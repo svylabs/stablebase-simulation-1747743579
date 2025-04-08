@@ -1,0 +1,19 @@
+{
+  "name": "ilumina-scaffolded-template",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "commander": "^13.1.0",
+    "fs-extra": "^11.3.0"
+  },
+  "devDependencies": {
+    "@svylabs/ilumina": "^0.1.2"
+  }
+}
