@@ -11,9 +11,12 @@
   "description": "",
   "dependencies": {
     "commander": "^13.1.0",
-    "fs-extra": "^11.3.0"
+    "fs-extra": "^11.3.0",
+    "mocha": "^10.2.0"
   },
   "devDependencies": {
-    "@svylabs/ilumina": "^0.1.2"
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@svylabs/ilumina": "^0.1.2",
+    "hardhat": "^2.22.19"
   }
 }
