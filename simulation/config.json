@@ -1,0 +1,14 @@
+{
+  "actors": {
+    "user": 10,
+    "frontend": 3,
+    "marketCreator": 2,
+    "predifyContract": 1,
+    "resolutionStrategy": 4
+  },
+  "options": {
+    "iterations": 10,
+    "randomSeed": "test-seed",
+    "shuffleAgents": false
+  }
+}
