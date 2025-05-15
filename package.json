@@ -16,7 +16,7 @@
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-    "@svylabs/ilumina": "^0.1.2",
+    "@svylabs/ilumina": "^0.1.3",
     "@typechain/hardhat": "^9.1.0",
     "hardhat": "^2.22.19",
     "ts-node": "^10.9.2",
