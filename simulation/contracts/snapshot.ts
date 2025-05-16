@@ -1,10 +1,7 @@
 import { Actor, SnapshotProvider } from "@svylabs/ilumina";
 import { Snapshot } from "@svylabs/ilumina/dist/src/run";
+import { Contract } from "ethers";
 
-interface Contract {
-    getState?: () => Promise<any>;
-    snapshot?: () => Promise<any>;
-}
 
 export class ContractSnapshotProvider implements SnapshotProvider {
     private contracts: Record<string, Contract>;
