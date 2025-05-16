@@ -1,7 +1,7 @@
 
 import { Action, Actor } from "@svylabs/ilumina";
 import type { RunContext } from "@svylabs/ilumina";
-import { Snapshot } from "@svylabs/ilumina/dist/src/run";
+import { Snapshot } from "@svylabs/ilumina";
 
 export class BorrowAction extends Action {
     private contracts: any;
@@ -9,7 +9,7 @@ export class BorrowAction extends Action {
         super("Borrow");
     }
 
-    async generateExecutionParams(context: RunContext, actor: Actor, currentSnapshot: Snapshot): Promise<[any, Record<string, any>]> {
+    async initialize(context: RunContext, actor: Actor, currentSnapshot: Snapshot): Promise<[any, Record<string, any>]> {
         actor.log("Generating execution parameters for borrow action...");
         // Here you can generate any parameters needed for the action
         const params = { borrowAmount: 100 }; // Example parameter
