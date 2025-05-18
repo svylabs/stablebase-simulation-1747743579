@@ -39,7 +39,7 @@ async function verifyDeployment(): Promise<VerificationResult> {
     // Log formatted addresses
     addressEntries.forEach(([name, address]) => {
       const padding = ' '.repeat(maxNameLength - name.length);
-      console.log(`  ${name}:${padding} ${address}`);
+      console.log(`DeployedContract- ${name}:${padding} ${address}`);
     });
     
     // Verify critical contract functionality
