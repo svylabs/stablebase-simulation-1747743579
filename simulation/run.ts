@@ -5,6 +5,7 @@ import {ethers} from 'hardhat';
 import { deployContracts} from './contracts/deploy';
 import { ContractSnapshotProvider } from './contracts/snapshot';
 import * as config from './config.json';
+import { setupActors } from './actors';
 
 async function main() {
     // Validate config
@@ -16,7 +17,6 @@ async function main() {
     const addrs = await ethers.getSigners();
 
     const env = new Environment();
-    const actors: Actor[] = [];
     let addrIndex = 0;
 
     // Calculate total required accounts
@@ -25,26 +25,10 @@ async function main() {
         throw new Error(`Not enough accounts (${addrs.length}) for all actors (${totalActors})`);
     }
 
-    // Create actors based on config
-    for (const [actorType, count] of Object.entries(config.actors)) {
-        for (let i = 0; i < count; i++) {
-            const account: Account = {
-                address: addrs[addrIndex].address,
-                type: "key",
-                value: addrs[addrIndex]
-            };
-            
-            const actor = new Actor(
-                actorType,
-                account,
-                [], // Actions will be added later
-                [] // Action probabilities will be added later
-            );
-            
-            actors.push(actor);
-            env.addAgent(actor);
-            addrIndex++;
-        }
+    const actors = setupActors(config, addrs, contracts);
+
+    for (const actor of actors) {
+        env.addAgent(actor);
     }
 
     // Configure Runner with options from config
