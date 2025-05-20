@@ -92,6 +92,20 @@
     },
     {
       "type": "call",
+      "contract": "DFIREToken",
+      "constructor": "null",
+      "function": "setAddresses",
+      "ref_name": "dfireToken",
+      "params": [
+        {
+          "name": "_stabilityPool",
+          "value": "stabilityPool",
+          "type": "ref"
+        }
+      ]
+    },
+    {
+      "type": "call",
       "contract": "DFIREStaking",
       "constructor": "null",
       "function": "setAddresses",
