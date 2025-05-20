@@ -1,218 +1,145 @@
-import { ethers } from 'hardhat';
-import { Contract, ContractFactory } from 'ethers';
+import { ethers } from "hardhat";
 
 // Import contract artifacts
-import ChainlinkPriceFeedArtifact from '../../../stablebase/artifacts/contracts/dependencies/price-oracle/ChainlinkPriceOracle.sol/ChainlinkPriceFeed.json';
-import ConstantsArtifact from '../../../stablebase/artifacts/contracts/Constants.sol/Constants.json';
-import DFIDTokenArtifact from '../../../stablebase/artifacts/contracts/DFIDToken.sol/DFIDToken.json';
-import DFIREStakingArtifact from '../../../stablebase/artifacts/contracts/DFIREStaking.sol/DFIREStaking.json';
-import DFIRETokenArtifact from '../../../stablebase/artifacts/contracts/DFIREToken.sol/DFIREToken.json';
-import MockDebtContractArtifact from '../../../stablebase/artifacts/contracts/MockDebtContract.sol/MockDebtContract.json';
-import MockPriceOracleArtifact from '../../../stablebase/artifacts/contracts/dependencies/price-oracle/MockPriceOracle.sol/MockPriceOracle.json';
-import OrderedDoublyLinkedListArtifact from '../../../stablebase/artifacts/contracts/library/OrderedDoublyLinkedList.sol/OrderedDoublyLinkedList.json';
-import ReenterDfireStakingArtifact from '../../../stablebase/artifacts/contracts/test/ReenterDfireStaking.sol/ReenterDfireStaking.json';
-import ReenterStabilityPoolArtifact from '../../../stablebase/artifacts/contracts/test/ReenterStabilityPool.sol/ReenterStabilityPool.json';
-import StabilityPoolArtifact from '../../../stablebase/artifacts/contracts/StabilityPool.sol/StabilityPool.json';
-import StableBaseCDPArtifact from '../../../stablebase/artifacts/contracts/StableBaseCDP.sol/StableBaseCDP.json';
-import TestMathArtifact from '../../../stablebase/artifacts/contracts/tests/TestMath.sol/TestMath.json';
+import DFIDTokenArtifact from "../../../stablebase/artifacts/contracts/DFIDToken.sol/DFIDToken.json";
+import DFIREStakingArtifact from "../../../stablebase/artifacts/contracts/DFIREStaking.sol/DFIREStaking.json";
+import DFIRETokenArtifact from "../../../stablebase/artifacts/contracts/DFIREToken.sol/DFIREToken.json";
+import MockPriceOracleArtifact from "../../../stablebase/artifacts/contracts/dependencies/price-oracle/MockPriceOracle.sol/MockPriceOracle.json";
+import OrderedDoublyLinkedListArtifact from "../../../stablebase/artifacts/contracts/library/OrderedDoublyLinkedList.sol/OrderedDoublyLinkedList.json";
+import StabilityPoolArtifact from "../../../stablebase/artifacts/contracts/StabilityPool.sol/StabilityPool.json";
+import StableBaseCDPArtifact from "../../../stablebase/artifacts/contracts/StableBaseCDP.sol/StableBaseCDP.json";
 
+export async function deployContracts() {
+  const [deployer] = await ethers.getSigners();
 
-interface DeploymentInstruction {
-    type: string;
-    contract: string;
-    constructor: string;
-    function: string;
-    ref_name: string;
-    params: { name: string; value: string; type: string }[];
-}
+  console.log("Deploying contracts with the account:", deployer.address);
 
-const deploymentInstructions: DeploymentInstruction[] = [
-    { "type": "deploy", "contract": "Constants", "constructor": "null", "function": "", "ref_name": "Constants", "params": [] },
-    { "type": "deploy", "contract": "DFIDToken", "constructor": "constructor() Ownable(msg.sender) ERC20(\"D.FI Dollar\", \"DFID\") {}", "function": "", "ref_name": "DFIDToken", "params": [] },
-    { "type": "call", "contract": "DFIDToken", "constructor": "", "function": "setAddresses", "ref_name": "DFIDToken", "params": [{ "name": "_stableBaseCDP", "value": "StableBaseCDP_address", "type": "ref" }] },
-    { "type": "deploy", "contract": "DFIREStaking", "constructor": "constructor(bool _rewardSenderActive) Ownable(msg.sender) {\n        rewardSenderActive = _rewardSenderActive;\n    }", "function": "", "ref_name": "DFIREStaking", "params": [{ "name": "_rewardSenderActive", "value": "true", "type": "val" }] },
-    { "type": "call", "contract": "DFIREStaking", "constructor": "", "function": "setAddresses", "ref_name": "DFIREStaking", "params": [{ "name": "_stakingToken", "value": "stakingToken_address", "type": "ref" }, { "name": "_rewardToken", "value": "rewardToken_address", "type": "ref" }, { "name": "_stableBaseContract", "value": "StableBaseCDP_address", "type": "ref" }] },
-    { "type": "deploy", "contract": "DFIREToken", "constructor": "constructor() Ownable(msg.sender) ERC20(\"D.FIRE\", \"DFIRE\") {}", "function": "", "ref_name": "DFIREToken", "params": [] },
-    { "type": "call", "contract": "DFIREToken", "constructor": "", "function": "setAddresses", "ref_name": "DFIREToken", "params": [{ "name": "_stabilityPool", "value": "StabilityPool_address", "type": "ref" }] },
-    { "type": "deploy", "contract": "MockDebtContract", "constructor": "constructor(address _stakingToken) { stakingToken = IERC20(_stakingToken); }", "function": "", "ref_name": "MockDebtContract", "params": [{ "name": "_stakingToken", "value": "stakingToken_address", "type": "ref" }] },
-    { "type": "call", "contract": "MockDebtContract", "constructor": "", "function": "setPool", "ref_name": "MockDebtContract", "params": [{ "name": "_pool", "value": "MockDebtContract_address", "type": "ref" }] },
-    { "type": "deploy", "contract": "StabilityPool", "constructor": "constructor(bool _rewardSenderActive) Ownable(msg.sender) {\n        rewardSenderActive = _rewardSenderActive;\n    }", "function": "", "ref_name": "StabilityPool", "params": [{ "name": "_rewardSenderActive", "value": "true", "type": "val" }] },
-    { "type": "call", "contract": "StabilityPool", "constructor": "", "function": "setAddresses", "ref_name": "StabilityPool", "params": [{ "name": "_stakingToken", "value": "stakingToken_address", "type": "ref" }, { "name": "_stableBaseCDP", "value": "StableBaseCDP_address", "type": "ref" }, { "name": "_sbrToken", "value": "sbrToken_address", "type": "ref" }] },
-    { "type": "deploy", "contract": "StableBaseCDP", "constructor": "constructor() StableBase() {}", "function": "", "ref_name": "StableBaseCDP", "params": [] },
-    { "type": "call", "contract": "StableBaseCDP", "constructor": "", "function": "setAddresses", "ref_name": "StableBaseCDP", "params": [{ "name": "_sbdToken", "value": "sbdToken_address", "type": "ref" }, { "name": "_priceOracle", "value": "ChainlinkPriceFeed_address", "type": "ref" }, { "name": "_stabilityPool", "value": "StabilityPool_address", "type": "ref" }, { "name": "_dfireTokenStaking", "value": "DFIREStaking_address", "type": "ref" }, { "name": "_safesOrderedForLiquidation", "value": "SafesOrderedForLiquidation_address", "type": "ref" }, { "name": "_safesOrderedForRedemption", "value": "SafesOrderedForRedemption_address", "type": "ref" }] },
-    { "type": "deploy", "contract": "OrderedDoublyLinkedList", "constructor": "constructor() Ownable(msg.sender) { head = 0; tail = 0; }", "function": "", "ref_name": "SafesOrderedForLiquidation", "params": [] },
-    { "type": "call", "contract": "OrderedDoublyLinkedList", "constructor": "", "function": "setAddresses", "ref_name": "SafesOrderedForLiquidation", "params": [{ "name": "_stableBaseCDP", "value": "StableBaseCDP_address", "type": "ref" }] },
-    { "type": "deploy", "contract": "OrderedDoublyLinkedList", "constructor": "constructor() Ownable(msg.sender) { head = 0; tail = 0; }", "function": "", "ref_name": "SafesOrderedForRedemption", "params": [] },
-    { "type": "call", "contract": "OrderedDoublyLinkedList", "constructor": "", "function": "setAddresses", "ref_name": "SafesOrderedForRedemption", "params": [{ "name": "_stableBaseCDP", "value": "StableBaseCDP_address", "type": "ref" }] },
-    { "type": "deploy", "contract": "ChainlinkPriceFeed", "constructor": "constructor(uint256 chainId) {\n        if (chainId == 1) {\n            // Ethereum Mainnet\n            priceFeed = AggregatorV3Interface(\n                0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419\n            );\n        } else if (chainId == 11155111) {\n            // Sepolia Testnet\n            priceFeed = AggregatorV3Interface(\n                0x694AA1769357215DE4FAC081bf1f309aDC325306\n            );\n        } else if (chainId == 5) {\n            // Goerli Testnet (if needed)\n            priceFeed = AggregatorV3Interface(\n                0xD4a33860578De61DBAbDc8BFdb98FD742fA7028e\n            );\n        } else {\n            revert(\"Unsupported chain ID\");\n        }\n    }", "function": "", "ref_name": "ChainlinkPriceFeed", "params": [{ "name": "chainId", "value": "1", "type": "val" }] },
-    { "type": "deploy", "contract": "MockPriceOracle", "constructor": "constructor() Ownable(msg.sender) {  Initializes the Ownable contract, setting the deployer as the owner. }", "function": "", "ref_name": "MockPriceOracle", "params": [] },
-    { "type": "deploy", "contract": "ReenterDfireStaking", "constructor": "constructor(address _dfireStaking, address _dfireStakingToken) {\n        dfireStaking = IDFIREStaking(_dfireStaking);\n        stakeToken = IERC20(_dfireStakingToken);\n    }", "function": "", "ref_name": "ReenterDfireStaking", "params": [{ "name": "_dfireStaking", "value": "DFIREStaking_address", "type": "ref" }, { "name": "_dfireStakingToken", "value": "stakingToken_address", "type": "ref" }] },
-    { "type": "deploy", "contract": "ReenterStabilityPool", "constructor": "constructor(address _stabilityPool, address _stakeToken) {\n        stabilityPool = IStabilityPool(_stabilityPool);\n        stakeToken = IERC20(_stakeToken);\n    }", "function": "", "ref_name": "ReenterStabilityPool", "params": [{ "name": "_stabilityPool", "value": "StabilityPool_address", "type": "ref" }, { "name": "_stakeToken", "value": "stakingToken_address", "type": "ref" }] },
-    { "type": "deploy", "contract": "TestMath", "constructor": "None", "function": "", "ref_name": "TestMath", "params": [] }
-];
+  const contracts: { [key: string]: any } = {};
 
-export async function deployContracts(): Promise<{ [key: string]: Contract }> {
-    const [deployer] = await ethers.getSigners();
+  // Deploy DFIDToken
+  const DFIDTokenFactory = new ethers.ContractFactory(
+    DFIDTokenArtifact.abi,
+    DFIDTokenArtifact.bytecode,
+    deployer
+  );
+  contracts['dfidToken'] = await DFIDTokenFactory.deploy();
+  await contracts['dfidToken'].waitForDeployment();
+  console.log("DFIDToken deployed to:", contracts['dfidToken'].target);
 
-    console.log("Deploying contracts with the account:", deployer.address);
+  // Deploy DFIREToken
+  const DFIRETokenFactory = new ethers.ContractFactory(
+    DFIRETokenArtifact.abi,
+    DFIRETokenArtifact.bytecode,
+    deployer
+  );
+  contracts['dfireToken'] = await DFIRETokenFactory.deploy();
+  await contracts['dfireToken'].waitForDeployment();
+  console.log("DFIREToken deployed to:", contracts['dfireToken'].target);
 
-    const deployedContracts: { [key: string]: Contract } = {};
-    const contractAddresses: { [key: string]: string } = {};
+  // Deploy Staking Token
+  contracts['stakingToken'] = await DFIRETokenFactory.deploy();
+  await contracts['stakingToken'].waitForDeployment();
+  console.log("StakingToken deployed to:", contracts['stakingToken'].target);
 
-    for (const instruction of deploymentInstructions) {
-        console.log(`Processing: ${instruction.type} ${instruction.contract} (${instruction.ref_name})`);
+  // Deploy Reward Token
+  contracts['rewardToken'] = await DFIRETokenFactory.deploy();
+  await contracts['rewardToken'].waitForDeployment();
+  console.log("RewardToken deployed to:", contracts['rewardToken'].target);
 
-        if (instruction.type === 'deploy') {
-            let contractFactory: ContractFactory;
+  // Deploy DFIREStaking
+  const DFIREStakingFactory = new ethers.ContractFactory(
+    DFIREStakingArtifact.abi,
+    DFIREStakingArtifact.bytecode,
+    deployer
+  );
+  contracts['dfireStaking'] = await DFIREStakingFactory.deploy(true);
+  await contracts['dfireStaking'].waitForDeployment();
+  console.log("DFIREStaking deployed to:", contracts['dfireStaking'].target);
 
-            switch (instruction.contract) {
-                case 'ChainlinkPriceFeed':
-                    contractFactory = new ethers.ContractFactory(
-                        ChainlinkPriceFeedArtifact.abi,
-                        ChainlinkPriceFeedArtifact.bytecode,
-                        deployer
-                    );
-                    break;
-                case 'Constants':
-                    contractFactory = new ethers.ContractFactory(
-                        ConstantsArtifact.abi,
-                        ConstantsArtifact.bytecode,
-                        deployer
-                    );
-                    break;
-                case 'DFIDToken':
-                    contractFactory = new ethers.ContractFactory(
-                        DFIDTokenArtifact.abi,
-                        DFIDTokenArtifact.bytecode,
-                        deployer
-                    );
-                    break;
-                case 'DFIREStaking':
-                    contractFactory = new ethers.ContractFactory(
-                        DFIREStakingArtifact.abi,
-                        DFIREStakingArtifact.bytecode,
-                        deployer
-                    );
-                    break;
-                case 'DFIREToken':
-                    contractFactory = new ethers.ContractFactory(
-                        DFIRETokenArtifact.abi,
-                        DFIRETokenArtifact.bytecode,
-                        deployer
-                    );
-                    break;
-                case 'MockDebtContract':
-                    contractFactory = new ethers.ContractFactory(
-                        MockDebtContractArtifact.abi,
-                        MockDebtContractArtifact.bytecode,
-                        deployer
-                    );
-                    break;
-                case 'MockPriceOracle':
-                    contractFactory = new ethers.ContractFactory(
-                        MockPriceOracleArtifact.abi,
-                        MockPriceOracleArtifact.bytecode,
-                        deployer
-                    );
-                    break;
-                case 'OrderedDoublyLinkedList':
-                    contractFactory = new ethers.ContractFactory(
-                        OrderedDoublyLinkedListArtifact.abi,
-                        OrderedDoublyLinkedListArtifact.bytecode,
-                        deployer
-                    );
-                    break;
-                case 'ReenterDfireStaking':
-                    contractFactory = new ethers.ContractFactory(
-                        ReenterDfireStakingArtifact.abi,
-                        ReenterDfireStakingArtifact.bytecode,
-                        deployer
-                    );
-                    break;
-                case 'ReenterStabilityPool':
-                    contractFactory = new ethers.ContractFactory(
-                        ReenterStabilityPoolArtifact.abi,
-                        ReenterStabilityPoolArtifact.bytecode,
-                        deployer
-                    );
-                    break;
-                case 'StabilityPool':
-                    contractFactory = new ethers.ContractFactory(
-                        StabilityPoolArtifact.abi,
-                        StabilityPoolArtifact.bytecode,
-                        deployer
-                    );
-                    break;
-                case 'StableBaseCDP':
-                    contractFactory = new ethers.ContractFactory(
-                        StableBaseCDPArtifact.abi,
-                        StableBaseCDPArtifact.bytecode,
-                        deployer
-                    );
-                    break;
-                case 'TestMath':
-                    contractFactory = new ethers.ContractFactory(
-                        TestMathArtifact.abi,
-                        TestMathArtifact.bytecode,
-                        deployer
-                    );
-                    break;
-                default:
-                    throw new Error(`Unknown contract: ${instruction.contract}`);
-            }
+  // Deploy StabilityPool
+  const StabilityPoolFactory = new ethers.ContractFactory(
+    StabilityPoolArtifact.abi,
+    StabilityPoolArtifact.bytecode,
+    deployer
+  );
+  contracts['stabilityPool'] = await StabilityPoolFactory.deploy(true);
+  await contracts['stabilityPool'].waitForDeployment();
+  console.log("StabilityPool deployed to:", contracts['stabilityPool'].target);
 
-            let params: any[] = [];
-            for (const param of instruction.params) {
-                if (param.type === 'val') {
-                    params.push(param.value);
-                } else if (param.type === 'ref') {
-                  //If it is a reference to another contract, get the address
-                  params.push(contractAddresses[param.value]);
-                } else {
-                    throw new Error(`Invalid parameter type: ${param.type}`);
-                }
-            }
+  // Deploy StableBaseCDP
+  const StableBaseCDPFactory = new ethers.ContractFactory(
+    StableBaseCDPArtifact.abi,
+    StableBaseCDPArtifact.bytecode,
+    deployer
+  );
+  contracts['stableBaseCDP'] = await StableBaseCDPFactory.deploy();
+  await contracts['stableBaseCDP'].waitForDeployment();
+  console.log("StableBaseCDP deployed to:", contracts['stableBaseCDP'].target);
 
-            try {
-              const contract = await contractFactory.deploy(...params);
-              await contract.waitForDeployment();
+  // Deploy SafesOrderedForLiquidation
+  const OrderedDoublyLinkedListFactory = new ethers.ContractFactory(
+    OrderedDoublyLinkedListArtifact.abi,
+    OrderedDoublyLinkedListArtifact.bytecode,
+    deployer
+  );
+  contracts['safesOrderedForLiquidation'] = await OrderedDoublyLinkedListFactory.deploy();
+  await contracts['safesOrderedForLiquidation'].waitForDeployment();
+  console.log("SafesOrderedForLiquidation deployed to:", contracts['safesOrderedForLiquidation'].target);
 
-              console.log(`${instruction.contract} deployed to: ${contract.target}`);
-              deployedContracts[instruction.ref_name] = contract;
-              contractAddresses[instruction.ref_name] = contract.target as string;
-            } catch (error) {
-              console.error(`Failed to deploy ${instruction.contract}:`, error);
-              throw error; // Re-throw the error to halt the deployment
-            }
+  // Deploy SafesOrderedForRedemption
+  contracts['safesOrderedForRedemption'] = await OrderedDoublyLinkedListFactory.deploy();
+  await contracts['safesOrderedForRedemption'].waitForDeployment();
+  console.log("SafesOrderedForRedemption deployed to:", contracts['safesOrderedForRedemption'].target);
 
+  // Deploy MockPriceOracle
+  const MockPriceOracleFactory = new ethers.ContractFactory(
+    MockPriceOracleArtifact.abi,
+    MockPriceOracleArtifact.bytecode,
+    deployer
+  );
+  contracts['mockPriceOracle'] = await MockPriceOracleFactory.deploy();
+  await contracts['mockPriceOracle'].waitForDeployment();
+  console.log("MockPriceOracle deployed to:", contracts['mockPriceOracle'].target);
 
-        } else if (instruction.type === 'call') {
-            const contract = deployedContracts[instruction.contract];
-            if (!contract) {
-                throw new Error(`Contract ${instruction.contract} not deployed.`);
-            }
+  // Call setAddresses functions
+  let tx = await contracts['dfireStaking'].setAddresses(
+    contracts['stakingToken'].target,
+    contracts['rewardToken'].target,
+    contracts['stableBaseCDP'].target
+  );
+  await tx.wait();
+  console.log("DFIREStaking setAddresses called");
 
-            const functionName = instruction.function;
-            const params = instruction.params.map(param => {
-                if (param.type === 'ref') {
-                    if (!contractAddresses[param.value]) {
-                        throw new Error(`Referenced contract ${param.value} not deployed.`);
-                    }
-                    return contractAddresses[param.value];
-                } else if (param.type === 'val'){
-                    return param.value;
-                } else {
-                    throw new Error(`Invalid parameter type: ${param.type}`);
-                }
-            });
+  tx = await contracts['stabilityPool'].setAddresses(
+    contracts['stakingToken'].target,
+    contracts['stableBaseCDP'].target,
+    contracts['dfireToken'].target
+  );
+  await tx.wait();
+  console.log("StabilityPool setAddresses called");
 
-            console.log(`Calling ${functionName} on ${instruction.contract} with params:`, params);
-            const tx = await contract.connect(deployer)[functionName](...params);
-            await tx.wait();
-            console.log(`${functionName} called on ${instruction.contract}`);
-        }
-    }
+  tx = await contracts['stableBaseCDP'].setAddresses(
+    contracts['dfidToken'].target,
+    contracts['mockPriceOracle'].target,
+    contracts['stabilityPool'].target,
+    contracts['dfireStaking'].target,
+    contracts['safesOrderedForLiquidation'].target,
+    contracts['safesOrderedForRedemption'].target
+  );
+  await tx.wait();
+  console.log("StableBaseCDP setAddresses called");
 
-    console.log('Contracts deployed and configured successfully.');
-    return deployedContracts;
+  tx = await contracts['safesOrderedForLiquidation'].setAddresses(
+    contracts['stableBaseCDP'].target
+  );
+  await tx.wait();
+  console.log("SafesOrderedForLiquidation setAddresses called");
+
+  tx = await contracts['safesOrderedForRedemption'].setAddresses(
+    contracts['stableBaseCDP'].target
+  );
+  await tx.wait();
+  console.log("SafesOrderedForRedemption setAddresses called");
+
+  return contracts;
 }
