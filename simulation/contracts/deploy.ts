@@ -1,140 +1,103 @@
-import { ethers } from 'hardhat';
-import { Contract, ContractFactory } from 'ethers';
+import { ethers } from "hardhat";
+import * as fs from 'fs';
 
-// Contract Artifacts
-import DFIDTokenArtifact from '../../../stablebase/artifacts/contracts/DFIDToken.sol/DFIDToken.json';
-import DFIREStakingArtifact from '../../../stablebase/artifacts/contracts/DFIREStaking.sol/DFIREStaking.json';
-import DFIRETokenArtifact from '../../../stablebase/artifacts/contracts/DFIREToken.sol/DFIREToken.json';
-import MockPriceOracleArtifact from '../../../stablebase/artifacts/contracts/dependencies/price-oracle/MockPriceOracle.sol/MockPriceOracle.json';
-import OrderedDoublyLinkedListArtifact from '../../../stablebase/artifacts/contracts/library/OrderedDoublyLinkedList.sol/OrderedDoublyLinkedList.json';
-import StabilityPoolArtifact from '../../../stablebase/artifacts/contracts/StabilityPool.sol/StabilityPool.json';
-import StableBaseCDPArtifact from '../../../stablebase/artifacts/contracts/StableBaseCDP.sol/StableBaseCDP.json';
-
-interface DeploymentInstruction {
-    sequence: DeploymentStep[];
+interface DeploymentSequence {
+  type: string;
+  contract: string;
+  constructor: string;
+  function: string;
+  ref_name: string;
+  params: { name: string; value: string; type: string }[];
 }
 
-interface DeploymentStep {
-    type: string;
-    contract: string;
-    constructor: string;
-    function: string | null;
-    ref_name: string;
-    params: DeploymentParameter[];
+interface DeploymentConfig {
+  sequence: DeploymentSequence[];
 }
 
-interface DeploymentParameter {
-    name: string;
-    value: string;
-    type: string;
-}
+async function deployContracts() {
+  const [deployer] = await ethers.getSigners();
+  console.log("Deploying contracts with the account:", deployer.address);
 
-interface ContractArtifact {
-    abi: any;
-    bytecode: string;
-}
+  const balance = await ethers.provider.getBalance(deployer.address);
+  console.log("Account balance:", balance.toString());
 
-const contractArtifacts: { [contractName: string]: ContractArtifact } = {
-    "DFIDToken": DFIDTokenArtifact,
-    "DFIREStaking": DFIREStakingArtifact,
-    "DFIREToken": DFIRETokenArtifact,
-    "MockPriceOracle": MockPriceOracleArtifact,
-    "OrderedDoublyLinkedList": OrderedDoublyLinkedListArtifact,
-    "StabilityPool": StabilityPoolArtifact,
-    "StableBaseCDP": StableBaseCDPArtifact
-};
+  const rawdata = fs.readFileSync('deployment_config.json');
+  const deploymentConfig: DeploymentConfig = JSON.parse(rawdata.toString());
+  
+  // Mapping of artifact import paths for the contracts.
+  const artifactPaths = {
+    "DFIDToken": "../../../stablebase/artifacts/contracts/DFIDToken.sol/DFIDToken.json",
+    "DFIREStaking": "../../../stablebase/artifacts/contracts/DFIREStaking.sol/DFIREStaking.json",
+    "DFIREToken": "../../../stablebase/artifacts/contracts/DFIREToken.sol/DFIREToken.json",
+    "MockPriceOracle": "../../../stablebase/artifacts/contracts/dependencies/price-oracle/MockPriceOracle.sol/MockPriceOracle.json",
+    "OrderedDoublyLinkedList": "../../../stablebase/artifacts/contracts/library/OrderedDoublyLinkedList.sol/OrderedDoublyLinkedList.json",
+    "StabilityPool": "../../../stablebase/artifacts/contracts/StabilityPool.sol/StabilityPool.json",
+    "StableBaseCDP": "../../../stablebase/artifacts/contracts/StableBaseCDP.sol/StableBaseCDP.json"
+  };
 
-async function deployContract(contractName: string, constructor: string, deployer: any, params: DeploymentParameter[]): Promise<Contract> {
-    console.log(`Deploying ${contractName} with constructor ${constructor}`);
-    let contract: Contract;
-    try {
-        const artifact = contractArtifacts[contractName];
+  const deployedContracts: { [key: string]: any } = {};
 
-        if (!artifact) {
-            throw new Error(`Artifact for ${contractName} not found`);
-        }
+  for (const step of deploymentConfig.sequence) {
+    if (step.type === "deploy") {
+      console.log(`Deploying ${step.contract}...`);
+      const artifactPath = artifactPaths[step.contract];
+      if (!artifactPath) {
+        throw new Error(`Artifact path not found for contract: ${step.contract}`);
+      }
 
-        const factory = new ethers.ContractFactory(
-            artifact.abi,
-            artifact.bytecode,
-            deployer
-        );
+      const artifact = await import(artifactPath);
+      const ContractFactory = await ethers.getContractFactory(artifact.abi, artifact.bytecode);
 
-        const constructorArgs = params.map(param => {
-            if (param.type === "val") {
-                return param.value;
-            } else {
-                throw new Error(`Invalid param type:  + ${param.type}`);
-            }
+      let constructorArgs = [];
+      if (step.params && step.params.length > 0) {
+        constructorArgs = step.params.map(param => {
+          if (param.type === "val") {
+            return param.value;
+          } else if (param.type === "ref") {
+            return deployedContracts[param.value].target; // changed from .address
+          }
+          return param.value;
         });
+      }
 
-        contract = await factory.deploy(...constructorArgs);
-        await contract.waitForDeployment();
+      const contract = await ContractFactory.connect(deployer).deploy(...constructorArgs);
+      await contract.waitForDeployment();
 
-        console.log(`${contractName} deployed to: ${contract.target}`);
-    } catch (error: any) {
-        console.error(`Error deploying ${contractName}:`, error.message);
-        throw error;
+      console.log(`${step.contract} deployed to:`, contract.target); // changed from .address
+      deployedContracts[step.ref_name] = contract;
     }
-    return contract;
-}
+  }
 
-async function callContractFunction(contract: Contract, functionName: string, params: DeploymentParameter[], deployedContracts: { [key: string]: Contract }) {
-    console.log(`Calling ${functionName} on ${contract.target}`);
+  for (const step of deploymentConfig.sequence) {
+    if (step.type === "call") {
+      console.log(`Calling function ${step.function} on ${step.contract}...`);
+      const contract = deployedContracts[step.contract];
+      if (!contract) {
+        throw new Error(`Contract not found: ${step.contract}`);
+      }
 
-    try {
-        const functionArgs = params.map(param => {
-            if (param.type === "ref") {
-                if (!deployedContracts[param.value]) {
-                    throw new Error(`Referenced contract ${param.value} not deployed`);
-                }
-                return deployedContracts[param.value].target;
-            } else if (param.type === "val") {
-                return param.value;
-            } else {
-                throw new Error(`Invalid param type: ${param.type}`);
-            }
+      let params = [];
+      if (step.params && step.params.length > 0) {
+        params = step.params.map(param => {
+          if (param.type === "val") {
+            return param.value;
+          } else if (param.type === "ref") {
+            return deployedContracts[param.value].target; // changed from .address
+          }
+          return param.value;
         });
+      }
 
-        const tx = await contract.connect(deployer)[functionName](...functionArgs);
-        await tx.wait();
+      const tx = await contract.connect(deployer)[step.function](...params);
+      await tx.wait();
 
-        console.log(`${functionName} executed`);
-    } catch (error: any) {
-        console.error(`Error calling ${functionName} on ${contract.target}:`, error.message);
-        throw error;
+      console.log(`Transaction confirmed for ${step.function} on ${step.contract}`);
     }
+  }
+
+  return deployedContracts;
 }
 
-export async function deployContracts(deploymentInstructionsJson: string): Promise<{ [key: string]: Contract }> {
-    const deployedContracts: { [key: string]: Contract } = {};
-    let deployer;
 
-    try {
-        const deploymentInstructions: DeploymentInstruction = JSON.parse(deploymentInstructionsJson);
-        [deployer] = await ethers.getSigners();
 
-        console.log("Deploying contracts with the account:", deployer.address);
-
-        for (const step of deploymentInstructions.sequence) {
-            if (step.type === "deploy") {
-                const contract = await deployContract(step.contract, step.constructor, deployer, step.params);
-                deployedContracts[step.ref_name] = contract;
-            } else if (step.type === "call") {
-                if (!deployedContracts[step.contract]) {
-                    throw new Error(`Contract ${step.contract} not deployed`);
-                }
-                if (step.function === null) {
-                    throw new Error("Function name cannot be null for call type");
-                }
-                await callContractFunction(deployedContracts[step.contract], step.function, step.params, deployedContracts);
-            }
-        }
-
-        console.log("All contracts deployed and configured successfully!");
-        return deployedContracts;
-    } catch (error: any) {
-        console.error("Deployment failed:", error.message);
-        throw error;
-    }
-}
+export default deployContracts;
