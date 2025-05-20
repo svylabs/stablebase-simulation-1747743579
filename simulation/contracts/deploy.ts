@@ -1,103 +1,114 @@
 import { ethers } from "hardhat";
-import * as fs from 'fs';
-
-interface DeploymentSequence {
-  type: string;
-  contract: string;
-  constructor: string;
-  function: string;
-  ref_name: string;
-  params: { name: string; value: string; type: string }[];
-}
-
-interface DeploymentConfig {
-  sequence: DeploymentSequence[];
-}
+import * as DFIDTokenArtifact from "../../../stablebase/artifacts/contracts/DFIDToken.sol/DFIDToken.json";
+import * as DFIREStakingArtifact from "../../../stablebase/artifacts/contracts/DFIREStaking.sol/DFIREStaking.json";
+import * as DFIRETokenArtifact from "../../../stablebase/artifacts/contracts/DFIREToken.sol/DFIREToken.json";
+import * as MockPriceOracleArtifact from "../../../stablebase/artifacts/contracts/dependencies/price-oracle/MockPriceOracle.sol/MockPriceOracle.json";
+import * as OrderedDoublyLinkedListArtifact from "../../../stablebase/artifacts/contracts/library/OrderedDoublyLinkedList.sol/OrderedDoublyLinkedList.json";
+import * as StabilityPoolArtifact from "../../../stablebase/artifacts/contracts/StabilityPool.sol/StabilityPool.json";
+import * as StableBaseCDPArtifact from "../../../stablebase/artifacts/contracts/StableBaseCDP.sol/StableBaseCDP.json";
 
 async function deployContracts() {
   const [deployer] = await ethers.getSigners();
+
   console.log("Deploying contracts with the account:", deployer.address);
 
-  const balance = await ethers.provider.getBalance(deployer.address);
-  console.log("Account balance:", balance.toString());
+  const dfidToken = await (await ethers.getContractFactory(
+    DFIDTokenArtifact.abi,
+    DFIDTokenArtifact.bytecode,
+    deployer
+  )).deploy();
+  await dfidToken.waitForDeployment();
+  console.log("DFIDToken deployed to:", dfidToken.target);
 
-  const rawdata = fs.readFileSync('deployment_config.json');
-  const deploymentConfig: DeploymentConfig = JSON.parse(rawdata.toString());
-  
-  // Mapping of artifact import paths for the contracts.
-  const artifactPaths = {
-    "DFIDToken": "../../../stablebase/artifacts/contracts/DFIDToken.sol/DFIDToken.json",
-    "DFIREStaking": "../../../stablebase/artifacts/contracts/DFIREStaking.sol/DFIREStaking.json",
-    "DFIREToken": "../../../stablebase/artifacts/contracts/DFIREToken.sol/DFIREToken.json",
-    "MockPriceOracle": "../../../stablebase/artifacts/contracts/dependencies/price-oracle/MockPriceOracle.sol/MockPriceOracle.json",
-    "OrderedDoublyLinkedList": "../../../stablebase/artifacts/contracts/library/OrderedDoublyLinkedList.sol/OrderedDoublyLinkedList.json",
-    "StabilityPool": "../../../stablebase/artifacts/contracts/StabilityPool.sol/StabilityPool.json",
-    "StableBaseCDP": "../../../stablebase/artifacts/contracts/StableBaseCDP.sol/StableBaseCDP.json"
+  const dfireToken = await (await ethers.getContractFactory(
+    DFIRETokenArtifact.abi,
+    DFIRETokenArtifact.bytecode,
+    deployer
+  )).deploy();
+  await dfireToken.waitForDeployment();
+  console.log("DFIREToken deployed to:", dfireToken.target);
+
+  const dfireStaking = await (await ethers.getContractFactory(
+    DFIREStakingArtifact.abi,
+    DFIREStakingArtifact.bytecode,
+    deployer
+  )).deploy(true);
+  await dfireStaking.waitForDeployment();
+  console.log("DFIREStaking deployed to:", dfireStaking.target);
+
+  const stabilityPool = await (await ethers.getContractFactory(
+    StabilityPoolArtifact.abi,
+    StabilityPoolArtifact.bytecode,
+    deployer
+  )).deploy(true);
+  await stabilityPool.waitForDeployment();
+  console.log("StabilityPool deployed to:", stabilityPool.target);
+
+  const stableBaseCDP = await (await ethers.getContractFactory(
+    StableBaseCDPArtifact.abi,
+    StableBaseCDPArtifact.bytecode,
+    deployer
+  )).deploy();
+  await stableBaseCDP.waitForDeployment();
+  console.log("StableBaseCDP deployed to:", stableBaseCDP.target);
+
+  const safesOrderedForLiquidation = await (await ethers.getContractFactory(
+    OrderedDoublyLinkedListArtifact.abi,
+    OrderedDoublyLinkedListArtifact.bytecode,
+    deployer
+  )).deploy();
+  await safesOrderedForLiquidation.waitForDeployment();
+  console.log("safesOrderedForLiquidation deployed to:", safesOrderedForLiquidation.target);
+
+  const safesOrderedForRedemption = await (await ethers.getContractFactory(
+    OrderedDoublyLinkedListArtifact.abi,
+    OrderedDoublyLinkedListArtifact.bytecode,
+    deployer
+  )).deploy();
+  await safesOrderedForRedemption.waitForDeployment();
+  console.log("safesOrderedForRedemption deployed to:", safesOrderedForRedemption.target);
+
+  const mockPriceOracle = await (await ethers.getContractFactory(
+    MockPriceOracleArtifact.abi,
+    MockPriceOracleArtifact.bytecode,
+    deployer
+  )).deploy();
+  await mockPriceOracle.waitForDeployment();
+  console.log("MockPriceOracle deployed to:", mockPriceOracle.target);
+
+  // Set Addresses
+  await (await dfireStaking.connect(deployer).setAddresses(dfireToken.target, dfidToken.target, stableBaseCDP.target)).wait();
+  console.log("DFIREStaking setAddresses");
+
+  await (await stabilityPool.connect(deployer).setAddresses(dfidToken.target, stableBaseCDP.target, dfireToken.target)).wait();
+  console.log("StabilityPool setAddresses");
+
+  await (await stableBaseCDP.connect(deployer).setAddresses(
+    dfidToken.target,
+    mockPriceOracle.target,
+    stabilityPool.target,
+    dfireStaking.target,
+    safesOrderedForLiquidation.target,
+    safesOrderedForRedemption.target
+  )).wait();
+  console.log("StableBaseCDP setAddresses");
+
+  await (await safesOrderedForLiquidation.connect(deployer).setAddresses(stableBaseCDP.target)).wait();
+  console.log("safesOrderedForLiquidation setAddresses");
+
+  await (await safesOrderedForRedemption.connect(deployer).setAddresses(stableBaseCDP.target)).wait();
+  console.log("safesOrderedForRedemption setAddresses");
+
+  return {
+    dfidToken,
+    dfireToken,
+    dfireStaking,
+    stabilityPool,
+    stableBaseCDP,
+    safesOrderedForLiquidation,
+    safesOrderedForRedemption,
+    mockPriceOracle,
   };
-
-  const deployedContracts: { [key: string]: any } = {};
-
-  for (const step of deploymentConfig.sequence) {
-    if (step.type === "deploy") {
-      console.log(`Deploying ${step.contract}...`);
-      const artifactPath = artifactPaths[step.contract];
-      if (!artifactPath) {
-        throw new Error(`Artifact path not found for contract: ${step.contract}`);
-      }
-
-      const artifact = await import(artifactPath);
-      const ContractFactory = await ethers.getContractFactory(artifact.abi, artifact.bytecode);
-
-      let constructorArgs = [];
-      if (step.params && step.params.length > 0) {
-        constructorArgs = step.params.map(param => {
-          if (param.type === "val") {
-            return param.value;
-          } else if (param.type === "ref") {
-            return deployedContracts[param.value].target; // changed from .address
-          }
-          return param.value;
-        });
-      }
-
-      const contract = await ContractFactory.connect(deployer).deploy(...constructorArgs);
-      await contract.waitForDeployment();
-
-      console.log(`${step.contract} deployed to:`, contract.target); // changed from .address
-      deployedContracts[step.ref_name] = contract;
-    }
-  }
-
-  for (const step of deploymentConfig.sequence) {
-    if (step.type === "call") {
-      console.log(`Calling function ${step.function} on ${step.contract}...`);
-      const contract = deployedContracts[step.contract];
-      if (!contract) {
-        throw new Error(`Contract not found: ${step.contract}`);
-      }
-
-      let params = [];
-      if (step.params && step.params.length > 0) {
-        params = step.params.map(param => {
-          if (param.type === "val") {
-            return param.value;
-          } else if (param.type === "ref") {
-            return deployedContracts[param.value].target; // changed from .address
-          }
-          return param.value;
-        });
-      }
-
-      const tx = await contract.connect(deployer)[step.function](...params);
-      await tx.wait();
-
-      console.log(`Transaction confirmed for ${step.function} on ${step.contract}`);
-    }
-  }
-
-  return deployedContracts;
 }
 
-
-
-export default deployContracts;
+export { deployContracts };
