@@ -78,6 +78,20 @@
     },
     {
       "type": "call",
+      "contract": "DFIDToken",
+      "constructor": "null",
+      "function": "setAddresses",
+      "ref_name": "dfidToken",
+      "params": [
+        {
+          "name": "_stableBaseCDP",
+          "value": "stableBaseCDP",
+          "type": "ref"
+        }
+      ]
+    },
+    {
+      "type": "call",
       "contract": "DFIREStaking",
       "constructor": "null",
       "function": "setAddresses",
