@@ -1,145 +1,140 @@
-import { ethers } from "hardhat";
+import { ethers } from 'hardhat';
+import { Contract, ContractFactory } from 'ethers';
 
-// Import contract artifacts
-import DFIDTokenArtifact from "../../../stablebase/artifacts/contracts/DFIDToken.sol/DFIDToken.json";
-import DFIREStakingArtifact from "../../../stablebase/artifacts/contracts/DFIREStaking.sol/DFIREStaking.json";
-import DFIRETokenArtifact from "../../../stablebase/artifacts/contracts/DFIREToken.sol/DFIREToken.json";
-import MockPriceOracleArtifact from "../../../stablebase/artifacts/contracts/dependencies/price-oracle/MockPriceOracle.sol/MockPriceOracle.json";
-import OrderedDoublyLinkedListArtifact from "../../../stablebase/artifacts/contracts/library/OrderedDoublyLinkedList.sol/OrderedDoublyLinkedList.json";
-import StabilityPoolArtifact from "../../../stablebase/artifacts/contracts/StabilityPool.sol/StabilityPool.json";
-import StableBaseCDPArtifact from "../../../stablebase/artifacts/contracts/StableBaseCDP.sol/StableBaseCDP.json";
+// Contract Artifacts
+import DFIDTokenArtifact from '../../../stablebase/artifacts/contracts/DFIDToken.sol/DFIDToken.json';
+import DFIREStakingArtifact from '../../../stablebase/artifacts/contracts/DFIREStaking.sol/DFIREStaking.json';
+import DFIRETokenArtifact from '../../../stablebase/artifacts/contracts/DFIREToken.sol/DFIREToken.json';
+import MockPriceOracleArtifact from '../../../stablebase/artifacts/contracts/dependencies/price-oracle/MockPriceOracle.sol/MockPriceOracle.json';
+import OrderedDoublyLinkedListArtifact from '../../../stablebase/artifacts/contracts/library/OrderedDoublyLinkedList.sol/OrderedDoublyLinkedList.json';
+import StabilityPoolArtifact from '../../../stablebase/artifacts/contracts/StabilityPool.sol/StabilityPool.json';
+import StableBaseCDPArtifact from '../../../stablebase/artifacts/contracts/StableBaseCDP.sol/StableBaseCDP.json';
 
-export async function deployContracts() {
-  const [deployer] = await ethers.getSigners();
+interface DeploymentInstruction {
+    sequence: DeploymentStep[];
+}
 
-  console.log("Deploying contracts with the account:", deployer.address);
+interface DeploymentStep {
+    type: string;
+    contract: string;
+    constructor: string;
+    function: string | null;
+    ref_name: string;
+    params: DeploymentParameter[];
+}
 
-  const contracts: { [key: string]: any } = {};
+interface DeploymentParameter {
+    name: string;
+    value: string;
+    type: string;
+}
 
-  // Deploy DFIDToken
-  const DFIDTokenFactory = new ethers.ContractFactory(
-    DFIDTokenArtifact.abi,
-    DFIDTokenArtifact.bytecode,
-    deployer
-  );
-  contracts['dfidToken'] = await DFIDTokenFactory.deploy();
-  await contracts['dfidToken'].waitForDeployment();
-  console.log("DFIDToken deployed to:", contracts['dfidToken'].target);
+interface ContractArtifact {
+    abi: any;
+    bytecode: string;
+}
 
-  // Deploy DFIREToken
-  const DFIRETokenFactory = new ethers.ContractFactory(
-    DFIRETokenArtifact.abi,
-    DFIRETokenArtifact.bytecode,
-    deployer
-  );
-  contracts['dfireToken'] = await DFIRETokenFactory.deploy();
-  await contracts['dfireToken'].waitForDeployment();
-  console.log("DFIREToken deployed to:", contracts['dfireToken'].target);
+const contractArtifacts: { [contractName: string]: ContractArtifact } = {
+    "DFIDToken": DFIDTokenArtifact,
+    "DFIREStaking": DFIREStakingArtifact,
+    "DFIREToken": DFIRETokenArtifact,
+    "MockPriceOracle": MockPriceOracleArtifact,
+    "OrderedDoublyLinkedList": OrderedDoublyLinkedListArtifact,
+    "StabilityPool": StabilityPoolArtifact,
+    "StableBaseCDP": StableBaseCDPArtifact
+};
 
-  // Deploy Staking Token
-  contracts['stakingToken'] = await DFIRETokenFactory.deploy();
-  await contracts['stakingToken'].waitForDeployment();
-  console.log("StakingToken deployed to:", contracts['stakingToken'].target);
+async function deployContract(contractName: string, constructor: string, deployer: any, params: DeploymentParameter[]): Promise<Contract> {
+    console.log(`Deploying ${contractName} with constructor ${constructor}`);
+    let contract: Contract;
+    try {
+        const artifact = contractArtifacts[contractName];
 
-  // Deploy Reward Token
-  contracts['rewardToken'] = await DFIRETokenFactory.deploy();
-  await contracts['rewardToken'].waitForDeployment();
-  console.log("RewardToken deployed to:", contracts['rewardToken'].target);
+        if (!artifact) {
+            throw new Error(`Artifact for ${contractName} not found`);
+        }
 
-  // Deploy DFIREStaking
-  const DFIREStakingFactory = new ethers.ContractFactory(
-    DFIREStakingArtifact.abi,
-    DFIREStakingArtifact.bytecode,
-    deployer
-  );
-  contracts['dfireStaking'] = await DFIREStakingFactory.deploy(true);
-  await contracts['dfireStaking'].waitForDeployment();
-  console.log("DFIREStaking deployed to:", contracts['dfireStaking'].target);
+        const factory = new ethers.ContractFactory(
+            artifact.abi,
+            artifact.bytecode,
+            deployer
+        );
 
-  // Deploy StabilityPool
-  const StabilityPoolFactory = new ethers.ContractFactory(
-    StabilityPoolArtifact.abi,
-    StabilityPoolArtifact.bytecode,
-    deployer
-  );
-  contracts['stabilityPool'] = await StabilityPoolFactory.deploy(true);
-  await contracts['stabilityPool'].waitForDeployment();
-  console.log("StabilityPool deployed to:", contracts['stabilityPool'].target);
+        const constructorArgs = params.map(param => {
+            if (param.type === "val") {
+                return param.value;
+            } else {
+                throw new Error(`Invalid param type:  + ${param.type}`);
+            }
+        });
 
-  // Deploy StableBaseCDP
-  const StableBaseCDPFactory = new ethers.ContractFactory(
-    StableBaseCDPArtifact.abi,
-    StableBaseCDPArtifact.bytecode,
-    deployer
-  );
-  contracts['stableBaseCDP'] = await StableBaseCDPFactory.deploy();
-  await contracts['stableBaseCDP'].waitForDeployment();
-  console.log("StableBaseCDP deployed to:", contracts['stableBaseCDP'].target);
+        contract = await factory.deploy(...constructorArgs);
+        await contract.waitForDeployment();
 
-  // Deploy SafesOrderedForLiquidation
-  const OrderedDoublyLinkedListFactory = new ethers.ContractFactory(
-    OrderedDoublyLinkedListArtifact.abi,
-    OrderedDoublyLinkedListArtifact.bytecode,
-    deployer
-  );
-  contracts['safesOrderedForLiquidation'] = await OrderedDoublyLinkedListFactory.deploy();
-  await contracts['safesOrderedForLiquidation'].waitForDeployment();
-  console.log("SafesOrderedForLiquidation deployed to:", contracts['safesOrderedForLiquidation'].target);
+        console.log(`${contractName} deployed to: ${contract.target}`);
+    } catch (error: any) {
+        console.error(`Error deploying ${contractName}:`, error.message);
+        throw error;
+    }
+    return contract;
+}
 
-  // Deploy SafesOrderedForRedemption
-  contracts['safesOrderedForRedemption'] = await OrderedDoublyLinkedListFactory.deploy();
-  await contracts['safesOrderedForRedemption'].waitForDeployment();
-  console.log("SafesOrderedForRedemption deployed to:", contracts['safesOrderedForRedemption'].target);
+async function callContractFunction(contract: Contract, functionName: string, params: DeploymentParameter[], deployedContracts: { [key: string]: Contract }) {
+    console.log(`Calling ${functionName} on ${contract.target}`);
 
-  // Deploy MockPriceOracle
-  const MockPriceOracleFactory = new ethers.ContractFactory(
-    MockPriceOracleArtifact.abi,
-    MockPriceOracleArtifact.bytecode,
-    deployer
-  );
-  contracts['mockPriceOracle'] = await MockPriceOracleFactory.deploy();
-  await contracts['mockPriceOracle'].waitForDeployment();
-  console.log("MockPriceOracle deployed to:", contracts['mockPriceOracle'].target);
+    try {
+        const functionArgs = params.map(param => {
+            if (param.type === "ref") {
+                if (!deployedContracts[param.value]) {
+                    throw new Error(`Referenced contract ${param.value} not deployed`);
+                }
+                return deployedContracts[param.value].target;
+            } else if (param.type === "val") {
+                return param.value;
+            } else {
+                throw new Error(`Invalid param type: ${param.type}`);
+            }
+        });
 
-  // Call setAddresses functions
-  let tx = await contracts['dfireStaking'].setAddresses(
-    contracts['stakingToken'].target,
-    contracts['rewardToken'].target,
-    contracts['stableBaseCDP'].target
-  );
-  await tx.wait();
-  console.log("DFIREStaking setAddresses called");
+        const tx = await contract.connect(deployer)[functionName](...functionArgs);
+        await tx.wait();
 
-  tx = await contracts['stabilityPool'].setAddresses(
-    contracts['stakingToken'].target,
-    contracts['stableBaseCDP'].target,
-    contracts['dfireToken'].target
-  );
-  await tx.wait();
-  console.log("StabilityPool setAddresses called");
+        console.log(`${functionName} executed`);
+    } catch (error: any) {
+        console.error(`Error calling ${functionName} on ${contract.target}:`, error.message);
+        throw error;
+    }
+}
 
-  tx = await contracts['stableBaseCDP'].setAddresses(
-    contracts['dfidToken'].target,
-    contracts['mockPriceOracle'].target,
-    contracts['stabilityPool'].target,
-    contracts['dfireStaking'].target,
-    contracts['safesOrderedForLiquidation'].target,
-    contracts['safesOrderedForRedemption'].target
-  );
-  await tx.wait();
-  console.log("StableBaseCDP setAddresses called");
+export async function deployContracts(deploymentInstructionsJson: string): Promise<{ [key: string]: Contract }> {
+    const deployedContracts: { [key: string]: Contract } = {};
+    let deployer;
 
-  tx = await contracts['safesOrderedForLiquidation'].setAddresses(
-    contracts['stableBaseCDP'].target
-  );
-  await tx.wait();
-  console.log("SafesOrderedForLiquidation setAddresses called");
+    try {
+        const deploymentInstructions: DeploymentInstruction = JSON.parse(deploymentInstructionsJson);
+        [deployer] = await ethers.getSigners();
 
-  tx = await contracts['safesOrderedForRedemption'].setAddresses(
-    contracts['stableBaseCDP'].target
-  );
-  await tx.wait();
-  console.log("SafesOrderedForRedemption setAddresses called");
+        console.log("Deploying contracts with the account:", deployer.address);
 
-  return contracts;
+        for (const step of deploymentInstructions.sequence) {
+            if (step.type === "deploy") {
+                const contract = await deployContract(step.contract, step.constructor, deployer, step.params);
+                deployedContracts[step.ref_name] = contract;
+            } else if (step.type === "call") {
+                if (!deployedContracts[step.contract]) {
+                    throw new Error(`Contract ${step.contract} not deployed`);
+                }
+                if (step.function === null) {
+                    throw new Error("Function name cannot be null for call type");
+                }
+                await callContractFunction(deployedContracts[step.contract], step.function, step.params, deployedContracts);
+            }
+        }
+
+        console.log("All contracts deployed and configured successfully!");
+        return deployedContracts;
+    } catch (error: any) {
+        console.error("Deployment failed:", error.message);
+        throw error;
+    }
 }
