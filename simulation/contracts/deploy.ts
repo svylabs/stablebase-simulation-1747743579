@@ -1,222 +1,153 @@
 import { ethers } from "hardhat";
+import * as DFIDTokenArtifact from '../../../stablebase/artifacts/contracts/DFIDToken.sol/DFIDToken.json';
+import * as DFIREStakingArtifact from '../../../stablebase/artifacts/contracts/DFIREStaking.sol/DFIREStaking.json';
+import * as DFIRETokenArtifact from '../../../stablebase/artifacts/contracts/DFIREToken.sol/DFIREToken.json';
+import * as MockPriceOracleArtifact from '../../../stablebase/artifacts/contracts/dependencies/price-oracle/MockPriceOracle.sol/MockPriceOracle.json';
+import * as OrderedDoublyLinkedListArtifact from '../../../stablebase/artifacts/contracts/library/OrderedDoublyLinkedList.sol/OrderedDoublyLinkedList.json';
+import * as StabilityPoolArtifact from '../../../stablebase/artifacts/contracts/StabilityPool.sol/StabilityPool.json';
+import * as StableBaseCDPArtifact from '../../../stablebase/artifacts/contracts/StableBaseCDP.sol/StableBaseCDP.json';
 
-// Import contract artifacts
-import DFIDToken_artifact from "../../../stablebase/artifacts/contracts/DFIDToken.sol/DFIDToken.json";
-import DFIREStaking_artifact from "../../../stablebase/artifacts/contracts/DFIREStaking.sol/DFIREStaking.json";
-import DFIREToken_artifact from "../../../stablebase/artifacts/contracts/DFIREToken.sol/DFIREToken.json";
-import MockPriceOracle_artifact from "../../../stablebase/artifacts/contracts/dependencies/price-oracle/MockPriceOracle.sol/MockPriceOracle.json";
-import OrderedDoublyLinkedList_artifact from "../../../stablebase/artifacts/contracts/library/OrderedDoublyLinkedList.sol/OrderedDoublyLinkedList.json";
-import StabilityPool_artifact from "../../../stablebase/artifacts/contracts/StabilityPool.sol/StabilityPool.json";
-import StableBaseCDP_artifact from "../../../stablebase/artifacts/contracts/StableBaseCDP.sol/StableBaseCDP.json";
 
-export async function deployContract() {
-  // Get the deployer account
+export async function deployContracts() {
   const [deployer] = await ethers.getSigners();
 
   console.log("Deploying contracts with the account:", deployer.address);
+  console.log("Account balance:", (await deployer.getBalance()).toString());
 
-  const deployedContracts: { [key: string]: any } = {};
+  let dfidToken, dfireToken, dfireStaking, stabilityPool, stableBaseCDP, safesOrderedForLiquidation, safesOrderedForRedemption, mockPriceOracle;
 
-  // Deploy contracts in sequence
-  // Contract deployment
   try {
-    const DFIDTokenFactory = new ethers.ContractFactory(
-      DFIDToken_artifact.abi,
-      DFIDToken_artifact.bytecode,
+    // Deploy DFIDToken
+    const DFIDToken = new ethers.ContractFactory(
+      DFIDTokenArtifact.abi,
+      DFIDTokenArtifact.bytecode,
       deployer
     );
-    const dfidToken = await DFIDTokenFactory.deploy();
+    dfidToken = await DFIDToken.deploy();
     await dfidToken.waitForDeployment();
-    deployedContracts["dfidToken"] = dfidToken;
-    console.log("DFIDToken deployed to:", dfidToken.target);
-  } catch (error) {
-    console.error("Error deploying DFIDToken:", error);
-    throw error; // Re-throw the error to halt the deployment
-  }
+    console.log("DFIDToken address:", dfidToken.target);
 
-  try {
-    const DFIRETokenFactory = new ethers.ContractFactory(
-      DFIREToken_artifact.abi,
-      DFIREToken_artifact.bytecode,
+    // Deploy DFIREToken
+    const DFIREToken = new ethers.ContractFactory(
+      DFIRETokenArtifact.abi,
+      DFIRETokenArtifact.bytecode,
       deployer
     );
-    const dfireToken = await DFIRETokenFactory.deploy();
+    dfireToken = await DFIREToken.deploy();
     await dfireToken.waitForDeployment();
-    deployedContracts["dfireToken"] = dfireToken;
-    console.log("DFIREToken deployed to:", dfireToken.target);
-  } catch (error) {
-    console.error("Error deploying DFIREToken:", error);
-    throw error;
-  }
+    console.log("DFIREToken address:", dfireToken.target);
 
-  try {
-    const DFIREStakingFactory = new ethers.ContractFactory(
-      DFIREStaking_artifact.abi,
-      DFIREStaking_artifact.bytecode,
+    // Deploy DFIREStaking
+    const DFIREStaking = new ethers.ContractFactory(
+      DFIREStakingArtifact.abi,
+      DFIREStakingArtifact.bytecode,
       deployer
     );
-    const dfireStaking = await DFIREStakingFactory.deploy(true);
+    dfireStaking = await DFIREStaking.deploy(true);
     await dfireStaking.waitForDeployment();
-    deployedContracts["dfireStaking"] = dfireStaking;
-    console.log("DFIREStaking deployed to:", dfireStaking.target, "with _rewardSenderActive = true");
-  } catch (error) {
-    console.error("Error deploying DFIREStaking:", error);
-    throw error;
-  }
+    console.log("DFIREStaking address:", dfireStaking.target);
 
-  try {
-    const StabilityPoolFactory = new ethers.ContractFactory(
-      StabilityPool_artifact.abi,
-      StabilityPool_artifact.bytecode,
+    // Deploy StabilityPool
+    const StabilityPool = new ethers.ContractFactory(
+      StabilityPoolArtifact.abi,
+      StabilityPoolArtifact.bytecode,
       deployer
     );
-    const stabilityPool = await StabilityPoolFactory.deploy(true);
+    stabilityPool = await StabilityPool.deploy(true);
     await stabilityPool.waitForDeployment();
-    deployedContracts["stabilityPool"] = stabilityPool;
-    console.log("StabilityPool deployed to:", stabilityPool.target, "with _rewardSenderActive = true");
-  } catch (error) {
-    console.error("Error deploying StabilityPool:", error);
-    throw error;
-  }
+    console.log("StabilityPool address:", stabilityPool.target);
 
-  try {
-    const StableBaseCDPFactory = new ethers.ContractFactory(
-      StableBaseCDP_artifact.abi,
-      StableBaseCDP_artifact.bytecode,
+    // Deploy StableBaseCDP
+    const StableBaseCDP = new ethers.ContractFactory(
+      StableBaseCDPArtifact.abi,
+      StableBaseCDPArtifact.bytecode,
       deployer
     );
-    const stableBaseCDP = await StableBaseCDPFactory.deploy();
+    stableBaseCDP = await StableBaseCDP.deploy();
     await stableBaseCDP.waitForDeployment();
-    deployedContracts["stableBaseCDP"] = stableBaseCDP;
-    console.log("StableBaseCDP deployed to:", stableBaseCDP.target);
-  } catch (error) {
-    console.error("Error deploying StableBaseCDP:", error);
-    throw error;
-  }
+    console.log("StableBaseCDP address:", stableBaseCDP.target);
 
-  try {
-    const OrderedDoublyLinkedListFactory = new ethers.ContractFactory(
-      OrderedDoublyLinkedList_artifact.abi,
-      OrderedDoublyLinkedList_artifact.bytecode,
+    // Deploy OrderedDoublyLinkedList for Liquidation
+    const OrderedDoublyLinkedListLiquidation = new ethers.ContractFactory(
+      OrderedDoublyLinkedListArtifact.abi,
+      OrderedDoublyLinkedListArtifact.bytecode,
       deployer
     );
-    const safesOrderedForLiquidation = await OrderedDoublyLinkedListFactory.deploy();
+    safesOrderedForLiquidation = await OrderedDoublyLinkedListLiquidation.deploy();
     await safesOrderedForLiquidation.waitForDeployment();
-    deployedContracts["safesOrderedForLiquidation"] = safesOrderedForLiquidation;
-    console.log("SafesOrderedForLiquidation deployed to:", safesOrderedForLiquidation.target);
-  } catch (error) {
-    console.error("Error deploying SafesOrderedForLiquidation:", error);
-    throw error;
-  }
+    console.log("SafesOrderedForLiquidation address:", safesOrderedForLiquidation.target);
 
-  try {
-    const OrderedDoublyLinkedListFactory = new ethers.ContractFactory(
-      OrderedDoublyLinkedList_artifact.abi,
-      OrderedDoublyLinkedList_artifact.bytecode,
+    // Deploy OrderedDoublyLinkedList for Redemption
+    const OrderedDoublyLinkedListRedemption = new ethers.ContractFactory(
+      OrderedDoublyLinkedListArtifact.abi,
+      OrderedDoublyLinkedListArtifact.bytecode,
       deployer
     );
-    const safesOrderedForRedemption = await OrderedDoublyLinkedListFactory.deploy();
+    safesOrderedForRedemption = await OrderedDoublyLinkedListRedemption.deploy();
     await safesOrderedForRedemption.waitForDeployment();
-    deployedContracts["safesOrderedForRedemption"] = safesOrderedForRedemption;
-    console.log("SafesOrderedForRedemption deployed to:", safesOrderedForRedemption.target);
-  } catch (error) {
-    console.error("Error deploying SafesOrderedForRedemption:", error);
-    throw error;
-  }
+    console.log("SafesOrderedForRedemption address:", safesOrderedForRedemption.target);
 
-  try {
-    const MockPriceOracleFactory = new ethers.ContractFactory(
-      MockPriceOracle_artifact.abi,
-      MockPriceOracle_artifact.bytecode,
+    // Deploy MockPriceOracle
+    const MockPriceOracle = new ethers.ContractFactory(
+      MockPriceOracleArtifact.abi,
+      MockPriceOracleArtifact.bytecode,
       deployer
     );
-    const mockPriceOracle = await MockPriceOracleFactory.deploy();
+    mockPriceOracle = await MockPriceOracle.deploy();
     await mockPriceOracle.waitForDeployment();
-    deployedContracts["mockPriceOracle"] = mockPriceOracle;
-    console.log("MockPriceOracle deployed to:", mockPriceOracle.target);
-  } catch (error) {
-    console.error("Error deploying MockPriceOracle:", error);
-    throw error;
-  }
+    console.log("MockPriceOracle address:", mockPriceOracle.target);
 
-  // Contract calls
-  try {
-    let tx = await deployedContracts["dfidToken"].setAddresses(deployedContracts["stableBaseCDP"].target);
+    // Set Addresses
+    let tx = await dfidToken.setAddresses(stableBaseCDP.target);
     await tx.wait();
-    console.log("DFIDToken.setAddresses called with _stableBaseCDP:", deployedContracts["stableBaseCDP"].target);
-  } catch (error) {
-    console.error("Error calling DFIDToken.setAddresses:", error);
-    throw error;
-  }
+    console.log("DFIDToken setAddresses done");
 
-  try {
-    let tx = await deployedContracts["dfireToken"].setAddresses(deployedContracts["stabilityPool"].target);
+    tx = await dfireToken.setAddresses(stabilityPool.target);
     await tx.wait();
-    console.log("DFIREToken.setAddresses called with _stabilityPool:", deployedContracts["stabilityPool"].target);
-  } catch (error) {
-    console.error("Error calling DFIREToken.setAddresses:", error);
-    throw error;
-  }
+    console.log("DFIREToken setAddresses done");
 
-  try {
-    let tx = await deployedContracts["dfireStaking"].setAddresses(
-      deployedContracts["dfireToken"].target,
-      deployedContracts["dfidToken"].target,
-      deployedContracts["stableBaseCDP"].target
+    tx = await dfireStaking.setAddresses(dfireToken.target, dfidToken.target, stableBaseCDP.target);
+    await tx.wait();
+    console.log("DFIREStaking setAddresses done");
+
+    tx = await stabilityPool.setAddresses(dfidToken.target, stableBaseCDP.target, dfireToken.target);
+    await tx.wait();
+    console.log("StabilityPool setAddresses done");
+
+    tx = await stableBaseCDP.setAddresses(
+      dfidToken.target,
+      mockPriceOracle.target,
+      stabilityPool.target,
+      dfireStaking.target,
+      safesOrderedForLiquidation.target,
+      safesOrderedForRedemption.target
     );
     await tx.wait();
-    console.log("DFIREStaking.setAddresses called with _stakingToken:", deployedContracts["dfireToken"].target, "_rewardToken:", deployedContracts["dfidToken"].target, "_stableBaseContract:", deployedContracts["stableBaseCDP"].target);
-  } catch (error) {
-    console.error("Error calling DFIREStaking.setAddresses:", error);
-    throw error;
-  }
+    console.log("StableBaseCDP setAddresses done");
 
-  try {
-    let tx = await deployedContracts["stabilityPool"].setAddresses(
-      deployedContracts["dfidToken"].target,
-      deployedContracts["stableBaseCDP"].target,
-      deployedContracts["dfireToken"].target
-    );
+    tx = await safesOrderedForLiquidation.setAddresses(stableBaseCDP.target);
     await tx.wait();
-    console.log("StabilityPool.setAddresses called with _stakingToken:", deployedContracts["dfidToken"].target, "_stableBaseCDP:", deployedContracts["stableBaseCDP"].target, "_sbrToken:", deployedContracts["dfireToken"].target);
-  } catch (error) {
-    console.error("Error calling StabilityPool.setAddresses:", error);
-    throw error;
-  }
+    console.log("safesOrderedForLiquidation setAddresses done");
 
-  try {
-    let tx = await deployedContracts["stableBaseCDP"].setAddresses(
-      deployedContracts["dfidToken"].target,
-      deployedContracts["mockPriceOracle"].target,
-      deployedContracts["stabilityPool"].target,
-      deployedContracts["dfireStaking"].target,
-      deployedContracts["safesOrderedForLiquidation"].target,
-      deployedContracts["safesOrderedForRedemption"].target
-    );
+    tx = await safesOrderedForRedemption.setAddresses(stableBaseCDP.target);
     await tx.wait();
-    console.log("StableBaseCDP.setAddresses called with _sbdToken:", deployedContracts["dfidToken"].target, "_priceOracle:", deployedContracts["mockPriceOracle"].target, "_stabilityPool:", deployedContracts["stabilityPool"].target, "_dfireTokenStaking:", deployedContracts["dfireStaking"].target, "_safesOrderedForLiquidation:", deployedContracts["safesOrderedForLiquidation"].target, "_safesOrderedForRedemption:", deployedContracts["safesOrderedForRedemption"].target);
+    console.log("safesOrderedForRedemption setAddresses done");
+
   } catch (error) {
-    console.error("Error calling StableBaseCDP.setAddresses:", error);
-    throw error;
+      console.error("Error during deployment or configuration:", error);
+      throw error;
   }
 
-  try {
-    let tx = await deployedContracts["safesOrderedForLiquidation"].setAddresses(deployedContracts["stableBaseCDP"].target);
-    await tx.wait();
-    console.log("SafesOrderedForLiquidation.setAddresses called with _stableBaseCDP:", deployedContracts["stableBaseCDP"].target);
-  } catch (error) {
-    console.error("Error calling SafesOrderedForLiquidation.setAddresses:", error);
-    throw error;
-  }
-
-  try {
-    let tx = await deployedContracts["safesOrderedForRedemption"].setAddresses(deployedContracts["stableBaseCDP"].target);
-    await tx.wait();
-    console.log("SafesOrderedForRedemption.setAddresses called with _stableBaseCDP:", deployedContracts["stableBaseCDP"].target);
-  } catch (error) {
-    console.error("Error calling SafesOrderedForRedemption.setAddresses:", error);
-    throw error;
-  }
-
-  return deployedContracts;
+  return {
+    dfidToken,
+    dfireToken,
+    dfireStaking,
+    stabilityPool,
+    stableBaseCDP,
+    safesOrderedForLiquidation,
+    safesOrderedForRedemption,
+    mockPriceOracle
+  };
 }
+
+export { deployContracts };
