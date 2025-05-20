@@ -18,7 +18,7 @@
     },
     {
       "type": "deploy",
-      "contract": "DFIREToken",
+      "contract": "ERC20",
       "constructor": "constructor() Ownable(msg.sender) ERC20(\"Staking Token\", \"STK\") {}",
       "function": "null",
       "ref_name": "stakingToken",
@@ -26,7 +26,7 @@
     },
     {
       "type": "deploy",
-      "contract": "DFIREToken",
+      "contract": "ERC20",
       "constructor": "constructor() Ownable(msg.sender) ERC20(\"Reward Token\", \"RWD\") {}",
       "function": "null",
       "ref_name": "rewardToken",
