@@ -9,7 +9,7 @@ import OrderedDoublyLinkedList_artifact from "../../../stablebase/artifacts/cont
 import StabilityPool_artifact from "../../../stablebase/artifacts/contracts/StabilityPool.sol/StabilityPool.json";
 import StableBaseCDP_artifact from "../../../stablebase/artifacts/contracts/StableBaseCDP.sol/StableBaseCDP.json";
 
-export async function deployContracts() {
+export async function deployContract() {
   // Get the deployer account
   const [deployer] = await ethers.getSigners();
 
