@@ -1,1 +1,157 @@
-"{\"action\":{\"name\":\"Open Safe\",\"summary\":\"Opens a new CDP (Safe).\",\"contract_name\":\"StableBaseCDP\",\"function_name\":\"openSafe\",\"probability\":0.7},\"action_detail\":{\"action_name\":\"Open Safe\",\"contract_name\":\"StableBaseCDP\",\"function_name\":\"openSafe\",\"pre_execution_parameter_generation_rules\":[\"Generate a _safeId that is greater than 0 and does not already exist in the safes mapping (safes[_safeId].collateralAmount == 0 and _ownerOf(_safeId) == address(0)).\",\"Generate an _amount that is greater than 0. This amount will also be sent as msg.value along with the transaction.\"],\"on_execution_state_updates_made\":[{\"category\":\"Safe Creation\",\"state_update_descriptions\":[\"A new Safe is created with collateralAmount set to _amount, borrowedAmount set to 0, weight set to 0, totalBorrowedAmount set to 0, and feePaid set to 0.\",\"A liquidation snapshot is created for the safe.\"]},{\"category\":\"Total Collateral Update\",\"state_update_descriptions\":[\"The totalCollateral state variable is increased by _amount.\"]},{\"category\":\"NFT Minting\",\"state_update_descriptions\":[\"An ERC721 NFT representing the Safe is minted and assigned to the message sender (msg.sender) with the _safeId as its tokenId.\"]},{\"category\":\"Event Emission\",\"state_update_descriptions\":[\"A Transfer event is emitted from address(0) to msg.sender for tokenId _safeId.\"]},{\"category\":\"Owner Mapping Update\",\"state_update_descriptions\":[\"The _owners mapping is updated with the new owner of the tokenId.\"]},{\"category\":\"Balances Mapping Update\",\"state_update_descriptions\":[\"The _balances mapping is updated to reflect that the recipient owns one more NFT.\"]}],\"post_execution_contract_state_validation_rules\":[{\"category\":\"Safe Existence\",\"rule_descriptions\":[\"Validate that a Safe with the provided _safeId exists.\",\"Verify that the owner of the Safe is the message sender (msg.sender).\"]},{\"category\":\"Collateral Amount\",\"rule_descriptions\":[\"Confirm that the collateral amount of the created Safe matches the provided _amount.\"]},{\"category\":\"Borrowed Amount\",\"rule_descriptions\":[\"Ensure that the initial borrowed amount of the Safe is 0.\"]},{\"category\":\"Total Collateral\",\"rule_descriptions\":[\"Check that the totalCollateral contract state variable has been increased by the amount of collateral deposited.\"]},{\"category\":\"Liquidation Snapshot\",\"rule_descriptions\":[\"Verify that a liquidation snapshot exists for the given safeId.\",\"Check that the debtPerCollateralSnapshot in the liquidation snapshot is equal to cumulativeDebtPerUnitCollateral at the time of opening the safe.\",\"Check that the collateralPerCollateralSnapshot in the liquidation snapshot is equal to cumulativeCollateralPerUnitCollateral at the time of opening the safe.\"]},{\"category\":\"Balance Update Validation\",\"rule_descriptions\":[\"Check that the balance of the msg.sender has increased by 1, indicating that the NFT was minted to the user.\"]}]},\"action_execution\":{\"action_name\":\"Open Safe\",\"contract_name\":\"StableBaseCDP\",\"function_name\":\"openSafe\",\"does_register_new_identifier\":true,\"new_identifiers\":[{\"name\":\"_safeId\",\"type\":\"structured_id_external\",\"has_max_identifier_limit_per_address\":true,\"max_identifier_limit_per_address\":20,\"description\":\"Unique ID for the newly created Safe.\"}],\"all_state_updates\":[{\"contract_name\":\"StableBaseCDP\",\"state_updated\":[{\"state_variable_name\":\"safes\",\"type\":\"mapping\",\"summary_of_update\":\"Updates the Safe struct with the provided collateral amount, setting borrowedAmount, weight, totalBorrowedAmount and feePaid to 0. A new liquidation snapshot is created for the safe.\",\"has_conditional_updates\":true,\"conditions\":[\"_amount > 0\",\"msg.value == _amount\",\"_safeId > 0\",\"safes[_safeId].collateralAmount == 0\",\"_ownerOf(_safeId) == address(0)\"]},{\"state_variable_name\":\"liquidationSnapshots\",\"type\":\"mapping\",\"summary_of_update\":\"Creates a snapshot of cumulativeDebtPerUnitCollateral and cumulativeCollateralPerUnitCollateral\",\"has_conditional_updates\":true,\"conditions\":[\"_amount > 0\",\"msg.value == _amount\",\"_safeId > 0\",\"safes[_safeId].collateralAmount == 0\",\"_ownerOf(_safeId) == address(0)\"]},{\"state_variable_name\":\"totalCollateral\",\"type\":\"global\",\"summary_of_update\":\"Increases the total collateral by the amount provided\",\"has_conditional_updates\":true,\"conditions\":[\"_amount > 0\",\"msg.value == _amount\",\"_safeId > 0\",\"safes[_safeId].collateralAmount == 0\",\"_ownerOf(_safeId) == address(0)\"]},{\"state_variable_name\":\"_owners\",\"type\":\"mapping\",\"summary_of_update\":\"Sets the owner of the new Safe (ERC721 token) to the message sender, effectively assigning ownership of the Safe NFT.\",\"has_conditional_updates\":true,\"conditions\":[\"_amount > 0\",\"msg.value == _amount\",\"_safeId > 0\",\"safes[_safeId].collateralAmount == 0\",\"_ownerOf(_safeId) == address(0)\",\"to != address(0)\"]},{\"state_variable_name\":\"_balances\",\"type\":\"mapping\",\"summary_of_update\":\"Increments the token balance of the message sender, representing ownership of an additional Safe (ERC721 token).\",\"has_conditional_updates\":true,\"conditions\":[\"_amount > 0\",\"msg.value == _amount\",\"_safeId > 0\",\"safes[_safeId].collateralAmount == 0\",\"_ownerOf(_safeId) == address(0)\",\"to != address(0)\"]}]}]}}"
+{
+  "action": {
+    "name": "Open Safe",
+    "summary": "Opens a new CDP (Safe).",
+    "contract_name": "StableBaseCDP",
+    "function_name": "openSafe",
+    "probability": 0.7
+  },
+  "action_detail": {
+    "action_name": "Open Safe",
+    "contract_name": "StableBaseCDP",
+    "function_name": "openSafe",
+    "pre_execution_parameter_generation_rules": [
+      "Generate a `_safeId` greater than 0 that does not already exist (i.e., `safes[_safeId].collateralAmount == 0` and `_ownerOf(_safeId) == address(0)` must be true). This ID will uniquely identify the new Safe.",
+      "Generate an `_amount` greater than 0. This represents the amount of collateral the user is depositing to open the Safe.  The `msg.value` (amount of Ether sent with the transaction) must equal this `_amount`."
+    ],
+    "on_execution_state_updates_made": [
+      {
+        "category": "Safe Creation",
+        "state_update_descriptions": [
+          "A new Safe is created with the provided `_safeId` and the initial collateral amount set to `_amount`.",
+          "The `collateralAmount`, `borrowedAmount`, `weight`, `totalBorrowedAmount`, and `feePaid` fields of the new Safe are initialized.",
+          "The `liquidationSnapshots` mapping is updated with the current values of `cumulativeDebtPerUnitCollateral` and `cumulativeCollateralPerUnitCollateral` for the given `_safeId`."
+        ]
+      },
+      {
+        "category": "NFT Minting",
+        "state_update_descriptions": [
+          "An NFT representing the Safe is minted to the `msg.sender` with the `_safeId` as the token ID. This NFT represents ownership of the Safe."
+        ]
+      },
+      {
+        "category": "Global State Updates",
+        "state_update_descriptions": [
+          "`totalCollateral` is increased by the amount of collateral deposited (`_amount`)."
+        ]
+      },
+      {
+        "category": "ERC721 State Updates",
+        "state_update_descriptions": [
+          "The `_owners` mapping is updated to associate the `_safeId` (tokenId) with the `msg.sender` (owner).",
+          "The `_balances` mapping for the `msg.sender` is incremented, reflecting the new NFT owned by the sender.",
+          "A `Transfer` event is emitted, indicating the transfer of the NFT (Safe) to the `msg.sender`."
+        ]
+      }
+    ],
+    "post_execution_contract_state_validation_rules": [
+      {
+        "category": "Safe State",
+        "rule_descriptions": [
+          "Verify that the `safes[_safeId].collateralAmount` is equal to the `_amount` provided.",
+          "Verify that `safes[_safeId].borrowedAmount` is 0.",
+          "Verify that `safes[_safeId].weight` is 0.",
+          "Verify that `safes[_safeId].totalBorrowedAmount` is 0.",
+          "Verify that `safes[_safeId].feePaid` is 0.",
+          "Verify that `liquidationSnapshots[_safeId].debtPerCollateralSnapshot` is equal to `cumulativeDebtPerUnitCollateral`.",
+          "Verify that `liquidationSnapshots[_safeId].collateralPerCollateralSnapshot` is equal to `cumulativeCollateralPerUnitCollateral`."
+        ]
+      },
+      {
+        "category": "NFT Ownership",
+        "rule_descriptions": [
+          "Verify that `_ownerOf(_safeId)` returns `msg.sender`."
+        ]
+      },
+      {
+        "category": "Global State",
+        "rule_descriptions": [
+          "Verify that `totalCollateral` has increased by `_amount`."
+        ]
+      },
+      {
+        "category": "Events",
+        "rule_descriptions": [
+          "Verify that a `OpenSafe` event is emitted with the correct parameters (`_safeId`, `msg.sender`, `_amount`, `totalCollateral`, `totalDebt`)."
+        ]
+      }
+    ]
+  },
+  "action_execution": {
+    "action_name": "Open Safe",
+    "contract_name": "StableBaseCDP",
+    "function_name": "openSafe",
+    "does_register_new_identifier": true,
+    "new_identifiers": [
+      {
+        "name": "_safeId",
+        "type": "structured_id_external",
+        "has_max_identifier_limit_per_address": true,
+        "max_identifier_limit_per_address": 100,
+        "description": "The ID of the newly opened Safe. This is an external identifier."
+      }
+    ],
+    "all_state_updates": [
+      {
+        "contract_name": "StableBaseCDP",
+        "state_updated": [
+          {
+            "state_variable_name": "safes[_safeId]",
+            "type": "mapping",
+            "summary_of_update": "Initializes a new Safe struct at the given _safeId with collateralAmount set to _amount, borrowedAmount set to 0, weight set to 0, totalBorrowedAmount set to 0 and feePaid set to 0.",
+            "has_conditional_updates": false,
+            "conditions": []
+          },
+          {
+            "state_variable_name": "liquidationSnapshots[_safeId]",
+            "type": "mapping",
+            "summary_of_update": "Initializes a new LiquidationSnapshot struct at the given _safeId, storing the current cumulative debt and collateral per unit collateral.",
+            "has_conditional_updates": false,
+            "conditions": []
+          },
+          {
+            "state_variable_name": "totalCollateral",
+            "type": "uint256",
+            "summary_of_update": "Increases the totalCollateral by the amount of collateral provided, i.e. _amount.",
+            "has_conditional_updates": false,
+            "conditions": []
+          },
+          {
+            "state_variable_name": "_owners[tokenId]",
+            "type": "mapping",
+            "summary_of_update": "Sets the owner of the newly minted NFT (representing the Safe) to the message sender.",
+            "has_conditional_updates": false,
+            "conditions": []
+          },
+          {
+            "state_variable_name": "_balances[to]",
+            "type": "mapping",
+            "summary_of_update": "Increments the balance of the recipient address to represent the new NFT minted to his address.",
+            "has_conditional_updates": false,
+            "conditions": []
+          },
+          {
+            "state_variable_name": "_tokenApprovals[tokenId]",
+            "type": "mapping",
+            "summary_of_update": "Sets the approval of the token ID to an address. Emits Approval event. Note the complex conditions which lead to the execution of this.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "auth != address(0)",
+              "owner != auth",
+              "!isApprovedForAll(owner, auth)"
+            ]
+          },
+          {
+            "state_variable_name": "_tokenApprovals[tokenId]",
+            "type": "mapping",
+            "summary_of_update": "Updates _tokenApprovals[tokenId] to address(0).",
+            "has_conditional_updates": true,
+            "conditions": [
+              "from != address(0)"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
