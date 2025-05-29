@@ -1,0 +1,200 @@
+{
+  "attributes": [
+    {
+      "name": "collateralLoss",
+      "type": "uint256",
+      "contract_function": "collateralLoss",
+      "parameters": []
+    },
+    {
+      "name": "userInfo",
+      "type": "tuple",
+      "contract_function": "getUser",
+      "parameters": [
+        {
+          "name": "_user",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
+    },
+    {
+      "name": "liquidationPossible",
+      "type": "bool",
+      "contract_function": "isLiquidationPossible",
+      "parameters": [
+        {
+          "name": "amount",
+          "type": "uint256",
+          "reference": "amount"
+        }
+      ]
+    },
+    {
+      "name": "lastSBRRewardDistributedTime",
+      "type": "uint256",
+      "contract_function": "lastSBRRewardDistributedTime",
+      "parameters": []
+    },
+    {
+      "name": "minimumScalingFactor",
+      "type": "uint256",
+      "contract_function": "minimumScalingFactor",
+      "parameters": []
+    },
+    {
+      "name": "precision",
+      "type": "uint256",
+      "contract_function": "precision",
+      "parameters": []
+    },
+    {
+      "name": "rewardLoss",
+      "type": "uint256",
+      "contract_function": "rewardLoss",
+      "parameters": []
+    },
+    {
+      "name": "rewardSenderActive",
+      "type": "bool",
+      "contract_function": "rewardSenderActive",
+      "parameters": []
+    },
+    {
+      "name": "sbrDistributionRate",
+      "type": "uint256",
+      "contract_function": "sbrDistributionRate",
+      "parameters": []
+    },
+    {
+      "name": "sbrRewardDistributionEndTime",
+      "type": "uint256",
+      "contract_function": "sbrRewardDistributionEndTime",
+      "parameters": []
+    },
+    {
+      "name": "sbrRewardDistributionStatus",
+      "type": "uint8",
+      "contract_function": "sbrRewardDistributionStatus",
+      "parameters": []
+    },
+    {
+      "name": "sbrRewardLoss",
+      "type": "uint256",
+      "contract_function": "sbrRewardLoss",
+      "parameters": []
+    },
+    {
+      "name": "stakeResetCount",
+      "type": "uint256",
+      "contract_function": "stakeResetCount",
+      "parameters": []
+    },
+    {
+      "name": "stakeScalingFactor",
+      "type": "uint256",
+      "contract_function": "stakeScalingFactor",
+      "parameters": []
+    },
+    {
+      "name": "totalCollateralPerToken",
+      "type": "uint256",
+      "contract_function": "totalCollateralPerToken",
+      "parameters": []
+    },
+    {
+      "name": "totalRewardPerToken",
+      "type": "uint256",
+      "contract_function": "totalRewardPerToken",
+      "parameters": []
+    },
+    {
+      "name": "totalSbrRewardPerToken",
+      "type": "uint256",
+      "contract_function": "totalSbrRewardPerToken",
+      "parameters": []
+    },
+    {
+      "name": "totalStakedRaw",
+      "type": "uint256",
+      "contract_function": "totalStakedRaw",
+      "parameters": []
+    },
+    {
+      "name": "userPendingCollateral",
+      "type": "uint256",
+      "contract_function": "userPendingCollateral",
+      "parameters": [
+        {
+          "name": "_user",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
+    },
+    {
+      "name": "userPendingReward",
+      "type": "uint256",
+      "contract_function": "userPendingReward",
+      "parameters": [
+        {
+          "name": "_user",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
+    },
+    {
+      "name": "userPendingRewardAndCollateral",
+      "type": "tuple",
+      "contract_function": "userPendingRewardAndCollateral",
+      "parameters": [
+        {
+          "name": "_user",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
+    },
+    {
+      "name": "stakeResetSnapshots",
+      "type": "tuple",
+      "contract_function": "stakeResetSnapshots",
+      "parameters": [
+        {
+          "name": "",
+          "type": "uint256",
+          "reference": "stakeResetCount"
+        }
+      ]
+    },
+    {
+      "name": "users",
+      "type": "tuple",
+      "contract_function": "users",
+      "parameters": [
+        {
+          "name": "",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
+    },
+    {
+      "name": "sbrRewardSnapshots",
+      "type": "tuple",
+      "contract_function": "sbrRewardSnapshots",
+      "parameters": [
+        {
+          "name": "",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
+    }
+  ],
+  "typescript_interfaces": {
+    "common_contract_state_snapshot_interface_code": "interface StabilityPoolState {\n  collateralLoss: BigInt;\n  liquidationPossible: boolean;\n  lastSBRRewardDistributedTime: BigInt;\n  minimumScalingFactor: BigInt;\n  precision: BigInt;\n  rewardLoss: BigInt;\n  rewardSenderActive: boolean;\n  sbrDistributionRate: BigInt;\n  sbrRewardDistributionEndTime: BigInt;\n  sbrRewardDistributionStatus: number; // Assuming enum is represented by number\n  sbrRewardLoss: BigInt;\n  stakeResetCount: BigInt;\n  stakeScalingFactor: BigInt;\n  totalCollateralPerToken: BigInt;\n  totalRewardPerToken: BigInt;\n  totalSbrRewardPerToken: BigInt;\n  totalStakedRaw: BigInt;\n}\n\ninterface StakeResetSnapshots {\n  scalingFactor: BigInt;\n  totalRewardPerToken: BigInt;\n  totalCollateralPerToken: BigInt;\n  totalSBRRewardPerToken: BigInt;\n}\n\ninterface Users {\n    stake: BigInt;\n    rewardSnapshot: BigInt;\n    collateralSnapshot: BigInt;\n    cumulativeProductScalingFactor: BigInt;\n    stakeResetCount: BigInt;\n}\n",
+    "user_data_snapshot_interface_code": "interface StabilityPoolUserInfo {\n  stake: BigInt;\n  rewardSnapshot: BigInt;\n  collateralSnapshot: BigInt;\n  cumulativeProductScalingFactor: BigInt;\n  stakeResetCount: BigInt;\n}\n\ninterface StabilityPoolUserPendingRewardAndCollateral {\n  0: BigInt; // reward\n  1: BigInt; // collateral\n  2: BigInt; // frontendFee\n}\n\ninterface StabilityPoolSBRRewardSnapshots {\n    rewardSnapshot: BigInt;\n    status: number;  // Assuming SBRRewardDistribution is represented by a number\n}"
+  }
+}
