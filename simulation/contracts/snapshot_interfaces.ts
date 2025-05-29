@@ -18,7 +18,9 @@ export interface StabilityPoolSnapshot {
   precision: BigInt;
   minimumScalingFactor: BigInt;
   lastSBRRewardDistributedTime: BigInt;
-}export interface StabilityPoolUserSnapshot {
+}
+
+export interface StabilityPoolUserSnapshot {
   stake: BigInt;
   rewardSnapshot: BigInt;
   collateralSnapshot: BigInt;
@@ -27,3 +29,4 @@ export interface StabilityPoolSnapshot {
   pendingReward: BigInt;
   pendingCollateral: BigInt;
 }
+
