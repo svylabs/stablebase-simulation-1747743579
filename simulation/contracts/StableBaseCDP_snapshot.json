@@ -1,61 +1,7 @@
 {
   "attributes": [
     {
-      "name": "mode",
-      "type": "uint8",
-      "contract_function": "mode",
-      "parameters": []
-    },
-    {
-      "name": "collateralLoss",
-      "type": "uint256",
-      "contract_function": "collateralLoss",
-      "parameters": []
-    },
-    {
-      "name": "cumulativeCollateralPerUnitCollateral",
-      "type": "uint256",
-      "contract_function": "cumulativeCollateralPerUnitCollateral",
-      "parameters": []
-    },
-    {
-      "name": "cumulativeDebtPerUnitCollateral",
-      "type": "uint256",
-      "contract_function": "cumulativeDebtPerUnitCollateral",
-      "parameters": []
-    },
-    {
-      "name": "debtLoss",
-      "type": "uint256",
-      "contract_function": "debtLoss",
-      "parameters": []
-    },
-    {
-      "name": "name",
-      "type": "string",
-      "contract_function": "name",
-      "parameters": []
-    },
-    {
-      "name": "totalCollateral",
-      "type": "uint256",
-      "contract_function": "totalCollateral",
-      "parameters": []
-    },
-    {
-      "name": "totalDebt",
-      "type": "uint256",
-      "contract_function": "totalDebt",
-      "parameters": []
-    },
-    {
-      "name": "symbol",
-      "type": "string",
-      "contract_function": "symbol",
-      "parameters": []
-    },
-    {
-      "name": "balanceOf",
+      "name": "Balance",
       "type": "uint256",
       "contract_function": "balanceOf",
       "parameters": [
@@ -67,19 +13,31 @@
       ]
     },
     {
-      "name": "ownerOf",
-      "type": "address",
-      "contract_function": "ownerOf",
-      "parameters": [
-        {
-          "name": "tokenId",
-          "type": "uint256",
-          "reference": "_safeId"
-        }
-      ]
+      "name": "CollateralLoss",
+      "type": "uint256",
+      "contract_function": "collateralLoss",
+      "parameters": []
     },
     {
-      "name": "getApproved",
+      "name": "CumulativeCollateralPerUnitCollateral",
+      "type": "uint256",
+      "contract_function": "cumulativeCollateralPerUnitCollateral",
+      "parameters": []
+    },
+    {
+      "name": "CumulativeDebtPerUnitCollateral",
+      "type": "uint256",
+      "contract_function": "cumulativeDebtPerUnitCollateral",
+      "parameters": []
+    },
+    {
+      "name": "DebtLoss",
+      "type": "uint256",
+      "contract_function": "debtLoss",
+      "parameters": []
+    },
+    {
+      "name": "Approval",
       "type": "address",
       "contract_function": "getApproved",
       "parameters": [
@@ -91,7 +49,19 @@
       ]
     },
     {
-      "name": "isApprovedForAll",
+      "name": "InactiveDebtAndCollateral",
+      "type": "tuple",
+      "contract_function": "getInactiveDebtAndCollateral",
+      "parameters": [
+        {
+          "name": "safeId",
+          "type": "uint256",
+          "reference": "_safeId"
+        }
+      ]
+    },
+    {
+      "name": "ApprovalForAll",
       "type": "bool",
       "contract_function": "isApprovedForAll",
       "parameters": [
@@ -108,55 +78,61 @@
       ]
     },
     {
-      "name": "sbrStakingPoolCanReceiveRewards",
+      "name": "Mode",
+      "type": "uint8",
+      "contract_function": "mode",
+      "parameters": []
+    },
+    {
+      "name": "Name",
+      "type": "string",
+      "contract_function": "name",
+      "parameters": []
+    },
+    {
+      "name": "Owner",
+      "type": "address",
+      "contract_function": "ownerOf",
+      "parameters": [
+        {
+          "name": "tokenId",
+          "type": "uint256",
+          "reference": "_safeId"
+        }
+      ]
+    },
+    {
+      "name": "Safe",
+      "type": "tuple",
+      "contract_function": "safes",
+      "parameters": [
+        {
+          "name": "safeId",
+          "type": "uint256",
+          "reference": "_safeId"
+        }
+      ]
+    },
+    {
+      "name": "SBRStakingPoolCanReceiveRewards",
       "type": "bool",
       "contract_function": "sbrStakingPoolCanReceiveRewards",
       "parameters": []
     },
     {
-      "name": "stabilityPoolCanReceiveRewards",
+      "name": "StabilityPoolCanReceiveRewards",
       "type": "bool",
       "contract_function": "stabilityPoolCanReceiveRewards",
       "parameters": []
     },
     {
-      "name": "liquidationSnapshots",
-      "type": "tuple",
-      "contract_function": "liquidationSnapshots",
-      "parameters": [
-        {
-          "name": "",
-          "type": "uint256",
-          "reference": "safeId"
-        }
-      ]
+      "name": "Symbol",
+      "type": "string",
+      "contract_function": "symbol",
+      "parameters": []
     },
     {
-      "name": "safes",
-      "type": "tuple",
-      "contract_function": "safes",
-      "parameters": [
-        {
-          "name": "",
-          "type": "uint256",
-          "reference": "safeId"
-        }
-      ]
-    },
-    {
-      "name": "getInactiveDebtAndCollateral",
-      "type": "tuple",
-      "contract_function": "getInactiveDebtAndCollateral",
-      "parameters": [
-        {
-          "name": "safeId",
-          "type": "uint256",
-          "reference": "safeId"
-        }
-      ]
-    },
-    {
-      "name": "tokenURI",
+      "name": "TokenURI",
       "type": "string",
       "contract_function": "tokenURI",
       "parameters": [
@@ -166,10 +142,34 @@
           "reference": "_safeId"
         }
       ]
+    },
+    {
+      "name": "TotalCollateral",
+      "type": "uint256",
+      "contract_function": "totalCollateral",
+      "parameters": []
+    },
+    {
+      "name": "TotalDebt",
+      "type": "uint256",
+      "contract_function": "totalDebt",
+      "parameters": []
+    },
+    {
+      "name": "LiquidationSnapshots",
+      "type": "tuple",
+      "contract_function": "liquidationSnapshots",
+      "parameters": [
+        {
+          "name": "safeId",
+          "type": "uint256",
+          "reference": "_safeId"
+        }
+      ]
     }
   ],
   "typescript_interfaces": {
-    "common_contract_state_snapshot_interface_code": "interface StableBaseCDPState {\n  mode: number;\n  collateralLoss: bigint;\n  cumulativeCollateralPerUnitCollateral: bigint;\n  cumulativeDebtPerUnitCollateral: bigint;\n  debtLoss: bigint;\n  name: string;\n  totalCollateral: bigint;\n  totalDebt: bigint;\n  symbol: string;\n  sbrStakingPoolCanReceiveRewards: boolean;\n  stabilityPoolCanReceiveRewards: boolean;\n  liquidationSnapshots: {[safeId: string]: { collateralPerCollateralSnapshot: bigint; debtPerCollateralSnapshot: bigint; }};\n  safes: {[safeId: string]: { collateralAmount: bigint; borrowedAmount: bigint; weight: bigint; totalBorrowedAmount: bigint; feePaid: bigint; }};\n}",
-    "user_data_snapshot_interface_code": "interface StableBaseCDPUserState {\n  balanceOf: bigint;\n  ownerOf: string;\n  getApproved: string;\n  isApprovedForAll: boolean;\n  getInactiveDebtAndCollateral: { collateral: bigint; debt: bigint; };\n  tokenURI: string;\n}"
+    "contract_snapshot_interface_code": "interface StableBaseCDPSnapshot {\n  balances: { [accountAddress: string]: bigint };\n  collateralLoss: bigint;\n  cumulativeCollateralPerUnitCollateral: bigint;\n  cumulativeDebtPerUnitCollateral: bigint;\n  debtLoss: bigint;\n  approvals: { [_safeId: bigint]: string };\n  inactiveDebtAndCollateral: { [_safeId: bigint]: [bigint, bigint] };\n  approvalForAll: { [accountAddress: string]: { [accountAddress: string]: boolean } };\n  mode: number;\n  name: string;\n  owners: { [_safeId: bigint]: string };\n  safes: { [_safeId: bigint]: { collateralAmount: bigint; borrowedAmount: bigint; weight: bigint; totalBorrowedAmount: bigint; feePaid: bigint } };\n  sbrStakingPoolCanReceiveRewards: boolean;\n  stabilityPoolCanReceiveRewards: boolean;\n  symbol: string;\n  tokenURIs: { [_safeId: bigint]: string };\n  totalCollateral: bigint;\n  totalDebt: bigint;\n  liquidationSnapshots: { [_safeId: bigint]: { collateralPerCollateralSnapshot: bigint, debtPerCollateralSnapshot: bigint } };\n}",
+    "interface_name": "StableBaseCDPSnapshot"
   }
 }
