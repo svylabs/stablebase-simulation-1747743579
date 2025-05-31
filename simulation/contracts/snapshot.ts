@@ -34,9 +34,9 @@ export class ContractSnapshotProvider implements SnapshotProvider {
         };
         const contractSnapshot = {};
         
-        contractSnapshot["stabilityPool"] = await takestabilityPoolContractSnapshot(this.contracts.stabilityPool, actors);
+        contractSnapshot["stabilityPool"] = await takestabilityPoolContractSnapshot(this.contracts.stabilityPool, this.actors);
         
-        contractSnapshot["stableBaseCDP"] = await takestableBaseCDPContractSnapshot(this.contracts.stableBaseCDP, actors);
+        contractSnapshot["stableBaseCDP"] = await takestableBaseCDPContractSnapshot(this.contracts.stableBaseCDP, this.actors);
         
         snapshot.contractSnapshot = contractSnapshot;
         return snapshot;
