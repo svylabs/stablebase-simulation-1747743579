@@ -2,19 +2,18 @@
 
 import { ethers } from 'ethers';
 import { Actor } from '@svylabs/ilumina';
-import { StabilityPoolSnapshot } from './snapshot_interfaces';
+import { StabilityPoolSnapshot, UserInfo, StakeResetSnapshot, SBRRewardSnapshot } from './snapshot_interfaces';
 
 /**
- * Takes a snapshot of StabilityPool state, fetching user-specific data for each actor.
+ * Takes a snapshot of StabilityPool state
  * @param contract - ethers.Contract instance
- * @param actors - An array of Actor objects, each containing an accountAddress.
+ * @param actors - Array of Actor objects to fetch user-specific data
  * @returns Promise returning the interface StabilityPoolSnapshot
  */
 export async function takestabilityPoolContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<StabilityPoolSnapshot> {
   try {
-    // Fetch constant state
+    // Fetch contract state
     const collateralLoss = BigInt(await contract.collateralLoss());
-    const lastSBRRewardDistributedTime = BigInt(await contract.lastSBRRewardDistributedTime());
     const minimumScalingFactor = BigInt(await contract.minimumScalingFactor());
     const precision = BigInt(await contract.precision());
     const rewardLoss = BigInt(await contract.rewardLoss());
@@ -29,65 +28,77 @@ export async function takestabilityPoolContractSnapshot(contract: ethers.Contrac
     const totalRewardPerToken = BigInt(await contract.totalRewardPerToken());
     const totalSbrRewardPerToken = BigInt(await contract.totalSbrRewardPerToken());
     const totalStakedRaw = BigInt(await contract.totalStakedRaw());
+    const lastSBRRewardDistributedTime = BigInt(await contract.lastSBRRewardDistributedTime());
 
-    // Fetch user-specific data for each actor
-    const userSpecificData: {
-      [accountAddress: string]: {
-        userInfo: any; // Replace 'any' with the actual type if known
-        userPendingCollateral: bigint;
-        userPendingReward: bigint;
-        userPendingRewardAndCollateral: [bigint, bigint, bigint];
-        users: any; // Replace 'any' with the actual type if known
-        sbrRewardSnapshots: { rewardSnapshot: bigint; status: number };
-      };
-    } = {};
+    // Fetch user-specific data
+    const users: { [accountAddress: string]: UserInfo } = {};
+    const stakeResetSnapshots: { [stakeResetCount: string]: StakeResetSnapshot } = {};
+    const sbrRewardSnapshots: { [accountAddress: string]: SBRRewardSnapshot } = {};
 
     for (const actor of actors) {
       const accountAddress = actor.accountAddress;
 
-      const userInfo = await contract.getUser(accountAddress);
-      const userPendingCollateral = BigInt(await contract.userPendingCollateral(accountAddress));
-      const userPendingReward = BigInt(await contract.userPendingReward(accountAddress));
-      const userPendingRewardAndCollateralResult = await contract.userPendingRewardAndCollateral(accountAddress);
-      const userPendingRewardAndCollateral = userPendingRewardAndCollateralResult.map(BigInt) as [bigint, bigint, bigint];
-      const users = await contract.users(accountAddress);
-      const sbrRewardSnapshotsResponse = await contract.sbrRewardSnapshots(accountAddress);
-
-      userSpecificData[accountAddress] = {
-        userInfo,
-        userPendingCollateral,
-        userPendingReward,
-        userPendingRewardAndCollateral,
-        users,
-        sbrRewardSnapshots: {
-          rewardSnapshot: BigInt(sbrRewardSnapshotsResponse.rewardSnapshot),
-          status: sbrRewardSnapshotsResponse.status,
-        },
-      };
-    }
-
-    const stakeResetSnapshots: any = {};
-
-    for (let i = 0; i <= Number(stakeResetCount); i++) {
-      stakeResetSnapshots[i] = {
-        scalingFactor: BigInt(0),
-        totalRewardPerToken: BigInt(0),
-        totalCollateralPerToken: BigInt(0),
-        totalSBRRewardPerToken: BigInt(0),
+      // Fetch user info
+      try {
+        const userInfo = await contract.users(accountAddress);
+        users[accountAddress] = {
+          stake: BigInt(userInfo.stake),
+          rewardSnapshot: BigInt(userInfo.rewardSnapshot),
+          collateralSnapshot: BigInt(userInfo.collateralSnapshot),
+          cumulativeProductScalingFactor: BigInt(userInfo.cumulativeProductScalingFactor),
+          stakeResetCount: BigInt(userInfo.stakeResetCount),
+        };
+      } catch (error) {
+        console.error(`Error fetching user info for ${accountAddress}: ${error}`);
+        // Initialize with default values if fetching fails.
+        users[accountAddress] = {
+          stake: BigInt(0),
+          rewardSnapshot: BigInt(0),
+          collateralSnapshot: BigInt(0),
+          cumulativeProductScalingFactor: BigInt(0),
+          stakeResetCount: BigInt(0),
+        };
       }
+
+            // Fetch SBR Reward Snapshot
+            try {
+                const sbrRewardSnapshot = await contract.sbrRewardSnapshots(accountAddress);
+                sbrRewardSnapshots[accountAddress] = {
+                    rewardSnapshot: BigInt(sbrRewardSnapshot.rewardSnapshot),
+                    status: sbrRewardSnapshot.status
+                };
+            } catch (error) {
+                console.error(`Error fetching SBR reward snapshot for ${accountAddress}: ${error}`);
+                sbrRewardSnapshots[accountAddress] = {
+                    rewardSnapshot: BigInt(0),
+                    status: 0,
+                };
+            }
     }
 
-    // Structure the snapshot data
+    // Fetch stake reset snapshots
+    try {
+        const stakeResetSnapshotResult = await contract.stakeResetSnapshots(stakeResetCount);
+        stakeResetSnapshots[stakeResetCount.toString()] = {
+            scalingFactor: BigInt(stakeResetSnapshotResult.scalingFactor),
+            totalRewardPerToken: BigInt(stakeResetSnapshotResult.totalRewardPerToken),
+            totalCollateralPerToken: BigInt(stakeResetSnapshotResult.totalCollateralPerToken),
+            totalSBRRewardPerToken: BigInt(stakeResetSnapshotResult.totalSBRRewardPerToken)
+        };
+    } catch (error) {
+        console.error(`Error fetching stake reset snapshot for ${stakeResetCount.toString()}: ${error}`);
+        // Initialize with default values if fetching fails.
+        stakeResetSnapshots[stakeResetCount.toString()] = {
+            scalingFactor: BigInt(0),
+            totalRewardPerToken: BigInt(0),
+            totalCollateralPerToken: BigInt(0),
+            totalSBRRewardPerToken: BigInt(0)
+        };
+    }
+
+    // Construct and return the snapshot
     const snapshot: StabilityPoolSnapshot = {
       collateralLoss,
-      userInfo: {
-        stake: BigInt(0),
-        rewardSnapshot: BigInt(0),
-        collateralSnapshot: BigInt(0),
-        cumulativeProductScalingFactor: BigInt(0),
-        stakeResetCount: BigInt(0),
-      },
-      lastSBRRewardDistributedTime,
       minimumScalingFactor,
       precision,
       rewardLoss,
@@ -96,30 +107,21 @@ export async function takestabilityPoolContractSnapshot(contract: ethers.Contrac
       sbrRewardDistributionEndTime,
       sbrRewardDistributionStatus,
       sbrRewardLoss,
-      sbrRewardSnapshots: { rewardSnapshot: BigInt(0), status: 0 },
       stakeResetCount,
-      stakeResetSnapshots,
       stakeScalingFactor,
       totalCollateralPerToken,
       totalRewardPerToken,
       totalSbrRewardPerToken,
       totalStakedRaw,
-      userPendingCollateral: BigInt(0),
-      userPendingReward: BigInt(0),
-      userPendingRewardAndCollateral: [BigInt(0), BigInt(0), BigInt(0)],
-      users: {
-        stake: BigInt(0),
-        rewardSnapshot: BigInt(0),
-        collateralSnapshot: BigInt(0),
-        cumulativeProductScalingFactor: BigInt(0),
-        stakeResetCount: BigInt(0),
-      },
-      isLiquidationPossible: false,
+      users,
+      stakeResetSnapshots,
+      sbrRewardSnapshots,
+      lastSBRRewardDistributedTime
     };
 
     return snapshot;
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error taking StabilityPool snapshot:', error);
-    throw new Error(`Failed to snapshot StabilityPool contract: ${error.message}`);
+    throw error; // Re-throw the error to be handled upstream
   }
 }

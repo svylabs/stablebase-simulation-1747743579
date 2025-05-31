@@ -2,14 +2,6 @@
 
 export interface StabilityPoolSnapshot {
   collateralLoss: bigint;
-  userInfo: {
-    stake: bigint;
-    rewardSnapshot: bigint;
-    collateralSnapshot: bigint;
-    cumulativeProductScalingFactor: bigint;
-    stakeResetCount: bigint;
-  };
-  lastSBRRewardDistributedTime: bigint;
   minimumScalingFactor: bigint;
   precision: bigint;
   rewardLoss: bigint;
@@ -18,33 +10,36 @@ export interface StabilityPoolSnapshot {
   sbrRewardDistributionEndTime: bigint;
   sbrRewardDistributionStatus: number;
   sbrRewardLoss: bigint;
-  sbrRewardSnapshots: {
-    rewardSnapshot: bigint;
-    status: number;
-  };
   stakeResetCount: bigint;
-  stakeResetSnapshots: {
-    scalingFactor: bigint;
-    totalRewardPerToken: bigint;
-    totalCollateralPerToken: bigint;
-    totalSBRRewardPerToken: bigint;
-  };
   stakeScalingFactor: bigint;
   totalCollateralPerToken: bigint;
   totalRewardPerToken: bigint;
   totalSbrRewardPerToken: bigint;
   totalStakedRaw: bigint;
-  userPendingCollateral: bigint;
-  userPendingReward: bigint;
-  userPendingRewardAndCollateral: [bigint, bigint, bigint];
-  users: {
-    stake: bigint;
+  users: { [accountAddress: string]: UserInfo };
+  stakeResetSnapshots: { [stakeResetCount: string]: StakeResetSnapshot };
+  sbrRewardSnapshots: { [accountAddress: string]: SBRRewardSnapshot };
+  lastSBRRewardDistributedTime: bigint;
+}
+
+export interface UserInfo {
+  stake: bigint;
+  rewardSnapshot: bigint;
+  collateralSnapshot: bigint;
+  cumulativeProductScalingFactor: bigint;
+  stakeResetCount: bigint;
+}
+
+export interface StakeResetSnapshot {
+  scalingFactor: bigint;
+  totalRewardPerToken: bigint;
+  totalCollateralPerToken: bigint;
+  totalSBRRewardPerToken: bigint;
+}
+
+export interface SBRRewardSnapshot {
     rewardSnapshot: bigint;
-    collateralSnapshot: bigint;
-    cumulativeProductScalingFactor: bigint;
-    stakeResetCount: bigint;
-  };
-  isLiquidationPossible: boolean;
+    status: number;
 }
 
 
