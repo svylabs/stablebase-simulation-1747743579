@@ -7,8 +7,8 @@ import { StableBaseCDPSnapshot } from './snapshot_interfaces';
 /**
  * Takes a snapshot of StableBaseCDP state
  * @param contract - ethers.Contract instance
- * @param actors - Array of Actor instances
- * @returns Promise returning the interface StableBaseCDPSnapshot
+ * @param actors - Array of Actor instances containing identifiers
+ * @returns Promise returning the StableBaseCDPSnapshot interface
  */
 export async function takestableBaseCDPContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<StableBaseCDPSnapshot> {
   try {
@@ -21,139 +21,85 @@ export async function takestableBaseCDPContractSnapshot(contract: ethers.Contrac
     const tokenURIs: { [_safeId: bigint]: string } = {};
     const liquidationSnapshots: { [_safeId: bigint]: { collateralPerCollateralSnapshot: bigint, debtPerCollateralSnapshot: bigint } } = {};
 
-    // Fetch all account addresses from actors
-    const accountAddresses = actors.map(actor => actor.accountAddress);
-    // Collect _safeIds from actors
-    const safeIds: bigint[] = [];
-    actors.forEach(actor => {
+    // Fetch state variables that don't depend on actors
+    const collateralLoss = BigInt(await contract.collateralLoss());
+    const cumulativeCollateralPerUnitCollateral = BigInt(await contract.cumulativeCollateralPerUnitCollateral());
+    const cumulativeDebtPerUnitCollateral = BigInt(await contract.cumulativeDebtPerUnitCollateral());
+    const debtLoss = BigInt(await contract.debtLoss());
+    const mode = Number(await contract.mode());
+    const name = await contract.name();
+    const sbrStakingPoolCanReceiveRewards = await contract.sbrStakingPoolCanReceiveRewards();
+    const stabilityPoolCanReceiveRewards = await contract.stabilityPoolCanReceiveRewards();
+    const symbol = await contract.symbol();
+    const totalCollateral = BigInt(await contract.totalCollateral());
+    const totalDebt = BigInt(await contract.totalDebt());
+
+    // Iterate over actors to fetch user-specific state
+    for (const actor of actors) {
+      const accountAddress = actor.accountAddress;
+
+      // Fetch Balance
+      balances[accountAddress] = BigInt(await contract.balanceOf(accountAddress));
+
+      // Fetch data based on _safeId if it exists
       if (actor.identifiers && actor.identifiers['_safeId']) {
-        const safeId = actor.identifiers['_safeId'];
-        if (Array.isArray(safeId)) {
-          safeIds.push(...safeId.map(id => BigInt(id)));
+        let safeIds: bigint[];
+
+        if (Array.isArray(actor.identifiers['_safeId'])) {
+          safeIds = (actor.identifiers['_safeId'] as (string | number)[]).map((safeId: string | number) => BigInt(safeId));
         } else {
-          safeIds.push(BigInt(safeId));
+          safeIds = [BigInt(actor.identifiers['_safeId'])];
         }
-      }
-    });
 
-    // Fetch balances for all account addresses
-    for (const accountAddress of accountAddresses) {
-      try {
-        const balance = await contract.balanceOf(accountAddress);
-        balances[accountAddress] = BigInt(balance);
-      } catch (error: any) {
-        console.error(`Error fetching balance for ${accountAddress}: ${error.message}`);
-      }
-    }
+        for (const _safeId of safeIds) {
+          // Fetch Approval
+          approvals[_safeId] = await contract.getApproved(_safeId);
 
-    // Fetch approvals for all _safeIds
-    for (const safeId of safeIds) {
-      try {
-        const approval = await contract.getApproved(safeId);
-        approvals[safeId] = approval;
-      } catch (error: any) {
-        console.error(`Error fetching approval for safeId ${safeId}: ${error.message}`);
-      }
-    }
+          // Fetch InactiveDebtAndCollateral
+          const inactiveDebtAndCollateralResult = await contract.getInactiveDebtAndCollateral(_safeId);
+          inactiveDebtAndCollateral[_safeId] = [BigInt(inactiveDebtAndCollateralResult[0]), BigInt(inactiveDebtAndCollateralResult[1])];
 
-    // Fetch inactiveDebtAndCollateral for all _safeIds
-    for (const safeId of safeIds) {
-      try {
-        const inactive = await contract.getInactiveDebtAndCollateral(safeId);
-        inactiveDebtAndCollateral[safeId] = [BigInt(inactive[0]), BigInt(inactive[1])];
-      } catch (error: any) {
-        console.error(`Error fetching inactiveDebtAndCollateral for safeId ${safeId}: ${error.message}`);
-      }
-    }
+          // Fetch Owner
+          owners[_safeId] = await contract.ownerOf(_safeId);
 
-    // Fetch approvalForAll for all combinations of account addresses
-    for (const owner of accountAddresses) {
-      approvalForAll[owner] = {};
-      for (const operator of accountAddresses) {
-        try {
-          const isApproved = await contract.isApprovedForAll(owner, operator);
-          approvalForAll[owner][operator] = isApproved;
-        } catch (error: any) {
-          console.error(`Error fetching approvalForAll for owner ${owner} and operator ${operator}: ${error.message}`);
-          approvalForAll[owner][operator] = false; // Default to false in case of error
+          // Fetch Safe
+          const safe = await contract.safes(_safeId);
+          safes[_safeId] = { collateralAmount: BigInt(safe.collateralAmount), borrowedAmount: BigInt(safe.borrowedAmount), weight: BigInt(safe.weight), totalBorrowedAmount: BigInt(safe.totalBorrowedAmount), feePaid: BigInt(safe.feePaid) };
+
+          // Fetch TokenURI
+          tokenURIs[_safeId] = await contract.tokenURI(_safeId);
+
+           // Fetch LiquidationSnapshots
+          const liquidationSnapshot = await contract.liquidationSnapshots(_safeId);
+          liquidationSnapshots[_safeId] = { collateralPerCollateralSnapshot: BigInt(liquidationSnapshot.collateralPerCollateralSnapshot), debtPerCollateralSnapshot: BigInt(liquidationSnapshot.debtPerCollateralSnapshot) };
         }
       }
     }
 
-    // Fetch owners for all _safeIds
-    for (const safeId of safeIds) {
-      try {
-        const owner = await contract.ownerOf(safeId);
-        owners[safeId] = owner;
-      } catch (error: any) {
-        console.error(`Error fetching owner for safeId ${safeId}: ${error.message}`);
-      }
-    }
-
-    // Fetch safes for all _safeIds
-    for (const safeId of safeIds) {
-      try {
-        const safe = await contract.safes(safeId);
-        safes[safeId] = { 
-          collateralAmount: BigInt(safe.collateralAmount), 
-          borrowedAmount: BigInt(safe.borrowedAmount), 
-          weight: BigInt(safe.weight), 
-          totalBorrowedAmount: BigInt(safe.totalBorrowedAmount), 
-          feePaid: BigInt(safe.feePaid) 
-        };
-      } catch (error: any) {
-        console.error(`Error fetching safe for safeId ${safeId}: ${error.message}`);
-      }
-    }
-
-    // Fetch tokenURIs for all _safeIds
-    for (const safeId of safeIds) {
-      try {
-        const tokenURI = await contract.tokenURI(safeId);
-        tokenURIs[safeId] = tokenURI;
-      } catch (error: any) {
-        console.error(`Error fetching tokenURI for safeId ${safeId}: ${error.message}`);
-      }
-    }
-
-     // Fetch liquidationSnapshots for all _safeIds
-     for (const safeId of safeIds) {
-        try {
-          const snapshot = await contract.liquidationSnapshots(safeId);
-          liquidationSnapshots[safeId] = { 
-            collateralPerCollateralSnapshot: BigInt(snapshot.collateralPerCollateralSnapshot), 
-            debtPerCollateralSnapshot: BigInt(snapshot.debtPerCollateralSnapshot) 
-          };
-        } catch (error: any) {
-          console.error(`Error fetching liquidation snapshot for safeId ${safeId}: ${error.message}`);
+    // Fetch ApprovalForAll - Consolidate and improve efficiency
+    for (const actor of actors) {
+      const accountAddress = actor.accountAddress;
+      approvalForAll[accountAddress] = {};
+      for (const otherActor of actors) {
+        const otherAccountAddress = otherActor.accountAddress;
+        if (accountAddress !== otherAccountAddress) { // Avoid self-approval queries
+          approvalForAll[accountAddress][otherAccountAddress] = await contract.isApprovedForAll(accountAddress, otherAccountAddress);
+        } else {
+          approvalForAll[accountAddress][otherAccountAddress] = false; // Set to false as an address cannot approve itself
         }
       }
-
-    // Fetch single value contract attributes
-    const [collateralLoss, cumulativeCollateralPerUnitCollateral, cumulativeDebtPerUnitCollateral, debtLoss, mode, name, sbrStakingPoolCanReceiveRewards, stabilityPoolCanReceiveRewards, symbol, totalCollateral, totalDebt] = await Promise.all([
-      contract.collateralLoss(),
-      contract.cumulativeCollateralPerUnitCollateral(),
-      contract.cumulativeDebtPerUnitCollateral(),
-      contract.debtLoss(),
-      contract.mode(),
-      contract.name(),
-      contract.sbrStakingPoolCanReceiveRewards(),
-      contract.stabilityPoolCanReceiveRewards(),
-      contract.symbol(),
-      contract.totalCollateral(),
-      contract.totalDebt()
-    ]);
+    }
 
     const snapshot: StableBaseCDPSnapshot = {
       balances,
-      collateralLoss: BigInt(collateralLoss),
-      cumulativeCollateralPerUnitCollateral: BigInt(cumulativeCollateralPerUnitCollateral),
-      cumulativeDebtPerUnitCollateral: BigInt(cumulativeDebtPerUnitCollateral),
-      debtLoss: BigInt(debtLoss),
+      collateralLoss,
+      cumulativeCollateralPerUnitCollateral,
+      cumulativeDebtPerUnitCollateral,
+      debtLoss,
       approvals,
       inactiveDebtAndCollateral,
       approvalForAll,
-      mode: Number(mode),
+      mode,
       name,
       owners,
       safes,
@@ -161,14 +107,14 @@ export async function takestableBaseCDPContractSnapshot(contract: ethers.Contrac
       stabilityPoolCanReceiveRewards,
       symbol,
       tokenURIs,
-      totalCollateral: BigInt(totalCollateral),
-      totalDebt: BigInt(totalDebt),
+      totalCollateral,
+      totalDebt,
       liquidationSnapshots
     };
 
     return snapshot;
   } catch (error: any) {
-    console.error(`Error taking StableBaseCDP snapshot: ${error.message}`);
-    throw error;
+    console.error('Error taking StableBaseCDP snapshot:', error);
+    throw new Error(`Failed to snapshot StableBaseCDP contract: ${error.message}`);
   }
 }
