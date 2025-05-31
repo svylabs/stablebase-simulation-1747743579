@@ -12,9 +12,9 @@ import { takestableBaseCDPContractSnapshot } from "./stableBaseCDP_snapshot";
 
 export interface ContractSnapshot {
 
-    stabilityPool: ;
+    stabilityPool: StabilityPoolSnapshot;
 
-    stableBaseCDP: ;
+    stableBaseCDP: StableBaseCDPSnapshot;
 
 }
 
