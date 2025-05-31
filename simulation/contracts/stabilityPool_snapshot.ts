@@ -7,8 +7,8 @@ import { StabilityPoolSnapshot, UserInfo, StakeResetSnapshot, SBRRewardSnapshot 
 /**
  * Takes a snapshot of StabilityPool state
  * @param contract - ethers.Contract instance
- * @param actors - Array of Actor instances, each containing an accountAddress.
- * @returns Promise returning the StabilityPoolSnapshot interface
+ * @param actors - Array of Actor objects
+ * @returns Promise returning the interface StabilityPoolSnapshot
  */
 export async function takestabilityPoolContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<StabilityPoolSnapshot> {
   try {
@@ -29,16 +29,15 @@ export async function takestabilityPoolContractSnapshot(contract: ethers.Contrac
     const totalStakedRaw = BigInt(await contract.totalStakedRaw());
     const lastSBRRewardDistributedTime = BigInt(await contract.lastSBRRewardDistributedTime());
 
-    // Fetch user-specific data
     const users: { [accountAddress: string]: UserInfo } = {};
     const stakeResetSnapshots: { [stakeResetCount: string]: StakeResetSnapshot } = {};
     const sbrRewardSnapshots: { [accountAddress: string]: SBRRewardSnapshot } = {};
 
+    // Fetch user specific data
     for (const actor of actors) {
       const accountAddress = actor.accountAddress;
-      if (accountAddress) {
+      try {
         const userInfo = await contract.users(accountAddress);
-
         users[accountAddress] = {
           stake: BigInt(userInfo.stake),
           rewardSnapshot: BigInt(userInfo.rewardSnapshot),
@@ -47,24 +46,31 @@ export async function takestabilityPoolContractSnapshot(contract: ethers.Contrac
           stakeResetCount: BigInt(userInfo.stakeResetCount),
         };
 
-        const sbrRewardSnapshot = await contract.sbrRewardSnapshots(accountAddress);
-
-        sbrRewardSnapshots[accountAddress] = {
-            rewardSnapshot: BigInt(sbrRewardSnapshot.rewardSnapshot),
-            status: sbrRewardSnapshot.status,
-        };
-
-        // Fetch stake reset snapshots for the user's stakeResetCount
-        const userStakeResetCount = userInfo.stakeResetCount.toString();
-        if (!stakeResetSnapshots[userStakeResetCount]) {
-          const stakeResetSnapshot = await contract.stakeResetSnapshots(userInfo.stakeResetCount);
-          stakeResetSnapshots[userStakeResetCount] = {
-            scalingFactor: BigInt(stakeResetSnapshot.scalingFactor),
-            totalRewardPerToken: BigInt(stakeResetSnapshot.totalRewardPerToken),
-            totalCollateralPerToken: BigInt(stakeResetSnapshot.totalCollateralPerToken),
-            totalSBRRewardPerToken: BigInt(stakeResetSnapshot.totalSBRRewardPerToken),
+          const sbrRewardSnapshot = await contract.sbrRewardSnapshots(accountAddress);
+          sbrRewardSnapshots[accountAddress] = {
+              rewardSnapshot: BigInt(sbrRewardSnapshot.rewardSnapshot),
+              status: sbrRewardSnapshot.status,
           };
-        }
+
+      } catch (error) {
+        console.error(`Error fetching user data for ${accountAddress}:`, error);
+        // Continue to the next user even if one fails
+      }
+    }
+
+    // Fetch stake reset snapshots
+    for (let i = 0; i <= Number(stakeResetCount); i++) {
+      try {
+        const stakeResetSnapshot = await contract.stakeResetSnapshots(i);
+        stakeResetSnapshots[i.toString()] = {
+          scalingFactor: BigInt(stakeResetSnapshot.scalingFactor),
+          totalRewardPerToken: BigInt(stakeResetSnapshot.totalRewardPerToken),
+          totalCollateralPerToken: BigInt(stakeResetSnapshot.totalCollateralPerToken),
+          totalSBRRewardPerToken: BigInt(stakeResetSnapshot.totalSBRRewardPerToken),
+        };
+      } catch (error) {
+        console.error(`Error fetching stake reset snapshot for index ${i}:`, error);
+        // Continue to the next stake reset snapshot even if one fails
       }
     }
 
@@ -91,6 +97,6 @@ export async function takestabilityPoolContractSnapshot(contract: ethers.Contrac
     };
   } catch (error) {
     console.error('Error taking StabilityPool snapshot:', error);
-    throw error; // Re-throw the error to be handled upstream
+    throw error;
   }
 }
