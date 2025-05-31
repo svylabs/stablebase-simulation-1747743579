@@ -7,8 +7,8 @@ import { StabilityPoolSnapshot, UserInfo, StakeResetSnapshot, SBRRewardSnapshot 
 /**
  * Takes a snapshot of StabilityPool state
  * @param contract - ethers.Contract instance
- * @param actors - Array of Actor instances representing users
- * @returns Promise returning the StabilityPoolSnapshot interface
+ * @param actors - Array of Actor instances for fetching user-specific data
+ * @returns Promise returning the interface StabilityPoolSnapshot
  */
 export async function takestabilityPoolContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<StabilityPoolSnapshot> {
   try {
@@ -31,57 +31,52 @@ export async function takestabilityPoolContractSnapshot(contract: ethers.Contrac
 
     // Fetch user-specific data
     const users: { [accountAddress: string]: UserInfo } = {};
-    for (const actor of actors) {
-      try {
-        const accountAddress = actor.accountAddress;
-        const userInfo = await contract.users(accountAddress);
-        users[accountAddress] = {
-          stake: BigInt(userInfo.stake),
-          rewardSnapshot: BigInt(userInfo.rewardSnapshot),
-          collateralSnapshot: BigInt(userInfo.collateralSnapshot),
-          cumulativeProductScalingFactor: BigInt(userInfo.cumulativeProductScalingFactor),
-          stakeResetCount: BigInt(userInfo.stakeResetCount),
-        };
-      } catch (userError: any) {
-        console.error(`Error fetching user info for ${actor.accountAddress}:`, userError);
-        throw new Error(`Failed to fetch user info for ${actor.accountAddress}: ${userError.message}`);
-      }
-    }
-
-    // Fetch stake reset snapshots
     const stakeResetSnapshots: { [stakeResetCount: string]: StakeResetSnapshot } = {};
-    for (let i = 0; i <= Number(stakeResetCount); i++) {
-      try {
-        const stakeResetSnapshot = await contract.stakeResetSnapshots(i);
-        stakeResetSnapshots[i.toString()] = {
-          scalingFactor: BigInt(stakeResetSnapshot.scalingFactor),
-          totalRewardPerToken: BigInt(stakeResetSnapshot.totalRewardPerToken),
-          totalCollateralPerToken: BigInt(stakeResetSnapshot.totalCollateralPerToken),
-          totalSBRRewardPerToken: BigInt(stakeResetSnapshot.totalSBRRewardPerToken),
-        };
-      } catch (stakeResetError: any) {
-        console.error(`Error fetching stake reset snapshot for index ${i}:`, stakeResetError);
-        throw new Error(`Failed to fetch stake reset snapshot for index ${i}: ${stakeResetError.message}`);
-      }
-    }
-
-    // Fetch SBR reward snapshots
     const sbrRewardSnapshots: { [accountAddress: string]: SBRRewardSnapshot } = {};
+
     for (const actor of actors) {
-      try {
-        const accountAddress = actor.accountAddress;
-        const sbrRewardSnapshot = await contract.sbrRewardSnapshots(accountAddress);
-        sbrRewardSnapshots[accountAddress] = {
-          rewardSnapshot: BigInt(sbrRewardSnapshot.rewardSnapshot),
-          status: sbrRewardSnapshot.status,
-        };
-      } catch (sbrRewardError: any) {
-        console.error(`Error fetching SBR reward snapshot for ${actor.accountAddress}:`, sbrRewardError);
-        throw new Error(`Failed to fetch SBR reward snapshot for ${actor.accountAddress}: ${sbrRewardError.message}`);
+      const accountAddress = actor.accountAddress;
+
+      if (accountAddress) {
+        try {
+          const user = await contract.users(accountAddress);
+          users[accountAddress] = {
+            stake: BigInt(user.stake),
+            rewardSnapshot: BigInt(user.rewardSnapshot),
+            collateralSnapshot: BigInt(user.collateralSnapshot),
+            cumulativeProductScalingFactor: BigInt(user.cumulativeProductScalingFactor),
+            stakeResetCount: BigInt(user.stakeResetCount),
+          };
+        } catch (error: any) {
+          console.error(`Error fetching user info for ${accountAddress}: ${error}`);
+        }
+
+        try {
+          const sbrRewardSnapshot = await contract.sbrRewardSnapshots(accountAddress);
+          sbrRewardSnapshots[accountAddress] = {
+            rewardSnapshot: BigInt(sbrRewardSnapshot.rewardSnapshot),
+            status: sbrRewardSnapshot.status,
+          };
+        } catch (error: any) {
+          console.error(`Error fetching sbrRewardSnapshot for ${accountAddress}: ${error}`);
+        }
+
+        try {
+          const userStakeResetCount = BigInt(users[accountAddress].stakeResetCount);
+          const stakeResetSnapshot = await contract.stakeResetSnapshots(userStakeResetCount);
+          stakeResetSnapshots[userStakeResetCount.toString()] = {
+            scalingFactor: BigInt(stakeResetSnapshot.scalingFactor),
+            totalRewardPerToken: BigInt(stakeResetSnapshot.totalRewardPerToken),
+            totalCollateralPerToken: BigInt(stakeResetSnapshot.totalCollateralPerToken),
+            totalSBRRewardPerToken: BigInt(stakeResetSnapshot.totalSBRRewardPerToken),
+          };
+        } catch (error: any) {
+          console.error(`Error fetching stakeResetSnapshot for ${accountAddress} with stakeResetCount ${users[accountAddress].stakeResetCount}: ${error}`);
+        }
       }
     }
 
-    return {
+    const snapshot: StabilityPoolSnapshot = {
       collateralLoss,
       minimumScalingFactor,
       precision,
@@ -102,6 +97,8 @@ export async function takestabilityPoolContractSnapshot(contract: ethers.Contrac
       sbrRewardSnapshots,
       lastSBRRewardDistributedTime,
     };
+
+    return snapshot;
   } catch (error: any) {
     console.error('Error taking StabilityPool snapshot:', error);
     throw new Error(`Failed to take StabilityPool snapshot: ${error.message}`);
