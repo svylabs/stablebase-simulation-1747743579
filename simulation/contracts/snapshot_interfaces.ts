@@ -2,14 +2,13 @@
 
 export interface StabilityPoolSnapshot {
   collateralLoss: bigint;
-  user(accountAddress: string): {
+  userInfo: {
     stake: bigint;
     rewardSnapshot: bigint;
     collateralSnapshot: bigint;
     cumulativeProductScalingFactor: bigint;
     stakeResetCount: bigint;
   };
-  liquidationPossible: boolean;
   lastSBRRewardDistributedTime: bigint;
   minimumScalingFactor: bigint;
   precision: bigint;
@@ -19,12 +18,12 @@ export interface StabilityPoolSnapshot {
   sbrRewardDistributionEndTime: bigint;
   sbrRewardDistributionStatus: number;
   sbrRewardLoss: bigint;
-  sbrRewardSnapshots(accountAddress: string): {
+  sbrRewardSnapshots: {
     rewardSnapshot: bigint;
     status: number;
   };
   stakeResetCount: bigint;
-  stakeResetSnapshots(stakeResetCount: bigint): {
+  stakeResetSnapshots: {
     scalingFactor: bigint;
     totalRewardPerToken: bigint;
     totalCollateralPerToken: bigint;
@@ -38,13 +37,14 @@ export interface StabilityPoolSnapshot {
   userPendingCollateral: bigint;
   userPendingReward: bigint;
   userPendingRewardAndCollateral: [bigint, bigint, bigint];
-  users(accountAddress: string): {
+  users: {
     stake: bigint;
     rewardSnapshot: bigint;
     collateralSnapshot: bigint;
     cumulativeProductScalingFactor: bigint;
     stakeResetCount: bigint;
   };
+  isLiquidationPossible: boolean;
 }
 
 
