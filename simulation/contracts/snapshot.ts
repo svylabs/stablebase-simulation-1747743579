@@ -5,20 +5,16 @@ import { Contract } from "ethers";
 import { Actor } from "@svylabs/ilumina";
 
 
-import {  } from "./";
+import { takestabilityPoolContractSnapshot } from "./stabilityPool_snapshot";
 
-import {  } from "./";
-
-import {  } from "./";
+import { takestableBaseCDPContractSnapshot } from "./stableBaseCDP_snapshot";
 
 
 export interface ContractSnapshot {
 
-    : ;
+    stabilityPool: ;
 
-    : ;
-
-    : ;
+    stableBaseCDP: ;
 
 }
 
@@ -37,11 +33,9 @@ export class ContractSnapshotProvider implements SnapshotProvider {
             actorSnapshot: {}
         };
         
-        snapshot.contractSnapshot[] = await (contracts., actors);
+        snapshot.contractSnapshot[stabilityPool] = await takestabilityPoolContractSnapshot(contracts.stabilityPool, actors);
         
-        snapshot.contractSnapshot[] = await (contracts., actors);
-        
-        snapshot.contractSnapshot[] = await (contracts., actors);
+        snapshot.contractSnapshot[stableBaseCDP] = await takestableBaseCDPContractSnapshot(contracts.stableBaseCDP, actors);
         
         return snapshot;
     }
