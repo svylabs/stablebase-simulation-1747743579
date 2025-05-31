@@ -5,12 +5,11 @@ import { Actor } from '@svylabs/ilumina';
 import { StabilityPoolStateSnapshot, StabilityPoolUserSnapshot } from './snapshot_interfaces';
 
 /**
- * Takes a snapshot of StabilityPool contract state
- * @param contract - ethers.Contract instance
- * @param actors - Array of Actor objects, each representing a user
- * @returns Promise resolving to StabilityPoolStateSnapshot
+ * Takes a snapshot of StabilityPool contract state.
+ * @param contract - ethers.Contract instance of the StabilityPool contract.
+ * @returns Promise resolving to a StabilityPoolStateSnapshot interface.
  */
-export async function takestabilityPoolContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<StabilityPoolStateSnapshot> {
+export async function takestabilityPoolContractSnapshot(contract: ethers.Contract): Promise<StabilityPoolStateSnapshot> {
     try {
         const collateralLoss = await contract.collateralLoss();
         const lastSBRRewardDistributedTime = await contract.lastSBRRewardDistributedTime();
@@ -29,7 +28,9 @@ export async function takestabilityPoolContractSnapshot(contract: ethers.Contrac
         const totalSbrRewardPerToken = await contract.totalSbrRewardPerToken();
         const totalStakedRaw = await contract.totalStakedRaw();
 
-        const stakeResetSnapshots: StabilityPoolStateSnapshot['stakeResetSnapshots'] = [];
+        // Fetch stakeResetSnapshots
+        const stakeResetSnapshots = [];
+        // Iterate through the stake reset count to fetch each snapshot
         for (let i = 0; i < Number(stakeResetCount); i++) {
             const snapshot = await contract.stakeResetSnapshots(i);
             stakeResetSnapshots.push({
@@ -46,10 +47,10 @@ export async function takestabilityPoolContractSnapshot(contract: ethers.Contrac
             minimumScalingFactor: BigInt(minimumScalingFactor),
             precision: BigInt(precision),
             rewardLoss: BigInt(rewardLoss),
-            rewardSenderActive: rewardSenderActive,
+            rewardSenderActive,
             sbrDistributionRate: BigInt(sbrDistributionRate),
             sbrRewardDistributionEndTime: BigInt(sbrRewardDistributionEndTime),
-            sbrRewardDistributionStatus: sbrRewardDistributionStatus,
+            sbrRewardDistributionStatus,
             sbrRewardLoss: BigInt(sbrRewardLoss),
             stakeResetCount: BigInt(stakeResetCount),
             stakeScalingFactor: BigInt(stakeScalingFactor),
@@ -57,7 +58,7 @@ export async function takestabilityPoolContractSnapshot(contract: ethers.Contrac
             totalRewardPerToken: BigInt(totalRewardPerToken),
             totalSbrRewardPerToken: BigInt(totalSbrRewardPerToken),
             totalStakedRaw: BigInt(totalStakedRaw),
-            stakeResetSnapshots: stakeResetSnapshots,
+            stakeResetSnapshots
         };
     } catch (error) {
         console.error('Error taking StabilityPool contract snapshot:', error);
@@ -66,10 +67,10 @@ export async function takestabilityPoolContractSnapshot(contract: ethers.Contrac
 }
 
 /**
- * Takes a snapshot of StabilityPool user-specific data
- * @param contract - ethers.Contract instance
- * @param actors - Array of Actor objects, each representing a user
- * @returns Promise resolving to an array of StabilityPoolUserSnapshot objects
+ * Takes a snapshot of StabilityPool user-specific data.
+ * @param contract - ethers.Contract instance of the StabilityPool contract.
+ * @param actors - Array of Actor objects, each representing a user.
+ * @returns Promise resolving to an array of StabilityPoolUserSnapshot interfaces.
  */
 export async function takestabilityPoolUserSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<StabilityPoolUserSnapshot[]> {
     const userSnapshots: StabilityPoolUserSnapshot[] = [];
@@ -77,9 +78,8 @@ export async function takestabilityPoolUserSnapshot(contract: ethers.Contract, a
     for (const actor of actors) {
         try {
             const accountAddress = actor.accountAddress;
-
             if (!accountAddress) {
-                console.warn('Skipping actor due to missing accountAddress.');
+                console.warn(`Skipping actor without accountAddress: ${actor}`);
                 continue;
             }
 
@@ -87,27 +87,24 @@ export async function takestabilityPoolUserSnapshot(contract: ethers.Contract, a
             const pendingReward = await contract.userPendingReward(accountAddress);
             const pendingCollateral = await contract.userPendingCollateral(accountAddress);
             const sbrRewardSnapshots = await contract.sbrRewardSnapshots(accountAddress);
-            
-            const userSnapshot: StabilityPoolUserSnapshot = {
+
+            userSnapshots.push({
                 userInfo: {
                     stake: BigInt(userInfo.stake),
                     rewardSnapshot: BigInt(userInfo.rewardSnapshot),
                     collateralSnapshot: BigInt(userInfo.collateralSnapshot),
                     cumulativeProductScalingFactor: BigInt(userInfo.cumulativeProductScalingFactor),
-                    stakeResetCount: BigInt(userInfo.stakeResetCount),
+                    stakeResetCount: BigInt(userInfo.stakeResetCount)
                 },
                 pendingReward: BigInt(pendingReward),
                 pendingCollateral: BigInt(pendingCollateral),
                 sbrRewardSnapshot: {
-                    rewardSnapshot: BigInt(sbrRewardSnapshots[0]),
-                    status: Number(sbrRewardSnapshots[1]),
+                    rewardSnapshot: BigInt(sbrRewardSnapshots.rewardSnapshot),
+                    status: sbrRewardSnapshots.status
                 }
-            };
-
-            userSnapshots.push(userSnapshot);
-
+            });
         } catch (error) {
-            console.error(`Error taking StabilityPool user snapshot for address ${actor.accountAddress}:`, error);
+            console.error(`Error taking StabilityPool user snapshot for actor ${actor.accountAddress}:`, error);
             throw error;
         }
     }

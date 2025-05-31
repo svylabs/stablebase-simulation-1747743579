@@ -41,41 +41,25 @@ export interface StabilityPoolUserSnapshot {
   };
 }
 
-export interface StableBaseCDPContractStateSnapshot {
+export interface StableBaseCDPStateSnapshot {
+  protocolMode: number;
   collateralLoss: bigint;
   cumulativeCollateralPerUnitCollateral: bigint;
   cumulativeDebtPerUnitCollateral: bigint;
   debtLoss: bigint;
-  inactiveDebt: bigint;
-  inactiveCollateral: bigint;
-  protocolMode: number;
-  contractName: string;
-  symbol: string;
-  tokenURI: string;
+  liquidationSnapshots: { collateralPerCollateralSnapshot: bigint, debtPerCollateralSnapshot: bigint };
+  mode: number;
   totalCollateral: bigint;
   totalDebt: bigint;
-  liquidationSnapshots: {
-        collateralPerCollateralSnapshot: bigint;
-        debtPerCollateralSnapshot: bigint;
-    };
-  sbrStakingPoolCanReceiveRewards: boolean;
-  stabilityPoolCanReceiveRewards: boolean;
-  redemptionCalculation: {
-    borrowMode: boolean;
-    _collateralToRedeem: bigint;
-    _amountToRedeem: bigint;
-    _amountToRefund: bigint;
-    _ownerFee: bigint;
-    _redeemerFee: bigint;
-  };
+  safeDetails: { collateralAmount: bigint; borrowedAmount: bigint; weight: bigint; totalBorrowedAmount: bigint; feePaid: bigint };
 }
 
 
-export interface StableBaseCDPUserDataSnapshot {
-  balance: bigint;
-  isApproved: boolean;
-  tokenOwner: string;
-  tokenApproved: string;
+export interface UserStableBaseCDPSnapshot {
+  safeBalance: bigint;
+  safeApproval: string;
+  isApprovedForAll: boolean;
+  safeOwner: string;
 }
 
 
