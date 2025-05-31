@@ -33,7 +33,7 @@ async function main() {
 
     // Configure Runner with options from config
     const snapshotProvider = new ContractSnapshotProvider(contracts, actors);
-    const snapshot = snapshotProvider.snapshot();
+    const snapshot = await snapshotProvider.snapshot();
     console.log(snapshot);
     const runner = new Runner(actors, snapshotProvider, config.options);
     await runner.run();

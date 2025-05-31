@@ -5,9 +5,9 @@ import { Contract } from "ethers";
 import { Actor } from "@svylabs/ilumina";
 
 
-import { takestabilityPoolContractSnapshot } from "./stabilityPool_snapshot";
+import { takestabilityPoolContractSnapshot } from "./stabilityPool_snapshot.ts";
 
-import { takestableBaseCDPContractSnapshot } from "./stableBaseCDP_snapshot";
+import { takestableBaseCDPContractSnapshot } from "./stableBaseCDP_snapshot.ts";
 
 
 export interface ContractSnapshot {
