@@ -41,3 +41,41 @@ export interface StabilityPoolUserSnapshot {
   };
 }
 
+export interface StableBaseCDPContractStateSnapshot {
+  collateralLoss: bigint;
+  cumulativeCollateralPerUnitCollateral: bigint;
+  cumulativeDebtPerUnitCollateral: bigint;
+  debtLoss: bigint;
+  inactiveDebt: bigint;
+  inactiveCollateral: bigint;
+  protocolMode: number;
+  contractName: string;
+  symbol: string;
+  tokenURI: string;
+  totalCollateral: bigint;
+  totalDebt: bigint;
+  liquidationSnapshots: {
+        collateralPerCollateralSnapshot: bigint;
+        debtPerCollateralSnapshot: bigint;
+    };
+  sbrStakingPoolCanReceiveRewards: boolean;
+  stabilityPoolCanReceiveRewards: boolean;
+  redemptionCalculation: {
+    borrowMode: boolean;
+    _collateralToRedeem: bigint;
+    _amountToRedeem: bigint;
+    _amountToRefund: bigint;
+    _ownerFee: bigint;
+    _redeemerFee: bigint;
+  };
+}
+
+
+export interface StableBaseCDPUserDataSnapshot {
+  balance: bigint;
+  isApproved: boolean;
+  tokenOwner: string;
+  tokenApproved: string;
+}
+
+

@@ -5,9 +5,10 @@ import { Actor, Snapshot } from '@svylabs/ilumina';
 import { StabilityPoolStateSnapshot, StabilityPoolUserSnapshot } from './snapshot_interfaces';
 
 /**
- * Takes a snapshot of StabilityPool contract state
- * @param contract - ethers.Contract instance
- * @returns Promise resolving to StabilityPoolStateSnapshot
+ * Takes a snapshot of StabilityPool contract state.
+ *
+ * @param contract - ethers.Contract instance of the StabilityPool contract.
+ * @returns A promise that resolves to a StabilityPoolStateSnapshot object.
  */
 export async function takestabilityPoolContractSnapshot(contract: ethers.Contract): Promise<StabilityPoolStateSnapshot> {
   try {
@@ -29,89 +30,97 @@ export async function takestabilityPoolContractSnapshot(contract: ethers.Contrac
     const totalStakedRaw = await contract.totalStakedRaw();
 
     // Fetch stake reset snapshots
-    const stakeResetSnapshots = [];
+    const stakeResetSnapshots: {
+      scalingFactor: bigint;
+      totalRewardPerToken: bigint;
+      totalCollateralPerToken: bigint;
+      totalSBRRewardPerToken: bigint;
+    }[] = [];
     for (let i = 0; i < Number(stakeResetCount); i++) {
       const snapshot = await contract.stakeResetSnapshots(i);
       stakeResetSnapshots.push({
-        scalingFactor: BigInt(snapshot.scalingFactor),
-        totalRewardPerToken: BigInt(snapshot.totalRewardPerToken),
-        totalCollateralPerToken: BigInt(snapshot.totalCollateralPerToken),
-        totalSBRRewardPerToken: BigInt(snapshot.totalSBRRewardPerToken),
+        scalingFactor: BigInt(snapshot.scalingFactor.toString()),
+        totalRewardPerToken: BigInt(snapshot.totalRewardPerToken.toString()),
+        totalCollateralPerToken: BigInt(snapshot.totalCollateralPerToken.toString()),
+        totalSBRRewardPerToken: BigInt(snapshot.totalSBRRewardPerToken.toString()),
       });
     }
 
+
     const snapshot: StabilityPoolStateSnapshot = {
-      collateralLoss: BigInt(collateralLoss),
-      lastSBRRewardDistributedTime: BigInt(lastSBRRewardDistributedTime),
-      minimumScalingFactor: BigInt(minimumScalingFactor),
-      precision: BigInt(precision),
-      rewardLoss: BigInt(rewardLoss),
-      rewardSenderActive,
-      sbrDistributionRate: BigInt(sbrDistributionRate),
-      sbrRewardDistributionEndTime: BigInt(sbrRewardDistributionEndTime),
-      sbrRewardDistributionStatus,
-      sbrRewardLoss: BigInt(sbrRewardLoss),
-      stakeResetCount: BigInt(stakeResetCount),
-      stakeScalingFactor: BigInt(stakeScalingFactor),
-      totalCollateralPerToken: BigInt(totalCollateralPerToken),
-      totalRewardPerToken: BigInt(totalRewardPerToken),
-      totalSbrRewardPerToken: BigInt(totalSbrRewardPerToken),
-      totalStakedRaw: BigInt(totalStakedRaw),
-      stakeResetSnapshots,
+      collateralLoss: BigInt(collateralLoss.toString()),
+      lastSBRRewardDistributedTime: BigInt(lastSBRRewardDistributedTime.toString()),
+      minimumScalingFactor: BigInt(minimumScalingFactor.toString()),
+      precision: BigInt(precision.toString()),
+      rewardLoss: BigInt(rewardLoss.toString()),
+      rewardSenderActive: rewardSenderActive,
+      sbrDistributionRate: BigInt(sbrDistributionRate.toString()),
+      sbrRewardDistributionEndTime: BigInt(sbrRewardDistributionEndTime.toString()),
+      sbrRewardDistributionStatus: sbrRewardDistributionStatus,
+      sbrRewardLoss: BigInt(sbrRewardLoss.toString()),
+      stakeResetCount: BigInt(stakeResetCount.toString()),
+      stakeScalingFactor: BigInt(stakeScalingFactor.toString()),
+      totalCollateralPerToken: BigInt(totalCollateralPerToken.toString()),
+      totalRewardPerToken: BigInt(totalRewardPerToken.toString()),
+      totalSbrRewardPerToken: BigInt(totalSbrRewardPerToken.toString()),
+      totalStakedRaw: BigInt(totalStakedRaw.toString()),
+      stakeResetSnapshots: stakeResetSnapshots
     };
 
     return snapshot;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error taking StabilityPool contract snapshot:', error);
-    throw error;
+    throw new Error(`Failed to take StabilityPool contract snapshot: ${error.message}`);
   }
 }
 
 /**
- * Takes a snapshot of StabilityPool user-specific data
- * @param contract - ethers.Contract instance
- * @param actors - Array of Actor objects, each representing a user.
- * @returns Promise resolving to an array of StabilityPoolUserSnapshot
+ * Takes a snapshot of StabilityPool user-specific data.
+ *
+ * @param contract - ethers.Contract instance of the StabilityPool contract.
+ * @param actors - An array of Actor objects, each representing a user.
+ * @returns A promise that resolves to an array of StabilityPoolUserSnapshot objects.
  */
 export async function takestabilityPoolUserSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<StabilityPoolUserSnapshot[]> {
-  const userSnapshots: StabilityPoolUserSnapshot[] = [];
+  const snapshots: StabilityPoolUserSnapshot[] = [];
 
-  try {
-    for (const actor of actors) {
-      const accountAddress = actor.accountAddress;
+  for (const actor of actors) {
+      try {
+          const accountAddress = actor.accountAddress;
 
-      if (!accountAddress) {
-        console.warn(`Skipping actor without accountAddress: ${JSON.stringify(actor)}`);
-        continue;
+          if (!accountAddress) {
+              console.warn("Account address is missing for actor. Skipping.");
+              continue;
+          }
+
+          const userInfo = await contract.users(accountAddress);
+          const pendingReward = await contract.userPendingReward(accountAddress);
+          const pendingCollateral = await contract.userPendingCollateral(accountAddress);
+          const sbrRewardSnapshots = await contract.sbrRewardSnapshots(accountAddress);
+
+          const snapshot: StabilityPoolUserSnapshot = {
+              userInfo: {
+                  stake: BigInt(userInfo.stake.toString()),
+                  rewardSnapshot: BigInt(userInfo.rewardSnapshot.toString()),
+                  collateralSnapshot: BigInt(userInfo.collateralSnapshot.toString()),
+                  cumulativeProductScalingFactor: BigInt(userInfo.cumulativeProductScalingFactor.toString()),
+                  stakeResetCount: BigInt(userInfo.stakeResetCount.toString()),
+              },
+              pendingReward: BigInt(pendingReward.toString()),
+              pendingCollateral: BigInt(pendingCollateral.toString()),
+              sbrRewardSnapshot: {
+                  rewardSnapshot: BigInt(sbrRewardSnapshots.rewardSnapshot.toString()),
+                  status: sbrRewardSnapshots.status,
+              },
+          };
+
+          snapshots.push(snapshot);
+
+      } catch (error: any) {
+          console.error(`Error taking StabilityPool user snapshot for address ${actor.accountAddress}:`, error);
+          throw new Error(`Failed to take StabilityPool user snapshot for address ${actor.accountAddress}: ${error.message}`);
       }
-
-      const userInfo = await contract.users(accountAddress);
-      const pendingReward = await contract.userPendingReward(accountAddress);
-      const pendingCollateral = await contract.userPendingCollateral(accountAddress);
-      const sbrRewardSnapshots = await contract.sbrRewardSnapshots(accountAddress);
-
-      const userSnapshot: StabilityPoolUserSnapshot = {
-        userInfo: {
-          stake: BigInt(userInfo.stake),
-          rewardSnapshot: BigInt(userInfo.rewardSnapshot),
-          collateralSnapshot: BigInt(userInfo.collateralSnapshot),
-          cumulativeProductScalingFactor: BigInt(userInfo.cumulativeProductScalingFactor),
-          stakeResetCount: BigInt(userInfo.stakeResetCount),
-        },
-        pendingReward: BigInt(pendingReward),
-        pendingCollateral: BigInt(pendingCollateral),
-        sbrRewardSnapshot: {
-          rewardSnapshot: BigInt(sbrRewardSnapshots.rewardSnapshot),
-          status: sbrRewardSnapshots.status,
-        },
-      };
-
-      userSnapshots.push(userSnapshot);
-    }
-
-    return userSnapshots;
-  } catch (error) {
-    console.error('Error taking StabilityPool user snapshot:', error);
-    throw error;
   }
+
+  return snapshots;
 }
