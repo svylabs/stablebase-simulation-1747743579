@@ -2,14 +2,15 @@
 
 import { ethers } from 'ethers';
 import { Actor, Snapshot } from '@svylabs/ilumina';
-import { StabilityPoolStateSnapshot, StabilityPoolUserSnapshot } from './snapshot_interfaces';
+import { StabilityPoolSnapshot } from './snapshot_interfaces';
 
 /**
- * Takes a snapshot of StabilityPool contract state
+ * Takes a snapshot of StabilityPool state
  * @param contract - ethers.Contract instance
- * @returns Promise resolving to StabilityPoolStateSnapshot
+ * @param actors - Array of Actor objects, each containing an accountAddress.
+ * @returns Promise returning the interface StabilityPoolSnapshot
  */
-export async function takestabilityPoolContractSnapshot(contract: ethers.Contract): Promise<StabilityPoolStateSnapshot> {
+export async function takestabilityPoolContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<StabilityPoolSnapshot> {
   try {
     const collateralLoss = await contract.collateralLoss();
     const lastSBRRewardDistributedTime = await contract.lastSBRRewardDistributedTime();
@@ -28,20 +29,70 @@ export async function takestabilityPoolContractSnapshot(contract: ethers.Contrac
     const totalSbrRewardPerToken = await contract.totalSbrRewardPerToken();
     const totalStakedRaw = await contract.totalStakedRaw();
 
-    // Fetch stake reset snapshots
-    const stakeResetSnapshots = [];
-    for (let i = 0; i < Number(stakeResetCount); i++) {
-      const snapshot = await contract.stakeResetSnapshots(i);
-      stakeResetSnapshots.push({
-        scalingFactor: BigInt(snapshot.scalingFactor.toString()),
-        totalRewardPerToken: BigInt(snapshot.totalRewardPerToken.toString()),
-        totalCollateralPerToken: BigInt(snapshot.totalCollateralPerToken.toString()),
-        totalSBRRewardPerToken: BigInt(snapshot.totalSBRRewardPerToken.toString()),
-      });
+    // Fetch user specific data
+    const userSnapshots: { [accountAddress: string]: any } = {};
+    const sbrRewardSnapshotsData: { [accountAddress: string]: any } = {};
+    const usersData: { [accountAddress: string]: any } = {};
+    const userPendingCollateralData: { [accountAddress: string]: any } = {};
+    const userPendingRewardData: { [accountAddress: string]: any } = {};
+    const userPendingRewardAndCollateralData: { [accountAddress: string]: any } = {};
+
+    for (const actor of actors) {
+      const accountAddress = actor.accountAddress;
+      if (!accountAddress) {
+        console.warn('Actor missing accountAddress, skipping.');
+        continue;
+      }
+
+      userSnapshots[accountAddress] = await contract.getUser(accountAddress);
+      sbrRewardSnapshotsData[accountAddress] = await contract.sbrRewardSnapshots(accountAddress);
+      usersData[accountAddress] = await contract.users(accountAddress);
+      userPendingCollateralData[accountAddress] = await contract.userPendingCollateral(accountAddress);
+      userPendingRewardData[accountAddress] = await contract.userPendingReward(accountAddress);
+      const pendingRewardAndCollateral = await contract.userPendingRewardAndCollateral(accountAddress);
+      userPendingRewardAndCollateralData[accountAddress] = [pendingRewardAndCollateral[0].toString(), pendingRewardAndCollateral[1].toString(), pendingRewardAndCollateral[2].toString()];
     }
 
-    const snapshot: StabilityPoolStateSnapshot = {
+    const stakeResetSnapshotsData: { [stakeResetCount: string]: any } = {};
+    for (let i = 0; i < Number(stakeResetCount); i++) {
+      stakeResetSnapshotsData[i.toString()] = await contract.stakeResetSnapshots(i);
+    }
+
+    const liquidationPossible = async (amount: bigint) => await contract.isLiquidationPossible(amount);
+
+    const getUser = async (accountAddress: string) => {
+      const userData = await contract.getUser(accountAddress);
+      return {
+        stake: BigInt(userData.stake.toString()),
+        rewardSnapshot: BigInt(userData.rewardSnapshot.toString()),
+        collateralSnapshot: BigInt(userData.collateralSnapshot.toString()),
+        cumulativeProductScalingFactor: BigInt(userData.cumulativeProductScalingFactor.toString()),
+        stakeResetCount: BigInt(userData.stakeResetCount.toString()),
+      };
+    };
+
+    const getSbrRewardSnapshots = async (accountAddress: string) => {
+      const sbrRewardSnapshot = await contract.sbrRewardSnapshots(accountAddress);
+      return {
+        rewardSnapshot: BigInt(sbrRewardSnapshot.rewardSnapshot.toString()),
+        status: Number(sbrRewardSnapshot.status),
+      };
+    };
+
+    const getStakeResetSnapshots = async (index: bigint) => {
+      const stakeResetSnapshot = await contract.stakeResetSnapshots(index);
+      return {
+        scalingFactor: BigInt(stakeResetSnapshot.scalingFactor.toString()),
+        totalRewardPerToken: BigInt(stakeResetSnapshot.totalRewardPerToken.toString()),
+        totalCollateralPerToken: BigInt(stakeResetSnapshot.totalCollateralPerToken.toString()),
+        totalSBRRewardPerToken: BigInt(stakeResetSnapshot.totalSBRRewardPerToken.toString()),
+      };
+    };
+
+    return {
       collateralLoss: BigInt(collateralLoss.toString()),
+      user: getUser,
+      liquidationPossible: (amount: bigint) => liquidationPossible(amount),
       lastSBRRewardDistributedTime: BigInt(lastSBRRewardDistributedTime.toString()),
       minimumScalingFactor: BigInt(minimumScalingFactor.toString()),
       precision: BigInt(precision.toString()),
@@ -49,64 +100,35 @@ export async function takestabilityPoolContractSnapshot(contract: ethers.Contrac
       rewardSenderActive: rewardSenderActive,
       sbrDistributionRate: BigInt(sbrDistributionRate.toString()),
       sbrRewardDistributionEndTime: BigInt(sbrRewardDistributionEndTime.toString()),
-      sbrRewardDistributionStatus: sbrRewardDistributionStatus,
+      sbrRewardDistributionStatus: Number(sbrRewardDistributionStatus),
       sbrRewardLoss: BigInt(sbrRewardLoss.toString()),
+      sbrRewardSnapshots: getSbrRewardSnapshots,
       stakeResetCount: BigInt(stakeResetCount.toString()),
+      stakeResetSnapshots: getStakeResetSnapshots,
       stakeScalingFactor: BigInt(stakeScalingFactor.toString()),
       totalCollateralPerToken: BigInt(totalCollateralPerToken.toString()),
       totalRewardPerToken: BigInt(totalRewardPerToken.toString()),
       totalSbrRewardPerToken: BigInt(totalSbrRewardPerToken.toString()),
       totalStakedRaw: BigInt(totalStakedRaw.toString()),
-      stakeResetSnapshots: stakeResetSnapshots,
+      userPendingCollateral: async (accountAddress: string) => BigInt((await contract.userPendingCollateral(accountAddress)).toString()),
+      userPendingReward: async (accountAddress: string) => BigInt((await contract.userPendingReward(accountAddress)).toString()),
+      userPendingRewardAndCollateral: async (accountAddress: string) => {
+        const result = await contract.userPendingRewardAndCollateral(accountAddress);
+        return [BigInt(result[0].toString()), BigInt(result[1].toString()), BigInt(result[2].toString())];
+      },
+      users: async (accountAddress: string) => {
+        const userData = await contract.users(accountAddress);
+        return {
+          stake: BigInt(userData.stake.toString()),
+          rewardSnapshot: BigInt(userData.rewardSnapshot.toString()),
+          collateralSnapshot: BigInt(userData.collateralSnapshot.toString()),
+          cumulativeProductScalingFactor: BigInt(userData.cumulativeProductScalingFactor.toString()),
+          stakeResetCount: BigInt(userData.stakeResetCount.toString()),
+        };
+      },
     };
-
-    return snapshot;
   } catch (error) {
-    console.error('Error taking StabilityPool contract snapshot:', error);
-    throw error;
+    console.error('Error in takestabilityPoolContractSnapshot:', error);
+    throw error; // Re-throw the error to be handled upstream
   }
-}
-
-/**
- * Takes a snapshot of StabilityPool user-specific data
- * @param contract - ethers.Contract instance
- * @param actors - Array of Actor objects, each representing a user
- * @returns Promise resolving to an array of StabilityPoolUserSnapshot
- */
-export async function takestabilityPoolUserSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<StabilityPoolUserSnapshot[]> {
-  const userSnapshots: StabilityPoolUserSnapshot[] = [];
-
-  for (const actor of actors) {
-    try {
-      const accountAddress = actor.accountAddress;
-
-      const userInfo = await contract.getUser(accountAddress);
-      const pendingReward = await contract.userPendingReward(accountAddress);
-      const pendingCollateral = await contract.userPendingCollateral(accountAddress);
-      const sbrRewardSnapshotData = await contract.sbrRewardSnapshots(accountAddress);
-
-      const snapshot: StabilityPoolUserSnapshot = {
-        userInfo: {
-          stake: BigInt(userInfo.stake.toString()),
-          rewardSnapshot: BigInt(userInfo.rewardSnapshot.toString()),
-          collateralSnapshot: BigInt(userInfo.collateralSnapshot.toString()),
-          cumulativeProductScalingFactor: BigInt(userInfo.cumulativeProductScalingFactor.toString()),
-          stakeResetCount: BigInt(userInfo.stakeResetCount.toString()),
-        },
-        pendingReward: BigInt(pendingReward.toString()),
-        pendingCollateral: BigInt(pendingCollateral.toString()),
-        sbrRewardSnapshot: {
-          rewardSnapshot: BigInt(sbrRewardSnapshotData.rewardSnapshot.toString()),
-          status: sbrRewardSnapshotData.status
-        }
-      };
-
-      userSnapshots.push(snapshot);
-    } catch (error) {
-      console.error(`Error taking StabilityPool user snapshot for address ${actor.accountAddress}:`, error);
-      throw error;
-    }
-  }
-
-  return userSnapshots;
 }
