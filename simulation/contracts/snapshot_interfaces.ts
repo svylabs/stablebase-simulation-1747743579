@@ -42,33 +42,27 @@ export interface StabilityPoolUserSnapshot {
 }
 
 export interface StableBaseCDPState {
-  protocolMode: number;
+  mode: number;
   collateralLoss: bigint;
   cumulativeCollateralPerUnitCollateral: bigint;
   cumulativeDebtPerUnitCollateral: bigint;
   debtLoss: bigint;
-  liquidationSnapshots: { [safeId: bigint]: { collateralPerCollateralSnapshot: bigint; debtPerCollateralSnapshot: bigint } };
-  mode: number;
+  name: string;
   totalCollateral: bigint;
   totalDebt: bigint;
+  symbol: string;
   sbrStakingPoolCanReceiveRewards: boolean;
   stabilityPoolCanReceiveRewards: boolean;
-  inactiveDebtAndCollateralAmounts:{inactiveDebt: bigint, inactiveCollateral: bigint};
+  liquidationSnapshots: {[safeId: string]: { collateralPerCollateralSnapshot: bigint; debtPerCollateralSnapshot: bigint; }};
+  safes: {[safeId: string]: { collateralAmount: bigint; borrowedAmount: bigint; weight: bigint; totalBorrowedAmount: bigint; feePaid: bigint; }};
 }
 
 export interface StableBaseCDPUserState {
-  safeBalance: bigint;
-  approvedAddress: string;
+  balanceOf: bigint;
+  ownerOf: string;
+  getApproved: string;
   isApprovedForAll: boolean;
-  safeDetails: Safe;
-  safeOwner: string;
-}
-
-export interface Safe {
-    collateralAmount: bigint;
-    borrowedAmount: bigint;
-    weight: bigint;
-    totalBorrowedAmount: bigint;
-    feePaid: bigint;
+  getInactiveDebtAndCollateral: { collateral: bigint; debt: bigint; };
+  tokenURI: string;
 }
 
