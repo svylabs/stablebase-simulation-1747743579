@@ -5,8 +5,20 @@ import { Contract } from "ethers";
 import { Actor } from "@svylabs/ilumina";
 
 
+import {  } from "./";
+
+import {  } from "./";
+
+import {  } from "./";
+
 
 export interface ContractSnapshot {
+
+    : ;
+
+    : ;
+
+    : ;
 
 }
 
@@ -24,6 +36,12 @@ export class ContractSnapshotProvider implements SnapshotProvider {
             contractSnapshot: {},
             actorSnapshot: {}
         };
+        
+        snapshot.contractSnapshot[] = await (contracts., actors);
+        
+        snapshot.contractSnapshot[] = await (contracts., actors);
+        
+        snapshot.contractSnapshot[] = await (contracts., actors);
         
         return snapshot;
     }
