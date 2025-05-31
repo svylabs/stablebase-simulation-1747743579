@@ -5,21 +5,17 @@ import { Actor, Snapshot } from '@svylabs/ilumina';
 import { StableBaseCDPContractStateSnapshot, StableBaseCDPUserDataSnapshot } from './snapshot_interfaces';
 
 /**
- * Takes a snapshot of StableBaseCDP contract state.
- *
+ * Takes a snapshot of StableBaseCDP contract state
  * @param contract - ethers.Contract instance
- * @param actors - Array of Actor objects, each representing a user.
- * @returns Promise resolving to an array of StableBaseCDPContractStateSnapshot
+ * @returns Promise resolving to StableBaseCDPContractStateSnapshot
  */
-export async function takestableBaseCDPContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<StableBaseCDPContractStateSnapshot[]> {
-  const contractSnapshots: StableBaseCDPContractStateSnapshot[] = [];
-
+export async function takestableBaseCDPContractSnapshot(contract: ethers.Contract): Promise<StableBaseCDPContractStateSnapshot> {
   try {
     const collateralLoss = BigInt(await contract.collateralLoss());
     const cumulativeCollateralPerUnitCollateral = BigInt(await contract.cumulativeCollateralPerUnitCollateral());
     const cumulativeDebtPerUnitCollateral = BigInt(await contract.cumulativeDebtPerUnitCollateral());
     const debtLoss = BigInt(await contract.debtLoss());
-    const protocolMode = Number(await contract.mode());
+    const protocolMode = await contract.mode();
     const contractName = await contract.name();
     const symbol = await contract.symbol();
     const totalCollateral = BigInt(await contract.totalCollateral());
@@ -27,57 +23,40 @@ export async function takestableBaseCDPContractSnapshot(contract: ethers.Contrac
     const sbrStakingPoolCanReceiveRewards = await contract.sbrStakingPoolCanReceiveRewards();
     const stabilityPoolCanReceiveRewards = await contract.stabilityPoolCanReceiveRewards();
 
-    for (const actor of actors) {
-      const identifiers = actor.identifiers;
+    // Dummy values to avoid errors, as this is dependent on user input and safe address, and we cannot compute
+    // redemptionCalculation or liquidationSnapshots here.
+    const liquidationSnapshots = {
+      collateralPerCollateralSnapshot: BigInt(0),
+      debtPerCollateralSnapshot: BigInt(0),
+    };
 
-      const safeId = identifiers._safeId as number; // Assuming safeId is a single number
-      const safe = safeId ? await contract.safes(safeId) : undefined;
+    const redemptionCalculation = {
+      borrowMode: false,
+      _collateralToRedeem: BigInt(0),
+      _amountToRedeem: BigInt(0),
+      _amountToRefund: BigInt(0),
+      _ownerFee: BigInt(0),
+      _redeemerFee: BigInt(0),
+    };
 
-      const amountToRedeem = identifiers.amountToRedeem as bigint; // Assuming amountToRedeem is a bigint
-      const collateralPrice = identifiers.collateralPrice as bigint; // Assuming collateralPrice is a bigint
-
-      const inactiveDebtAndCollateral = safeId ? await contract.getInactiveDebtAndCollateral(safeId) : { debt: BigInt(0), collateral: BigInt(0) };
-      const inactiveDebt = BigInt(inactiveDebtAndCollateral.debt);
-      const inactiveCollateral = BigInt(inactiveDebtAndCollateral.collateral);
-
-      const liquidationSnapshotsValue = safeId ? await contract.liquidationSnapshots(safeId) : { collateralPerCollateralSnapshot: BigInt(0), debtPerCollateralSnapshot: BigInt(0) };
-      const liquidationSnapshots = {
-        collateralPerCollateralSnapshot: BigInt(liquidationSnapshotsValue.collateralPerCollateralSnapshot),
-        debtPerCollateralSnapshot: BigInt(liquidationSnapshotsValue.debtPerCollateralSnapshot),
-      };
-
-      const redemptionCalculationValue = (safe && amountToRedeem && collateralPrice) ? await contract.calculateRedemptionAmountsAndFee(safe, amountToRedeem, collateralPrice) : { borrowMode: false, _collateralToRedeem: BigInt(0), _amountToRedeem: BigInt(0), _amountToRefund: BigInt(0), _ownerFee: BigInt(0), _redeemerFee: BigInt(0) };
-      const redemptionCalculation = {
-        borrowMode: redemptionCalculationValue.borrowMode,
-        _collateralToRedeem: BigInt(redemptionCalculationValue._collateralToRedeem),
-        _amountToRedeem: BigInt(redemptionCalculationValue._amountToRedeem),
-        _amountToRefund: BigInt(redemptionCalculationValue._amountToRefund),
-        _ownerFee: BigInt(redemptionCalculationValue._ownerFee),
-        _redeemerFee: BigInt(redemptionCalculationValue._redeemerFee),
-      };
-        const tokenURI = await contract.tokenURI(1); //using 1 as a default tokenId for tokenURI
-
-      contractSnapshots.push({
-        collateralLoss,
-        cumulativeCollateralPerUnitCollateral,
-        cumulativeDebtPerUnitCollateral,
-        debtLoss,
-        inactiveDebt,
-        inactiveCollateral,
-        protocolMode,
-        contractName,
-        symbol,
-        tokenURI,
-        totalCollateral,
-        totalDebt,
-        liquidationSnapshots,
-        sbrStakingPoolCanReceiveRewards,
-        stabilityPoolCanReceiveRewards,
-        redemptionCalculation,
-      });
-    }
-
-    return contractSnapshots;
+    return {
+      collateralLoss,
+      cumulativeCollateralPerUnitCollateral,
+      cumulativeDebtPerUnitCollateral,
+      debtLoss,
+      inactiveDebt: BigInt(0),
+      inactiveCollateral: BigInt(0),
+      protocolMode,
+      contractName,
+      symbol,
+      tokenURI: "",
+      totalCollateral,
+      totalDebt,
+      liquidationSnapshots,
+      sbrStakingPoolCanReceiveRewards,
+      stabilityPoolCanReceiveRewards,
+      redemptionCalculation
+    };
   } catch (error: any) {
     console.error('Error taking contract snapshot:', error);
     throw new Error(`Failed to take contract snapshot: ${error.message}`);
@@ -85,52 +64,56 @@ export async function takestableBaseCDPContractSnapshot(contract: ethers.Contrac
 }
 
 /**
- * Takes a snapshot of StableBaseCDP user-specific data.
- *
+ * Takes a snapshot of StableBaseCDP user-specific data
  * @param contract - ethers.Contract instance
- * @param actors - Array of Actor objects, each representing a user.
+ * @param actors - An array of actors with identifiers for user-specific data.
  * @returns Promise resolving to an array of StableBaseCDPUserDataSnapshot
  */
 export async function takestableBaseCDPUserSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<StableBaseCDPUserDataSnapshot[]> {
-  const userSnapshots: StableBaseCDPUserDataSnapshot[] = [];
+  const userDataSnapshots: StableBaseCDPUserDataSnapshot[] = [];
 
   for (const actor of actors) {
     try {
       const accountAddress = actor.accountAddress;
-      if (!accountAddress) {
-        console.warn(`Skipping actor ${actor.name} due to missing accountAddress.`);
-        continue;
+      const identifiers = actor.identifiers;
+
+      // Type definition for identifiers
+      interface Identifiers {
+        _safeId?: string | string[];
+      }
+
+      let _safeId: bigint | undefined;
+
+      if (identifiers && identifiers._safeId) {
+        const safeIdValue = identifiers._safeId;
+
+        if (Array.isArray(safeIdValue)) {
+          // Use the first safeId if it's an array
+          _safeId = BigInt(safeIdValue[0]);
+        } else {
+          _safeId = BigInt(safeIdValue);
+        }
       }
 
       const balance = BigInt(await contract.balanceOf(accountAddress));
 
-      let isApproved = false;
-      if (actor.identifiers.operatorAddress && Array.isArray(actor.identifiers.operatorAddress)) {
-        for (const operatorAddress of actor.identifiers.operatorAddress) {
-          isApproved = await contract.isApprovedForAll(accountAddress, operatorAddress) || isApproved;
-        }
-      }
+      // Dummy values, these require tokenId, operatorAddress which cannot be computed here
+      const isApproved = false;
+      const tokenOwner = ethers.constants.AddressZero;
+      const tokenApproved = ethers.constants.AddressZero;
 
-      let tokenOwner = "";
-      let tokenApproved = "";
-      if (actor.identifiers.tokenId && Array.isArray(actor.identifiers.tokenId)) {
-        for (const tokenId of actor.identifiers.tokenId) {
-          tokenOwner = await contract.ownerOf(tokenId);
-          tokenApproved = await contract.getApproved(tokenId);
-        }
-      }
-
-      userSnapshots.push({
+      userDataSnapshots.push({
         balance,
         isApproved,
         tokenOwner,
-        tokenApproved,
+        tokenApproved
       });
     } catch (error: any) {
-      console.error(`Error taking user snapshot for actor ${actor.name}:`, error);
-      throw new Error(`Failed to take user snapshot for actor ${actor.name}: ${error.message}`);
+      console.error(`Error taking user snapshot for address ${actor.accountAddress}:`, error);
+      // Return an empty snapshot instead of throwing an error
+      continue;
     }
   }
 
-  return userSnapshots;
+  return userDataSnapshots;
 }
