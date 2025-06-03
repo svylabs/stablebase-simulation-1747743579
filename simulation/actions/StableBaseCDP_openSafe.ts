@@ -1,51 +1,42 @@
-import { Actor, RunContext, Snapshot, Action } from "@ilumina/core";
-import { StableBaseCDPSnapshot } from "./types";
 import { ethers } from "ethers";
+import { Actor, RunContext, Snapshot, Action } from "@/ilumia";
 
-export class StableBaseCDPOpenSafeAction implements Action {
+export class StableBaseCDPOpensafeAction implements Action {
+  contract: ethers.Contract;
+
+  constructor(contract: ethers.Contract) {
+    this.contract = contract;
+  }
+
   async initialize(
     context: RunContext,
     actor: Actor,
     currentSnapshot: Snapshot
   ): Promise<[any, Record<string, any>]> {
-    const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot
-      .stableBaseCDP as StableBaseCDPSnapshot;
-
-    // Generate a _safeId that doesn't already exist
+    // Generate _safeId
     let _safeId: bigint;
-    let attempts = 0;
-    const maxAttempts = 100; // Avoid infinite loops
+    let maxRetries = 100; // avoid infinite loops
+    while (maxRetries > 0) {
+      _safeId = BigInt(Math.floor(context.prng.next() % 1000000) + 1); // Ensure it's greater than 0
 
-    do {
-      _safeId = BigInt(Math.floor(context.prng.next() % 10000) + 1); // Ensure > 0
-      if (stableBaseCDPSnapshot.safes && stableBaseCDPSnapshot.safes[_safeId]) {
+      const safe = currentSnapshot.contractSnapshot.stableBaseCDP.safes?.[_safeId];
+      const owner = currentSnapshot.contractSnapshot.stableBaseCDP.owners?.[_safeId];
 
-      } else if (stableBaseCDPSnapshot.owners && stableBaseCDPSnapshot.owners[_safeId.toString()] !== undefined) {
-
-      } else {
-        break;
+      if ((safe === undefined || safe.collateralAmount === 0n) && (owner === undefined || owner === ethers.ZeroAddress)) {
+        break; // Found a suitable safeId
       }
-      attempts++;
-      if (attempts >= maxAttempts) {
-        throw new Error("Could not generate a unique _safeId after multiple attempts.");
-      }
-    } while (
-      stableBaseCDPSnapshot.safes &&
-      stableBaseCDPSnapshot.safes[_safeId] &&
-      stableBaseCDPSnapshot.safes[_safeId].collateralAmount !== 0n
-    );
+      maxRetries--;
+    }
 
-    // Generate an _amount greater than 0
-    const _amount = BigInt(Math.floor(context.prng.next() % 1000) + 1); // Ensure > 0
+    if (maxRetries === 0) {
+      throw new Error("Could not generate a unique _safeId after multiple retries.");
+    }
 
-    const actionParams = {
-      _safeId: _safeId,
-      _amount: _amount,
-    };
+    // Generate _amount
+    const _amount = BigInt(Math.floor(context.prng.next() % 1000) + 1); // Ensure it's greater than 0
 
-    const newIdentifiers = {
-      _safeId: _safeId.toString(),
-    };
+    const actionParams = { _safeId: _safeId, _amount: _amount, value: _amount };
+    const newIdentifiers = { _safeId: _safeId };
 
     return [actionParams, newIdentifiers];
   }
@@ -56,18 +47,15 @@ export class StableBaseCDPOpenSafeAction implements Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<Record<string, any> | void> {
-    const contract = new ethers.Contract(
-      context.addresses["StableBaseCDP"],
-      [], // ABI not needed here for execution, can be omitted or left empty.
-      actor.account.value
-    );
+    const { _safeId, _amount, value } = actionParams;
 
-    const tx = await contract.openSafe(actionParams._safeId, {
-      value: actionParams._amount,
-    });
-    await tx.wait();
-
-    return {}; // Return empty object if no specific return values needed
+    try {
+      const tx = await this.contract.connect(actor.account.value).openSafe(_safeId, { value: value });
+      await tx.wait();
+    } catch (error: any) {
+      console.error("Execution error:", error);
+      throw error;
+    }
   }
 
   async validate(
@@ -77,90 +65,55 @@ export class StableBaseCDPOpenSafeAction implements Action {
     newSnapshot: Snapshot,
     actionParams: any
   ): Promise<boolean> {
-    const previousStableBaseCDPSnapshot = previousSnapshot.contractSnapshot
-      .stableBaseCDP as StableBaseCDPSnapshot;
-    const newStableBaseCDPSnapshot = newSnapshot.contractSnapshot
-      .stableBaseCDP as StableBaseCDPSnapshot;
-
-    const _safeId = actionParams._safeId;
-    const _amount = actionParams._amount;
+    const { _safeId, _amount } = actionParams;
 
     // Safe State
-    if (
-      !newStableBaseCDPSnapshot.safes ||
-      !newStableBaseCDPSnapshot.safes[_safeId]
-    ) {
-      console.error("Safe not found in new snapshot");
+    if (newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId].collateralAmount !== _amount) {
+      console.error("Validation failed: safes[_safeId].collateralAmount !== _amount");
+      return false;
+    }
+    if (newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId].borrowedAmount !== 0n) {
+      console.error("Validation failed: safes[_safeId].borrowedAmount !== 0");
+      return false;
+    }
+    if (newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId].weight !== 0n) {
+      console.error("Validation failed: safes[_safeId].weight !== 0");
+      return false;
+    }
+    if (newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId].totalBorrowedAmount !== 0n) {
+      console.error("Validation failed: safes[_safeId].totalBorrowedAmount !== 0");
+      return false;
+    }
+    if (newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId].feePaid !== 0n) {
+      console.error("Validation failed: safes[_safeId].feePaid !== 0");
       return false;
     }
 
-    if (newStableBaseCDPSnapshot.safes[_safeId].collateralAmount !== _amount) {
-      console.error("collateralAmount mismatch");
-      return false;
-    }
-    if (newStableBaseCDPSnapshot.safes[_safeId].borrowedAmount !== 0n) {
-      console.error("borrowedAmount not zero");
-      return false;
-    }
-    if (newStableBaseCDPSnapshot.safes[_safeId].weight !== 0n) {
-      console.error("weight not zero");
-      return false;
-    }
-    if (newStableBaseCDPSnapshot.safes[_safeId].totalBorrowedAmount !== 0n) {
-      console.error("totalBorrowedAmount not zero");
-      return false;
-    }
-    if (newStableBaseCDPSnapshot.safes[_safeId].feePaid !== 0n) {
-      console.error("feePaid not zero");
+    if (newSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshots[_safeId].debtPerCollateralSnapshot !==
+      newSnapshot.contractSnapshot.stableBaseCDP.cumulativeDebtPerUnitCollateral) {
+      console.error("Validation failed: liquidationSnapshots[_safeId].debtPerCollateralSnapshot !== cumulativeDebtPerUnitCollateral");
       return false;
     }
 
-    if (
-      !newStableBaseCDPSnapshot.liquidationSnapshots ||
-      !newStableBaseCDPSnapshot.liquidationSnapshots[_safeId]
-    ) {
-      console.error("Liquidation snapshot not found in new snapshot");
-      return false;
-    }
-
-    if (
-      newStableBaseCDPSnapshot.liquidationSnapshots[_safeId]
-        .debtPerCollateralSnapshot !==
-      newStableBaseCDPSnapshot.cumulativeDebtPerUnitCollateral
-    ) {
-      console.error("debtPerCollateralSnapshot mismatch");
-      return false;
-    }
-    if (
-      newStableBaseCDPSnapshot.liquidationSnapshots[_safeId]
-        .collateralPerCollateralSnapshot !==
-      newStableBaseCDPSnapshot.cumulativeCollateralPerUnitCollateral
-    ) {
-      console.error("collateralPerCollateralSnapshot mismatch");
+    if (newSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshots[_safeId].collateralPerCollateralSnapshot !==
+      newSnapshot.contractSnapshot.stableBaseCDP.cumulativeCollateralPerUnitCollateral) {
+      console.error("Validation failed: liquidationSnapshots[_safeId].collateralPerCollateralSnapshot !== cumulativeCollateralPerUnitCollateral");
       return false;
     }
 
     // NFT Ownership
-    if (!newStableBaseCDPSnapshot.owners) {
-        console.error("Owners mapping not found in new snapshot");
-        return false;
-    }
-
-    if (newStableBaseCDPSnapshot.owners[String(_safeId)] !== actor.account.address) {
-        console.error("Owner Mismatch", newStableBaseCDPSnapshot.owners, actor.account.address, _safeId);
-        return false;
-    }
-
-    // Global State
-    const expectedTotalCollateral = previousStableBaseCDPSnapshot.totalCollateral + _amount;
-    if (newStableBaseCDPSnapshot.totalCollateral !== expectedTotalCollateral) {\n      console.error("totalCollateral mismatch", newStableBaseCDPSnapshot.totalCollateral, expectedTotalCollateral);
+    if (ethers.getAddress(newSnapshot.contractSnapshot.stableBaseCDP.owners[_safeId]) !== ethers.getAddress(actor.account.address)) {
+      console.error("Validation failed: _ownerOf(_safeId) !== msg.sender");
       return false;
     }
 
-    // TODO: Verify that a OpenSafe event is emitted with the correct parameters
-    // Events are not directly available in snapshots.  Event validation would
-    // typically involve access to transaction receipts or logs, which are
-    // beyond the scope of snapshot-based validation.
+    // Global State
+    if (newSnapshot.contractSnapshot.stableBaseCDP.totalCollateral !== previousSnapshot.contractSnapshot.stableBaseCDP.totalCollateral + _amount) {
+      console.error("Validation failed: totalCollateral has not increased by _amount");
+      return false;
+    }
+
+    // TODO: Verify OpenSafe event.  Need better event parsing in Ilumia.
 
     return true;
   }
