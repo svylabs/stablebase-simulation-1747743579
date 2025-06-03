@@ -1,140 +1,163 @@
-import { ethers } from "ethers";
-import { Actor, RunContext, Snapshot, Action } from "@svylabs/ilumia";
+import { Actor, RunContext, Snapshot, Action } from '@svylabs/ilumia';
+import { BigNumber, ethers } from 'ethers';
 
-export class StableBaseCDPOpenSafeAction implements Action {
+export class OpensafeAction extends Action {
   contract: ethers.Contract;
 
   constructor(contract: ethers.Contract) {
+    super();
     this.contract = contract;
   }
 
+  /**
+   * Initializes the OpenSafe action by generating the necessary parameters.
+   * @param context The RunContext object.
+   * @param actor The Actor object.
+   * @param currentSnapshot The current Snapshot object.
+   * @returns A tuple containing the action parameters and a record of new identifiers.
+   */
   async initialize(
     context: RunContext,
     actor: Actor,
     currentSnapshot: Snapshot
   ): Promise<[any, Record<string, any>]> {
-    // Generate _safeId
-    let _safeId: bigint;
+    // Generate _safeId that does not already exist
+    let _safeId: BigNumber;
+    let safeExists = true;
     let attempts = 0;
-    const maxAttempts = 100; // Avoid infinite loops
+    const maxAttempts = 100; // Prevent infinite loops
+
+    const existingSafeIds = Object.keys(currentSnapshot.contractSnapshot.stableBaseCDP.safes).map(Number);
+    const addressSafeCount = Object.values(currentSnapshot.contractSnapshot.stableBaseCDP.owners).filter(owner => owner === actor.account.address).length; // approximate to allow for pending updates
+
+    if (addressSafeCount >= 100) {
+      throw new Error("Actor has reached the maximum number of safes allowed.");
+    }
 
     do {
-      _safeId = BigInt(context.prng.next()) % BigInt(10000) + BigInt(1); // Ensure > 0
-      const safe = currentSnapshot.contractSnapshot.stableBaseCDP.safes?.[_safeId];
-      const owner = currentSnapshot.contractSnapshot.stableBaseCDP.owners?.[_safeId];
-
-      if ((safe === undefined || safe.collateralAmount === BigInt(0)) && (owner === undefined || owner === ethers.ZeroAddress)) {
-        break;
-      }
-
-      attempts++;
       if (attempts > maxAttempts) {
         throw new Error("Could not generate a unique _safeId after multiple attempts.");
       }
-    } while (true);
 
-    // Generate _amount (collateral amount)
-    const maxEth = context.getAvailableEther(actor);
-    if (maxEth <= BigInt(0)) {
-      throw new Error("Account has insufficient ETH to perform this action.");
+      _safeId = BigNumber.from(context.prng.next()).mod(10000).add(1); // Ensure it's greater than 0
+
+      safeExists = existingSafeIds.includes(_safeId.toNumber());
+
+      attempts++;
+    } while (safeExists);
+
+    // Generate _amount greater than 0, but within the actor's ETH balance and total collateral.
+    const actorEth = currentSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+    const totalCollateral = currentSnapshot.contractSnapshot.stableBaseCDP.totalCollateral || BigInt(0);
+
+    let maxCollateral = actorEth;
+
+    // Ensure maxCollateral is not too high
+    if (maxCollateral > BigNumber.from(100)) {
+        maxCollateral = BigNumber.from(100)
     }
-    const _amount = BigInt(context.prng.next()) % maxEth + BigInt(1); // Ensure > 0
 
-    const actionParams = {
-      _safeId: _safeId,
-      _amount: _amount
-    };
+    const _amount = BigNumber.from(context.prng.next()).mod(maxCollateral).add(1); // Ensure it's greater than 0
 
-    const newIdentifiers = {
-      _safeId: _safeId.toString()
-    };
+    const params = [_safeId, _amount];
+    const newIdentifiers = { _safeId: _safeId.toString() };
 
-    return [actionParams, newIdentifiers];
+    return [params, newIdentifiers];
   }
 
+  /**
+   * Executes the OpenSafe action.
+   * @param context The RunContext object.
+   * @param actor The Actor object.
+   * @param currentSnapshot The current Snapshot object.
+   * @param actionParams The parameters for the action.
+   */
   async execute(
     context: RunContext,
     actor: Actor,
     currentSnapshot: Snapshot,
-    actionParams: any
+    actionParams: [BigNumber, BigNumber]
   ): Promise<Record<string, any> | void> {
-    const {
-      _safeId,
-      _amount
-    } = actionParams;
+    const [_safeId, _amount] = actionParams;
 
-    try {
-      const tx = await this.contract
-        .connect(actor.account.value as ethers.Signer)
-        .openSafe(_safeId, { value: _amount });
+    const tx = await this.contract
+      .connect(actor.account.value)
+      .openSafe(_safeId, { value: _amount });
 
-      await tx.wait();
-    } catch (e) {
-      console.error(e);
-      throw e;
-    }
+    await tx.wait();
   }
 
+  /**
+   * Validates the OpenSafe action.
+   * @param context The RunContext object.
+   * @param actor The Actor object.
+   * @param previousSnapshot The previous Snapshot object.
+   * @param newSnapshot The new Snapshot object.
+   * @param actionParams The parameters for the action.
+   * @returns True if the action is valid, false otherwise.
+   */
   async validate(
     context: RunContext,
     actor: Actor,
     previousSnapshot: Snapshot,
     newSnapshot: Snapshot,
-    actionParams: any
+    actionParams: [BigNumber, BigNumber]
   ): Promise<boolean> {
-    const {
-      _safeId,
-      _amount
-    } = actionParams;
+    const [_safeId, _amount] = actionParams;
 
-    const prevStableBaseCDP = previousSnapshot.contractSnapshot.stableBaseCDP;
-    const newStableBaseCDP = newSnapshot.contractSnapshot.stableBaseCDP;
-
-    // Safe State: Verify the collateral amount, borrowed amount, weight, total borrowed amount and fee paid
-    if (newStableBaseCDP.safes[_safeId].collateralAmount !== _amount) {
-      console.error(`Validation failed: safes[_safeId].collateralAmount !== _amount`);
-      return false;
-    }
-    if (newStableBaseCDP.safes[_safeId].borrowedAmount !== BigInt(0)) {
-      console.error(`Validation failed: safes[_safeId].borrowedAmount !== 0`);
-      return false;
-    }
-    if (newStableBaseCDP.safes[_safeId].weight !== BigInt(0)) {
-      console.error(`Validation failed: safes[_safeId].weight !== 0`);
-      return false;
-    }
-    if (newStableBaseCDP.safes[_safeId].totalBorrowedAmount !== BigInt(0)) {
-      console.error(`Validation failed: safes[_safeId].totalBorrowedAmount !== 0`);
-      return false;
-    }
-    if (newStableBaseCDP.safes[_safeId].feePaid !== BigInt(0)) {
-      console.error(`Validation failed: safes[_safeId].feePaid !== 0`);
-      return false;
-    }
-     // Verify liquidation snapshots.
-    if (newStableBaseCDP.liquidationSnapshots[_safeId].debtPerCollateralSnapshot !== prevStableBaseCDP.cumulativeDebtPerUnitCollateral) {
-      console.error(`Validation failed: liquidationSnapshots[_safeId].debtPerCollateralSnapshot !== cumulativeDebtPerUnitCollateral`);
-      return false;
-    }
-    if (newStableBaseCDP.liquidationSnapshots[_safeId].collateralPerCollateralSnapshot !== prevStableBaseCDP.cumulativeCollateralPerUnitCollateral) {
-      console.error(`Validation failed: liquidationSnapshots[_safeId].collateralPerCollateralSnapshot !== cumulativeCollateralPerUnitCollateral`);
+    // Verify that `safes[_safeId].collateralAmount` is equal to the `_amount` provided.
+    if (!BigNumber.from(newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId.toString()]?.collateralAmount || 0).eq(_amount)) {
+      console.error(`safes[_safeId].collateralAmount validation failed. Expected: ${_amount}, Actual: ${newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId.toString()]?.collateralAmount}`);
       return false;
     }
 
-    // NFT Ownership: Verify the owner of the safe.
-    if (newStableBaseCDP.owners[_safeId] !== actor.account.address) {
-      console.error(`Validation failed: _ownerOf(_safeId) !== msg.sender`);
+    // Verify that `safes[_safeId].borrowedAmount` is 0.
+    if (newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId.toString()]?.borrowedAmount !== BigInt(0)) {
+      console.error(`safes[_safeId].borrowedAmount validation failed. Expected: 0, Actual: ${newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId.toString()]?.borrowedAmount}`);
       return false;
     }
 
-    // Global State: Verify the total collateral has increased by the amount.
-    if (newStableBaseCDP.totalCollateral !== prevStableBaseCDP.totalCollateral + _amount) {
-      console.error(`Validation failed: totalCollateral has not increased by _amount`);
+    // Verify that `safes[_safeId].weight` is 0.
+    if (newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId.toString()]?.weight !== BigInt(0)) {
+      console.error(`safes[_safeId].weight validation failed. Expected: 0, Actual: ${newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId.toString()]?.weight}`);
       return false;
     }
 
-    // TODO: Verify that a OpenSafe event is emitted with the correct parameters
-    // For the purpose of this example, we'll assume the event is emitted correctly if all other validations pass.
+    // Verify that `safes[_safeId].totalBorrowedAmount` is 0.
+    if (newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId.toString()]?.totalBorrowedAmount !== BigInt(0)) {
+      console.error(`safes[_safeId].totalBorrowedAmount validation failed. Expected: 0, Actual: ${newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId.toString()]?.totalBorrowedAmount}`);
+      return false;
+    }
+
+    // Verify that `safes[_safeId].feePaid` is 0.
+    if (newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId.toString()]?.feePaid !== BigInt(0)) {
+      console.error(`safes[_safeId].feePaid validation failed. Expected: 0, Actual: ${newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId.toString()]?.feePaid}`);
+      return false;
+    }
+
+    // Verify that `liquidationSnapshots[_safeId].debtPerCollateralSnapshot` is equal to `cumulativeDebtPerUnitCollateral`.
+    if (newSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshots[_safeId.toString()]?.debtPerCollateralSnapshot !== newSnapshot.contractSnapshot.stableBaseCDP.cumulativeDebtPerUnitCollateral) {
+      console.error(`liquidationSnapshots[_safeId].debtPerCollateralSnapshot validation failed. Expected: ${newSnapshot.contractSnapshot.stableBaseCDP.cumulativeDebtPerUnitCollateral}, Actual: ${newSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshots[_safeId.toString()]?.debtPerCollateralSnapshot}`);
+      return false;
+    }
+
+    // Verify that `liquidationSnapshots[_safeId].collateralPerCollateralSnapshot` is equal to `cumulativeCollateralPerUnitCollateral`.
+    if (newSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshots[_safeId.toString()]?.collateralPerCollateralSnapshot !== newSnapshot.contractSnapshot.stableBaseCDP.cumulativeCollateralPerUnitCollateral) {
+      console.error(`liquidationSnapshots[_safeId].collateralPerCollateralSnapshot validation failed. Expected: ${newSnapshot.contractSnapshot.stableBaseCDP.cumulativeCollateralPerUnitCollateral}, Actual: ${newSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshots[_safeId.toString()]?.collateralPerCollateralSnapshot}`);
+      return false;
+    }
+
+    // Verify that `_ownerOf(_safeId)` returns `msg.sender`.
+    if (newSnapshot.contractSnapshot.stableBaseCDP.owners[_safeId.toString()] !== actor.account.address) {
+      console.error(`_ownerOf(_safeId) validation failed. Expected: ${actor.account.address}, Actual: ${newSnapshot.contractSnapshot.stableBaseCDP.owners[_safeId.toString()]}`);
+      return false;
+    }
+
+    // Verify that `totalCollateral` has increased by `_amount`.
+    if (BigNumber.from(newSnapshot.contractSnapshot.stableBaseCDP.totalCollateral).sub(BigNumber.from(previousSnapshot.contractSnapshot.stableBaseCDP.totalCollateral)).eq(_amount) === false) {
+      console.error(`totalCollateral validation failed. Expected increase: ${_amount}, Actual increase: ${BigNumber.from(newSnapshot.contractSnapshot.stableBaseCDP.totalCollateral).sub(BigNumber.from(previousSnapshot.contractSnapshot.stableBaseCDP.totalCollateral))}`);
+      return false;
+    }
 
     return true;
   }
