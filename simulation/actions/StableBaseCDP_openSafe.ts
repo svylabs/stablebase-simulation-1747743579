@@ -1,13 +1,13 @@
-import { Actor, RunContext, Snapshot, Action } from '@svylabs/ilumia'
-import { ethers } from 'ethers'
-import { expect } from 'chai'
+import { ethers } from 'ethers';
+import { Actor, RunContext, Snapshot, Action } from '@svylabs/ilumia';
+import { expect } from 'chai';
 
 export class OpenSafeAction extends Action {
-  private contract: ethers.Contract
+  private contract: ethers.Contract;
 
   constructor(contract: ethers.Contract) {
-    super('OpenSafeAction')
-    this.contract = contract
+    super('OpenSafeAction');
+    this.contract = contract;
   }
 
   async initialize(
@@ -15,36 +15,37 @@ export class OpenSafeAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot
   ): Promise<[any, Record<string, any>]> {
-    // Generate a `_safeId` greater than 0 that does not already exist
-    let _safeId: bigint
-    let safeExists = true
-    let attempts = 0
-    const maxAttempts = 100 // Avoid infinite loops
+    let _safeId: bigint;
+    let maxSafeId = 100;
+    let attempts = 0;
 
-    while (safeExists && attempts < maxAttempts) {
-      _safeId = BigInt(context.prng.next()) % BigInt(1000) + BigInt(1)
+    while (true) {
+      if (attempts > maxSafeId * 2) {
+        throw new Error("Could not find a valid safeId after multiple attempts.");
+      }
+      _safeId = BigInt(Math.floor(context.prng.next() % BigInt(maxSafeId) + 1));
 
-      const safe = currentSnapshot.contractSnapshot.stableBaseCDP.safes?.[_safeId]
-      const owner = currentSnapshot.contractSnapshot.stableBaseCDP.owners?.[_safeId]
+      const safe = currentSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId];
+      const owner = currentSnapshot.contractSnapshot.stableBaseCDP.owners[_safeId];
 
-      safeExists = (safe !== undefined && safe.collateralAmount !== BigInt(0)) || (owner !== undefined && owner !== ethers.ZeroAddress)
-      attempts++
+      if ((safe === undefined || safe.collateralAmount === BigInt(0)) && (owner === undefined || owner === ethers.ZeroAddress)) {
+        break;
+      }
+      attempts++;
     }
 
-    if (safeExists) {
-      throw new Error('Could not generate a unique safeId after multiple attempts.')
-    }
+    const _amount = BigInt(Math.floor(context.prng.next() % BigInt(1000) + 1)); // Example amount between 1 and 1000
 
-    // Generate an `_amount` greater than 0
-    const _amount = BigInt(context.prng.next()) % (actor.account.value ? BigInt(ethers.parseEther('10')) : BigInt(10)) + BigInt(1)
+    const newIdentifiers: Record<string, any> = {
+      _safeId: _safeId.toString(),
+    };
 
-    const params = [_safeId, _amount]
+    const actionParams = [
+      _safeId,
+      _amount,
+    ];
 
-    const newIdentifiers = {
-      _safeId: _safeId.toString()
-    }
-
-    return [params, newIdentifiers]
+    return [actionParams, newIdentifiers];
   }
 
   async execute(
@@ -53,16 +54,17 @@ export class OpenSafeAction extends Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<Record<string, any> | void> {
-    const [safeId, amount] = actionParams
+    const _safeId = actionParams[0];
+    const _amount = actionParams[1];
 
     try {
       const tx = await this.contract
-        .connect(actor.account.value as ethers.Signer)
-        .openSafe(safeId, amount, { value: amount })
-      await tx.wait()
-    } catch (error) {
-      console.error('Transaction execution failed:', error)
-      throw error; // Re-throw the error to indicate failure
+        .connect(actor.account.value)
+        .openSafe(_safeId, _amount, { value: _amount });
+
+      await tx.wait();
+    } catch (error: any) {
+      throw new Error(`Error executing openSafe: ${_safeId}, ${_amount}. Details: ${error.message}`);
     }
   }
 
@@ -73,69 +75,76 @@ export class OpenSafeAction extends Action {
     newSnapshot: Snapshot,
     actionParams: any
   ): Promise<boolean> {
-    const [safeId, amount] = actionParams
-    const safeIdBigInt = BigInt(safeId)
+    const _safeId = actionParams[0] as bigint;
+    const _amount = actionParams[1] as bigint;
 
     // Safe State
     expect(
-      newSnapshot.contractSnapshot.stableBaseCDP.safes[safeIdBigInt].collateralAmount,
+      newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId].collateralAmount,
       'collateralAmount should be equal to _amount'
-    ).to.equal(BigInt(amount))
+    ).to.equal(_amount);
     expect(
-      newSnapshot.contractSnapshot.stableBaseCDP.safes[safeIdBigInt].borrowedAmount,
+      newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId].borrowedAmount,
       'borrowedAmount should be 0'
-    ).to.equal(BigInt(0))
+    ).to.equal(BigInt(0));
     expect(
-      newSnapshot.contractSnapshot.stableBaseCDP.safes[safeIdBigInt].weight,
+      newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId].weight,
       'weight should be 0'
-    ).to.equal(BigInt(0))
+    ).to.equal(BigInt(0));
     expect(
-      newSnapshot.contractSnapshot.stableBaseCDP.safes[safeIdBigInt].totalBorrowedAmount,
+      newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId].totalBorrowedAmount,
       'totalBorrowedAmount should be 0'
-    ).to.equal(BigInt(0))
+    ).to.equal(BigInt(0));
     expect(
-      newSnapshot.contractSnapshot.stableBaseCDP.safes[safeIdBigInt].feePaid,
+      newSnapshot.contractSnapshot.stableBaseCDP.safes[_safeId].feePaid,
       'feePaid should be 0'
-    ).to.equal(BigInt(0))
+    ).to.equal(BigInt(0));
     expect(
-      newSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshots[safeIdBigInt]
+      newSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshots[_safeId]
         .debtPerCollateralSnapshot,
       'debtPerCollateralSnapshot should be equal to cumulativeDebtPerUnitCollateral'
-    ).to.equal(newSnapshot.contractSnapshot.stableBaseCDP.cumulativeDebtPerUnitCollateral)
+    ).to.equal(
+      newSnapshot.contractSnapshot.stableBaseCDP.cumulativeDebtPerUnitCollateral
+    );
     expect(
-      newSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshots[safeIdBigInt]
+      newSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshots[_safeId]
         .collateralPerCollateralSnapshot,
       'collateralPerCollateralSnapshot should be equal to cumulativeCollateralPerUnitCollateral'
     ).to.equal(
-      newSnapshot.contractSnapshot.stableBaseCDP.cumulativeCollateralPerUnitCollateral
-    )
+      newSnapshot.contractSnapshot.stableBaseCDP
+        .cumulativeCollateralPerUnitCollateral
+    );
 
     // NFT Ownership
     expect(
-      newSnapshot.contractSnapshot.stableBaseCDP.owners[safeIdBigInt],
-      'ownerOf(_safeId) should return msg.sender'
-    ).to.equal(actor.account.address)
+      newSnapshot.contractSnapshot.stableBaseCDP.owners[_safeId],
+      '_ownerOf(_safeId) should return msg.sender'
+    ).to.equal(actor.account.address);
 
     // Global State
     expect(
       newSnapshot.contractSnapshot.stableBaseCDP.totalCollateral - previousSnapshot.contractSnapshot.stableBaseCDP.totalCollateral,
       'totalCollateral should have increased by _amount'
-    ).to.equal(BigInt(amount))
+    ).to.equal(_amount);
 
-        // Account Balances (ETH)
-        const previousEthBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-        const newEthBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-        const ethChange = previousEthBalance - newEthBalance;
-        expect(ethChange, 'ETH balance should have decreased by amount sent + gas cost').to.be.greaterThanOrEqual(BigInt(amount));
+    // Contract ETH balance validation
+    const contractAddress = this.contract.target;
+    if (contractAddress) {
+        expect(
+            (newSnapshot.accountSnapshot[contractAddress as string] || BigInt(0)) - (previousSnapshot.accountSnapshot[contractAddress as string] || BigInt(0)),
+            'Contract ETH balance should have increased by _amount'
+        ).to.equal(_amount);
+    }
 
-        // Contract Balance (ETH)
-        const previousContractEthBalance = previousSnapshot.accountSnapshot[this.contract.address] || BigInt(0);
-        const newContractEthBalance = newSnapshot.accountSnapshot[this.contract.address] || BigInt(0);
-        const contractEthChange = newContractEthBalance - previousContractEthBalance;
-        expect(contractEthChange, 'Contract ETH balance should have increased by amount sent').to.equal(BigInt(amount));
+    // Token Balances
+    const previousBalance = previousSnapshot.contractSnapshot.stableBaseCDP.balances[actor.account.address] || BigInt(0);
+    const newBalance = newSnapshot.contractSnapshot.stableBaseCDP.balances[actor.account.address] || BigInt(0);
 
-    // Token Balances: No tokens involved in this function
+    expect(
+      newBalance,
+      'Token balance of the owner should have increased by 1'
+    ).to.equal(previousBalance + BigInt(1));
 
-    return true
+    return true;
   }
 }
