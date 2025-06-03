@@ -23,7 +23,7 @@
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@nomicfoundation/hardhat-verify": "^2.0.13",
     "@nomicfoundation/ignition-core": "^0.15.11",
-    "@svylabs/ilumina": "^0.1.6",
+    "@svylabs/ilumina": "^0.1.7",
     "@typechain/ethers-v6": "^0.5.1",
     "@typechain/hardhat": "^9.1.0",
     "@types/chai": "^4.3.20",

@@ -31,6 +31,15 @@ async function main() {
         env.addAgent(actor);
     }
 
+    // Adding all contracts as agents without actions so the state can be snapshotted.
+    for (const [key, contract] of Object.entries(contracts)) {
+        env.addAgent(new Actor(key, {
+            type: "contract",
+            address: contract.target.toString(),
+            value: contract
+        }, []));
+    };
+
     // Configure Runner with options from config
     const snapshotProvider = new ContractSnapshotProvider(contracts, actors);
     const snapshot = await snapshotProvider.snapshot();
