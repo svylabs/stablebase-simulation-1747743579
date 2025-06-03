@@ -1,0 +1,519 @@
+{
+  "action": {
+    "name": "borrow",
+    "summary": "Borrow from the protocol",
+    "contract_name": "StableBaseCDP",
+    "function_name": "borrow",
+    "probability": 1.0
+  },
+  "action_detail": {
+    "action_name": "borrow",
+    "contract_name": "StableBaseCDP",
+    "function_name": "borrow",
+    "pre_execution_parameter_generation_rules": [
+      "safeId: Should be an existing and valid safeId owned by the user.  Verify that `ownerOf(safeId)` returns `msg.sender`.",
+      "amount: The amount of SBD tokens the user wants to borrow. Should be greater than 0 and satisfy the minimum debt requirement (MINIMUM_DEBT).",
+      "shieldingRate: The shielding rate to apply to the borrowed amount. Should be a valid percentage (e.g., between 0 and 10000, representing 0% to 100%).",
+      "nearestSpotInLiquidationQueue: A hint for the location in the liquidation queue to optimize the upsert operation. Can be 0 or a valid safeId already in the queue.",
+      "nearestSpotInRedemptionQueue: A hint for the location in the redemption queue to optimize the upsert operation. Can be 0 or a valid safeId already in the queue."
+    ],
+    "on_execution_state_updates_made": [
+      {
+        "category": "Safe State",
+        "state_update_descriptions": [
+          "safes[safeId].borrowedAmount is increased by amount.",
+          "safes[safeId].totalBorrowedAmount is increased by amount.",
+          "safes[safeId].weight is updated based on shieldingRate and existing weight.",
+          "safes[safeId].feePaid is increased by the shielding fee (_shieldingFee)."
+        ]
+      },
+      {
+        "category": "Doubly Linked List State",
+        "state_update_descriptions": [
+          "safesOrderedForRedemption is updated with the safeId and the new weight, potentially inserting or updating the safe's position in the queue.",
+          "safesOrderedForLiquidation is updated with the safeId and the new ratio (borrowedAmount / collateralAmount), potentially inserting or updating the safe's position in the queue."
+        ]
+      },
+      {
+        "category": "Token State",
+        "state_update_descriptions": [
+          "SBD tokens are minted to the msg.sender (borrower) with the amount _amountToBorrow (amount - shieldingFee + canRefund)."
+        ]
+      },
+      {
+        "category": "Protocol Debt State",
+        "state_update_descriptions": [
+          "totalDebt is increased by amount."
+        ]
+      },
+      {
+        "category": "Fee Distribution",
+        "state_update_descriptions": [
+          "Fees are distributed to the SBR stakers and the Stability Pool.",
+          "SBD tokens are minted to this contract to distribute fee",
+          "SBD tokens are burned to this contract for refund"
+        ]
+      },
+      {
+        "category": "Liquidation Snapshot State",
+        "state_update_descriptions": [
+          "liquidationSnapshots[_safeId].debtPerCollateralSnapshot is updated",
+          "liquidationSnapshots[_safeId].collateralPerCollateralSnapshot is updated"
+        ]
+      },
+      {
+        "category": "Total Collateral",
+        "state_update_descriptions": [
+          "totalCollateral is updated"
+        ]
+      }
+    ],
+    "post_execution_contract_state_validation_rules": [
+      {
+        "category": "Borrow Amount",
+        "rule_descriptions": [
+          "safes[safeId].borrowedAmount should be equal to the previous borrowed amount + amount after execution.",
+          "safes[safeId].totalBorrowedAmount should be equal to the previous total borrowed amount + amount after execution.",
+          "totalDebt should be equal to the previous totalDebt + amount after execution.",
+          "The borrower's SBD token balance should increase by _amountToBorrow. Need to query sbdToken.balanceOf(msg.sender) before and after the transaction to validate."
+        ]
+      },
+      {
+        "category": "Queue Position",
+        "rule_descriptions": [
+          "The position of safeId in safesOrderedForRedemption should reflect the new weight of the safe.",
+          "The position of safeId in safesOrderedForLiquidation should reflect the new ratio (borrowedAmount / collateralAmount) of the safe."
+        ]
+      },
+      {
+        "category": "Shielding Rate",
+        "rule_descriptions": [
+          "If shieldingRate is greater than 0, feePaid should be greater than zero",
+          "If shieldingRate is equal to 0, feePaid should be equal to zero"
+        ]
+      },
+      {
+        "category": "Safe Ownership",
+        "rule_descriptions": [
+          "ownerOf(safeId) should still return msg.sender after the borrow operation."
+        ]
+      }
+    ]
+  },
+  "action_execution": {
+    "action_name": "borrow",
+    "contract_name": "StableBaseCDP",
+    "function_name": "borrow",
+    "does_register_new_identifier": false,
+    "new_identifiers": [],
+    "all_state_updates": [
+      {
+        "contract_name": "StableBaseCDP",
+        "state_updated": [
+          {
+            "state_variable_name": "_safe.borrowedAmount",
+            "type": "uint256",
+            "summary_of_update": "Increase the borrowed amount of the safe by debtIncrease.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "_safe.totalBorrowedAmount",
+            "type": "uint256",
+            "summary_of_update": "Increase the total borrowed amount of the safe by debtIncrease.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "liquidationSnapshot.debtPerCollateralSnapshot",
+            "type": "uint256",
+            "summary_of_update": "Update debtPerCollateralSnapshot with cumulativeDebtPerUnitCollateral.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "_safe.collateralAmount",
+            "type": "uint256",
+            "summary_of_update": "Increase collateral amount of safe by collateralIncrease.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "liquidationSnapshot.collateralPerCollateralSnapshot",
+            "type": "uint256",
+            "summary_of_update": "Update collateralPerCollateralSnapshot with cumulativeCollateralPerUnitCollateral.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "totalCollateral",
+            "type": "uint256",
+            "summary_of_update": "Increase totalCollateral by collateralIncrease.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "totalDebt",
+            "type": "uint256",
+            "summary_of_update": "Increase totalDebt by debtIncrease.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "safe.weight",
+            "type": "uint256",
+            "summary_of_update": "Sets the safe weight to shieldingRate when it's the first borrow and there are no existing borrowings.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "safe.borrowedAmount == 0",
+              "_minFeeWeightNode == 0"
+            ]
+          },
+          {
+            "state_variable_name": "safe.weight",
+            "type": "uint256",
+            "summary_of_update": "Adjusts the safe weight based on the minimum existing fee when it's the first borrow and there are existing borrowings.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "safe.borrowedAmount == 0",
+              "_minFeeWeightNode != 0"
+            ]
+          },
+          {
+            "state_variable_name": "safe.weight",
+            "type": "uint256",
+            "summary_of_update": "Updates the safe weight by calculating a new fee weight based on the shielding rate relative to the minimum existing fee.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "safe.borrowedAmount != 0",
+              "shieldingRate > 0"
+            ]
+          },
+          {
+            "state_variable_name": "safe.borrowedAmount",
+            "type": "uint256",
+            "summary_of_update": "Increases the borrowed amount of the safe.",
+            "has_conditional_updates": false,
+            "conditions": []
+          },
+          {
+            "state_variable_name": "safe.totalBorrowedAmount",
+            "type": "uint256",
+            "summary_of_update": "Increases the total borrowed amount of the safe.",
+            "has_conditional_updates": false,
+            "conditions": []
+          },
+          {
+            "state_variable_name": "safe.feePaid",
+            "type": "uint256",
+            "summary_of_update": "Increases the fee paid by the safe.",
+            "has_conditional_updates": false,
+            "conditions": []
+          },
+          {
+            "state_variable_name": "feePaid",
+            "type": "uint256",
+            "summary_of_update": "Distributes fees and gets the fee paid and the amount that can be refunded.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "_shieldingFee > 0"
+            ]
+          },
+          {
+            "state_variable_name": "canRefund",
+            "type": "uint256",
+            "summary_of_update": "Distributes fees and gets the fee paid and the amount that can be refunded.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "_shieldingFee > 0"
+            ]
+          },
+          {
+            "state_variable_name": "totalDebt",
+            "type": "uint256",
+            "summary_of_update": "Updates the total debt of the protocol.",
+            "has_conditional_updates": false,
+            "conditions": []
+          }
+        ]
+      },
+      {
+        "contract_name": "StableBaseCDP",
+        "state_updated": [
+          {
+            "state_variable_name": "sbdToken",
+            "type": "IMintableToken",
+            "summary_of_update": "Mints SBD tokens to the contract if mint is true.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "mint"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "DFIREStaking",
+        "state_updated": [
+          {
+            "state_variable_name": "rewardToken",
+            "type": "IERC20",
+            "summary_of_update": "Transfers reward tokens from the message sender to the contract, conditional on total stake being non-zero and the DFIREStaking contract's ability to receive rewards. This is part of the fee distribution.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "_shieldingFee > 0",
+              "dfireTokenStaking.addReward is called",
+              "totalStake != 0",
+              "sbrStakingPoolCanReceiveRewards"
+            ]
+          },
+          {
+            "state_variable_name": "totalRewardPerToken",
+            "type": "uint256",
+            "summary_of_update": "Increases the total reward per token, conditional on total stake being non-zero and the DFIREStaking contract's ability to receive rewards. This is part of the fee distribution.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "_shieldingFee > 0",
+              "dfireTokenStaking.addReward is called",
+              "totalStake != 0",
+              "sbrStakingPoolCanReceiveRewards"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "StabilityPool",
+        "state_updated": [
+          {
+            "state_variable_name": "stakingToken",
+            "type": "IERC20",
+            "summary_of_update": "Transfers staking tokens from the message sender to the contract, conditional on total staked raw being non-zero and the stability pool's ability to receive rewards. This is part of the fee distribution.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "_shieldingFee > 0",
+              "stabilityPool.addReward is called",
+              "totalStakedRaw != 0",
+              "stabilityPoolCanReceiveRewards"
+            ]
+          },
+          {
+            "state_variable_name": "totalRewardPerToken",
+            "type": "uint256",
+            "summary_of_update": "Increases the total reward per token for the stability pool, conditional on total staked raw being non-zero and the stability pool's ability to receive rewards. This is part of the fee distribution.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "_shieldingFee > 0",
+              "stabilityPool.addReward is called",
+              "totalStakedRaw != 0",
+              "stabilityPoolCanReceiveRewards"
+            ]
+          },
+          {
+            "state_variable_name": "rewardLoss",
+            "type": "uint256",
+            "summary_of_update": "Updates reward loss for the stability pool, conditional on total staked raw being non-zero and the stability pool's ability to receive rewards. This is part of the fee distribution.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "_shieldingFee > 0",
+              "stabilityPool.addReward is called",
+              "totalStakedRaw != 0",
+              "stabilityPoolCanReceiveRewards"
+            ]
+          },
+          {
+            "state_variable_name": "sbrRewardDistributionStatus",
+            "type": "SBRRewardDistribution",
+            "summary_of_update": "Adds SBR rewards to the stability pool if the distribution has not ended, conditional on total staked raw being non-zero and the stability pool's ability to receive rewards. This is part of the fee distribution.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "_shieldingFee > 0",
+              "stabilityPool.addReward is called",
+              "totalStakedRaw != 0",
+              "sbrRewardDistributionStatus != SBRRewardDistribution.ENDED",
+              "stabilityPoolCanReceiveRewards"
+            ]
+          },
+          {
+            "state_variable_name": "lastSBRRewardDistributedTime",
+            "type": "uint256",
+            "summary_of_update": "Updates the last SBR reward distribution time, conditional on total staked raw being non-zero and the stability pool's ability to receive rewards. This is part of the fee distribution.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "_shieldingFee > 0",
+              "stabilityPool.addReward is called",
+              "sbrRewardDistributionStatus == SBRRewardDistribution.STARTED",
+              "stabilityPoolCanReceiveRewards"
+            ]
+          },
+          {
+            "state_variable_name": "sbrRewardDistributionStatus",
+            "type": "SBRRewardDistribution",
+            "summary_of_update": "Sets SBR reward distribution status to ENDED if the end time is reached, conditional on total staked raw being non-zero and the stability pool's ability to receive rewards. This is part of the fee distribution.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "_shieldingFee > 0",
+              "stabilityPool.addReward is called",
+              "sbrRewardDistributionStatus == SBRRewardDistribution.STARTED",
+              "block.timestamp > sbrRewardDistributionEndTime",
+              "stabilityPoolCanReceiveRewards"
+            ]
+          },
+          {
+            "state_variable_name": "totalSbrRewardPerToken",
+            "type": "uint256",
+            "summary_of_update": "Increases the total SBR reward per token, conditional on total staked raw being non-zero and the stability pool's ability to receive rewards. This is part of the fee distribution.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "_shieldingFee > 0",
+              "stabilityPool.addReward is called",
+              "sbrRewardDistributionStatus == SBRRewardDistribution.STARTED",
+              "totalStakedRaw > 0",
+              "stabilityPoolCanReceiveRewards"
+            ]
+          },
+          {
+            "state_variable_name": "sbrRewardLoss",
+            "type": "uint256",
+            "summary_of_update": "Updates SBR reward loss, conditional on total staked raw being non-zero and the stability pool's ability to receive rewards. This is part of the fee distribution.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "_shieldingFee > 0",
+              "stabilityPool.addReward is called",
+              "sbrRewardDistributionStatus == SBRRewardDistribution.STARTED",
+              "totalStakedRaw > 0",
+              "stabilityPoolCanReceiveRewards"
+            ]
+          },
+          {
+            "state_variable_name": "lastSBRRewardDistributedTime",
+            "type": "uint256",
+            "summary_of_update": "Sets the last SBR reward distribution time, conditional on the stability pool's ability to receive rewards. This is part of the fee distribution.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "_shieldingFee > 0",
+              "stabilityPool.addReward is called",
+              "sbrRewardDistributionStatus == SBRRewardDistribution.NOT_STARTED",
+              "stabilityPoolCanReceiveRewards"
+            ]
+          },
+          {
+            "state_variable_name": "sbrRewardDistributionEndTime",
+            "type": "uint256",
+            "summary_of_update": "Sets the SBR reward distribution end time, conditional on the stability pool's ability to receive rewards. This is part of the fee distribution.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "_shieldingFee > 0",
+              "stabilityPool.addReward is called",
+              "sbrRewardDistributionStatus == SBRRewardDistribution.NOT_STARTED",
+              "stabilityPoolCanReceiveRewards"
+            ]
+          },
+          {
+            "state_variable_name": "sbrRewardDistributionStatus",
+            "type": "SBRRewardDistribution",
+            "summary_of_update": "Sets SBR reward distribution status to STARTED, conditional on the stability pool's ability to receive rewards. This is part of the fee distribution.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "_shieldingFee > 0",
+              "stabilityPool.addReward is called",
+              "sbrRewardDistributionStatus == SBRRewardDistribution.NOT_STARTED",
+              "stabilityPoolCanReceiveRewards"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "StableBaseCDP",
+        "state_updated": [
+          {
+            "state_variable_name": "sbdToken",
+            "type": "IMintableToken",
+            "summary_of_update": "Burns SBD tokens from the contract if mint is true and canRefund is greater than 0.",
+            "has_conditional_updates": true,
+            "conditions": [
+              "mint",
+              "canRefund > 0"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "OrderedDoublyLinkedList",
+        "state_updated": [
+          {
+            "state_variable_name": "head",
+            "type": "uint256",
+            "summary_of_update": "Updates the head of the doubly linked list, potentially changing the order based on the upsert operation triggered by safesOrderedForRedemption.",
+            "has_conditional_updates": false,
+            "conditions": [
+              "safesOrderedForRedemption.upsert is called"
+            ]
+          },
+          {
+            "state_variable_name": "tail",
+            "type": "uint256",
+            "summary_of_update": "Updates the tail of the doubly linked list, potentially changing the order based on the upsert operation triggered by safesOrderedForRedemption.",
+            "has_conditional_updates": false,
+            "conditions": [
+              "safesOrderedForRedemption.upsert is called"
+            ]
+          },
+          {
+            "state_variable_name": "nodes",
+            "type": "IDoublyLinkedList.Node",
+            "summary_of_update": "Updates the nodes in the doubly linked list, inserting or updating a node with the safeId and its weight for redemption queue.",
+            "has_conditional_updates": false,
+            "conditions": [
+              "safesOrderedForRedemption.upsert is called"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "OrderedDoublyLinkedList",
+        "state_updated": [
+          {
+            "state_variable_name": "head",
+            "type": "uint256",
+            "summary_of_update": "Updates the head of the doubly linked list, potentially changing the order based on the upsert operation triggered by safesOrderedForLiquidation.",
+            "has_conditional_updates": false,
+            "conditions": [
+              "safesOrderedForLiquidation.upsert is called"
+            ]
+          },
+          {
+            "state_variable_name": "tail",
+            "type": "uint256",
+            "summary_of_update": "Updates the tail of the doubly linked list, potentially changing the order based on the upsert operation triggered by safesOrderedForLiquidation.",
+            "has_conditional_updates": false,
+            "conditions": [
+              "safesOrderedForLiquidation.upsert is called"
+            ]
+          },
+          {
+            "state_variable_name": "nodes",
+            "type": "IDoublyLinkedList.Node",
+            "summary_of_update": "Updates the nodes in the doubly linked list, inserting or updating a node with the safeId and its liquidation ratio for liquidation queue.",
+            "has_conditional_updates": false,
+            "conditions": [
+              "safesOrderedForLiquidation.upsert is called"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
