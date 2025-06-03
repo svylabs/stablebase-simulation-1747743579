@@ -30,7 +30,7 @@ export class ContractSnapshotProvider implements SnapshotProvider {
     async snapshot(): Promise<Snapshot> {   
         const snapshot: Snapshot = {
             contractSnapshot: {},
-            actorSnapshot: {}
+            accountSnapshot: {}
         };
         const contractSnapshot = {};
         
