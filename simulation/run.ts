@@ -44,7 +44,7 @@ async function main() {
     const snapshotProvider = new ContractSnapshotProvider(contracts, actors);
     const snapshot = await snapshotProvider.snapshot();
     console.log(snapshot);
-    const runner = new Runner(actors, snapshotProvider, config.options);
+    const runner = new Runner(contracts, actors, snapshotProvider, config.options);
     await runner.run();
 }
 
