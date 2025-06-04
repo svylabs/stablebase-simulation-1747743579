@@ -1,133 +1,109 @@
 import { ethers } from "ethers";
-import { Actor, RunContext, Snapshot, Action } from "@svylabs/ilumia";
 import { expect } from 'chai';
-import { Interface } from "ethers";
+import { Action, Actor, RunContext, Snapshot } from "@svylabs/ilumia";
 
 export class BorrowAction extends Action {
-  private contract: ethers.Contract;
+    contract: ethers.Contract;
 
-  constructor(contract: ethers.Contract) {
-    super("BorrowAction");
-    this.contract = contract;
-  }
-
-  async initialize(
-    context: RunContext,
-    actor: Actor,
-    currentSnapshot: Snapshot
-  ): Promise<[[bigint, bigint, bigint, bigint, bigint], Record<string, any>]> {
-    const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
-    const safeIds = Object.keys(stableBaseCDPSnapshot.safes).map(Number);
-
-    if (safeIds.length === 0) {
-      throw new Error("No safes available to borrow from.");
+    constructor(contract: ethers.Contract) {
+        super("BorrowAction");
+        this.contract = contract;
     }
 
-    const safeId = BigInt(context.prng.pick(safeIds));
-    const safe = stableBaseCDPSnapshot.safes[safeId];
+    async initialize(
+        context: RunContext,
+        actor: Actor,
+        currentSnapshot: Snapshot
+    ): Promise<[any, Record<string, any>]> {
+        const safeId = BigInt(actor.identifiers['safeId']);
+        const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
+        const safe = stableBaseCDPSnapshot.safes[safeId];
+        const price = BigInt(1000000000); // Assuming price is fixed for now
+        const liquidationRatio = BigInt(15000);
+        const PRECISION = BigInt(1000000000);
+        const BASIS_POINTS_DIVISOR = BigInt(10000);
+        const MINIMUM_DEBT = BigInt(1000000000000000000); // 1 SBD
 
-    // Fetch necessary values for calculating maxBorrowAmount. Using snapshot data
-    const price = BigInt(1000); // Assuming a fixed price for simplicity since the oracle is mocked.  Replace with priceOracle.fetchPrice() equivalent using snapshot data if needed.
-    const liquidationRatio = BigInt(11000); // Assuming liquidationRatio is 110% in basis points.
-    const BASIS_POINTS_DIVISOR = BigInt(10000);
-    const PRECISION = BigInt(1000000000);
-    const MINIMUM_DEBT = BigInt(100);
+        const maxBorrowAmount = ((safe.collateralAmount * price * BASIS_POINTS_DIVISOR) / liquidationRatio) / PRECISION;
+        const borrowedAmount = safe.borrowedAmount;
 
-    const maxBorrowAmount = ((safe.collateralAmount * price * BASIS_POINTS_DIVISOR) / liquidationRatio) / PRECISION;
+        let amount = BigInt(context.prng.next()) % (maxBorrowAmount - borrowedAmount);
+        if (amount < MINIMUM_DEBT) {
+            amount = MINIMUM_DEBT;
+        }
+        const shieldingRate = BigInt(context.prng.next()) % BASIS_POINTS_DIVISOR; // Up to 100%
+        const nearestSpotInLiquidationQueue = BigInt(0);
+        const nearestSpotInRedemptionQueue = BigInt(0);
 
-    let amount = BigInt(Math.floor(context.prng.next() % Number(maxBorrowAmount - safe.borrowedAmount)));
+        const params = [
+            safeId,
+            amount,
+            shieldingRate,
+            nearestSpotInLiquidationQueue,
+            nearestSpotInRedemptionQueue
+        ];
 
-    if (amount <= BigInt(0)) {
-        amount = MINIMUM_DEBT; // Ensure amount is at least the minimum debt.
+        return [params, {}];
     }
 
-    if (safe.borrowedAmount + amount < MINIMUM_DEBT) {
-        amount = MINIMUM_DEBT - safe.borrowedAmount; // Adjust to meet minimum debt after borrowing.
+    async execute(
+        context: RunContext,
+        actor: Actor,
+        currentSnapshot: Snapshot,
+        actionParams: any
+    ): Promise<Record<string, any> | void> {
+        const [safeId, amount, shieldingRate, nearestSpotInLiquidationQueue, nearestSpotInRedemptionQueue] = actionParams;
+
+        const tx = await this.contract.connect(actor.account.value).borrow(
+            safeId,
+            amount,
+            shieldingRate,
+            nearestSpotInLiquidationQueue,
+            nearestSpotInRedemptionQueue
+        );
+
+        await tx.wait();
     }
 
-    if (amount > maxBorrowAmount - safe.borrowedAmount) {
-        amount = maxBorrowAmount - safe.borrowedAmount; // Cap the amount to the maximum borrowable.
+    async validate(
+        context: RunContext,
+        actor: Actor,
+        previousSnapshot: Snapshot,
+        newSnapshot: Snapshot,
+        actionParams: any
+    ): Promise<boolean> {
+        const [safeId, amount, shieldingRate, nearestSpotInLiquidationQueue, nearestSpotInRedemptionQueue] = actionParams;
+        const safeIdBigInt = BigInt(safeId);
+        const amountBigInt = BigInt(amount);
+        const shieldingRateBigInt = BigInt(shieldingRate);
+
+        const previousSafe = previousSnapshot.contractSnapshot.stableBaseCDP.safes[safeIdBigInt];
+        const newSafe = newSnapshot.contractSnapshot.stableBaseCDP.safes[safeIdBigInt];
+
+        // Core Borrowing and Accounting
+        expect(newSafe.borrowedAmount).to.equal(previousSafe.borrowedAmount + amountBigInt, "Borrowed amount should increase by amount");
+        expect(newSafe.totalBorrowedAmount).to.equal(previousSafe.totalBorrowedAmount + amountBigInt, "Total borrowed amount should increase by amount");
+
+        const _shieldingFee = (amountBigInt * shieldingRateBigInt) / BigInt(10000);
+        expect(newSafe.feePaid).to.equal(previousSafe.feePaid + _shieldingFee, "Fee paid should increase by shielding fee");
+
+        const previousTotalDebt = previousSnapshot.contractSnapshot.stableBaseCDP.totalDebt;
+        const newTotalDebt = newSnapshot.contractSnapshot.stableBaseCDP.totalDebt;
+
+        expect(newTotalDebt).to.equal(previousTotalDebt + amountBigInt, "Total debt should increase by amount");
+
+        const dfidTokenAddress = (context.contracts['dfidToken'] as ethers.Contract).target;
+        const previousTokenBalance = previousSnapshot.accountSnapshot[dfidTokenAddress] || BigInt(0);
+        const newTokenBalance = newSnapshot.accountSnapshot[dfidTokenAddress] || BigInt(0);
+
+        // Calculate the amount to borrow after shielding fee
+        const _amountToBorrow = amountBigInt - _shieldingFee;
+
+         // Verify that the contract's SBD balance increased by the amount borrowed.
+        expect(newTokenBalance).to.equal(previousTokenBalance + _amountToBorrow, "Contract SBD balance should increase by amountToBorrow");
+
+        // Fee Distribution validation will require event parsing to get accurate fee amounts.
+
+        return true;
     }
-    if (amount <= BigInt(0)) {
-      amount = MINIMUM_DEBT
-    }
-
-    const shieldingRate = BigInt(Math.floor(context.prng.next() % 1000)); // Up to 10% shielding rate.
-    const nearestSpotInLiquidationQueue = BigInt(0); // Assuming head of queue.
-    const nearestSpotInRedemptionQueue = BigInt(0); // Assuming head of queue.
-
-    const actionParams: [bigint, bigint, bigint, bigint, bigint] = [
-      safeId,
-      amount,
-      shieldingRate,
-      nearestSpotInLiquidationQueue,
-      nearestSpotInRedemptionQueue,
-    ];
-
-    return [actionParams, {}];
-  }
-
-  async execute(
-    context: RunContext,
-    actor: Actor,
-    currentSnapshot: Snapshot,
-    actionParams: [bigint, bigint, bigint, bigint, bigint]
-  ): Promise<Record<string, any> | void> {
-    const [safeId, amount, shieldingRate, nearestSpotInLiquidationQueue, nearestSpotInRedemptionQueue] = actionParams;
-    const signer = actor.account.value.connect(this.contract.runner!);
-
-    try {
-      const tx = await this.contract.connect(signer).borrow(
-        safeId,
-        amount,
-        shieldingRate,
-        nearestSpotInLiquidationQueue,
-        nearestSpotInRedemptionQueue
-      );
-      await tx.wait();
-    } catch (e) {
-      console.error(e);
-      throw e;
-    }
-  }
-
-  async validate(
-    context: RunContext,
-    actor: Actor,
-    previousSnapshot: Snapshot,
-    newSnapshot: Snapshot,
-    actionParams: [bigint, bigint, bigint, bigint, bigint]
-  ): Promise<boolean> {
-    const [safeId, amount, shieldingRate, nearestSpotInLiquidationQueue, nearestSpotInRedemptionQueue] = actionParams;
-    const previousStableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
-    const newStableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
-
-    const previousSafe = previousStableBaseCDPSnapshot.safes[safeId];
-    const newSafe = newStableBaseCDPSnapshot.safes[safeId];
-
-    // Core Borrowing and Accounting validations
-    expect(newSafe.borrowedAmount).to.equal(previousSafe.borrowedAmount + amount, "Borrowed amount should increase by the amount borrowed.");
-    expect(newSafe.totalBorrowedAmount).to.equal(previousSafe.totalBorrowedAmount + amount, "Total borrowed amount should increase by the amount borrowed.");
-    expect(newStableBaseCDPSnapshot.totalDebt).to.equal(previousStableBaseCDPSnapshot.totalDebt + amount, "Total debt should increase by the amount borrowed.");
-
-    // Fee calculation and validation would require replicating the contract logic.
-    // Skipping detailed fee validation for brevity, but ensuring feePaid is non-decreasing.
-    expect(newSafe.feePaid).to.be.gte(previousSafe.feePaid, "Fee paid should increase or remain the same.");
-
-    // Token balance validation (SBD token minted to borrower).
-    const previousAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-    const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-
-    // Calculate the net increase in account balance
-    const expectedAccountBalanceIncrease = amount - (amount * shieldingRate / BigInt(10000)); // amount - _shieldingFee
-    expect(newAccountBalance - previousAccountBalance).to.be.gte(expectedAccountBalanceIncrease, "Account balance should increase after borrowing.");
-
-    //Contract Address Token Balance Validation - Fee will be minted to the contract.
-    const previousSBDTokenBalance = previousSnapshot.accountSnapshot[this.contract.target] || BigInt(0);
-    const newSBDTokenBalance = newSnapshot.accountSnapshot[this.contract.target] || BigInt(0);
-    const fee = (amount * shieldingRate) / BigInt(10000);
-    expect(newSBDTokenBalance - previousSBDTokenBalance).to.be.lte(fee, "Contract SBD balance should increase after minting fee.");
-
-    return true;
-  }
-} 
+}
