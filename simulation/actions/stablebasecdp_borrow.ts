@@ -1,15 +1,13 @@
-import { Actor, RunContext, Snapshot, Action } from '@svylabs/ilumia';
-import { ethers } from 'ethers';
+import { ethers } from "ethers";
 import { expect } from 'chai';
+import { Action, Actor, RunContext, Snapshot } from "@svylabs/ilumia";
 
-class BorrowAction extends Action {
-  private contract: ethers.Contract;
-  private BASIS_POINTS_DIVISOR: BigInt;
+export class BorrowAction extends Action {
+  contract: ethers.Contract;
 
   constructor(contract: ethers.Contract) {
-    super('BorrowAction');
+    super("BorrowAction");
     this.contract = contract;
-    this.BASIS_POINTS_DIVISOR = BigInt(10000);
   }
 
   async initialize(
@@ -17,48 +15,39 @@ class BorrowAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot
   ): Promise<[any, Record<string, any>]> {
-    const safeId = actor.identifiers.safeId;
-    if (!safeId) {
-      throw new Error('SafeId is required');
-    }
-
     const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
-    if (!stableBaseCDPSnapshot) {
-      throw new Error('StableBaseCDP snapshot not found');
+    const safeIds = Object.keys(stableBaseCDPSnapshot.safes).map(Number);
+    const ownerSafes = safeIds.filter((safeId) => stableBaseCDPSnapshot.owners[safeId] === actor.account.address);
+
+    if (ownerSafes.length === 0) {
+      throw new Error("No Safe owned by the actor");
     }
 
-    const safe = stableBaseCDPSnapshot.safes[safeId];
-    if (!safe) {
-      throw new Error(`Safe with id ${safeId} not found`);
+    const safeId = ownerSafes[Math.floor(context.prng.next() % ownerSafes.length)];
+
+    // Validate ownership before proceeding
+    if (stableBaseCDPSnapshot.owners[safeId] !== actor.account.address) {
+      throw new Error("Actor does not own the selected Safe.");
     }
 
-    const currentBorrowedAmount = safe.borrowedAmount;
+    // Example bounds based on snapshot (replace with actual bounds)
+    const maxBorrowAmount = 1000n; // Example max, fetch from snapshot if available
+    const maxShieldingRate = 10000n; // Example max (basis points), fetch from snapshot if available
 
-    // Generate random amount to borrow, ensuring it meets the minimum debt requirement
-    const minBorrowAmount = BigInt(1);
-    // Example maximum value, should be based on collateral and liquidation ratio
-    const maxBorrowAmount = BigInt(1000000000000000000);
+    const amount = BigInt(Math.floor(context.prng.next() % Number(maxBorrowAmount)) + 1); // Non-zero amount
+    const shieldingRate = BigInt(Math.floor(context.prng.next() % Number(maxShieldingRate))); // Up to 100%
+    const nearestSpotInLiquidationQueue = BigInt(Math.floor(context.prng.next() % 100)); // Example
+    const nearestSpotInRedemptionQueue = BigInt(Math.floor(context.prng.next() % 100)); // Example
 
-    let amount = BigInt(Math.floor(context.prng.next() % Number(maxBorrowAmount)));
-    if (amount === BigInt(0)) {
-      amount = minBorrowAmount;
-    }
+    const actionParams = {
+      safeId: safeId,
+      amount: amount,
+      shieldingRate: shieldingRate,
+      nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue,
+      nearestSpotInRedemptionQueue: nearestSpotInRedemptionQueue,
+    };
 
-    const shieldingRate = BigInt(Math.floor(context.prng.next() % 10000)); // Basis points, 0-10000 (0%-100%)
-    const nearestSpotInLiquidationQueue = BigInt(0); // Can be 0 if unknown
-    const nearestSpotInRedemptionQueue = BigInt(0); // Can be 0 if unknown
-
-    const _shieldingFee = (amount * shieldingRate) / this.BASIS_POINTS_DIVISOR;
-
-    const parameters = [
-      safeId,
-      amount,
-      shieldingRate,
-      nearestSpotInLiquidationQueue,
-      nearestSpotInRedemptionQueue,
-    ];
-
-    return [parameters, {}];
+    return [actionParams, {}];
   }
 
   async execute(
@@ -67,23 +56,15 @@ class BorrowAction extends Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<Record<string, any> | void> {
-    const safeId = actionParams[0];
-    const amount = actionParams[1];
-    const shieldingRate = actionParams[2];
-    const nearestSpotInLiquidationQueue = actionParams[3];
-    const nearestSpotInRedemptionQueue = actionParams[4];
-
-    const tx = await this.contract
-      .connect(actor.account.value as unknown as ethers.Signer)
+    return this.contract
+      .connect(actor.account.value)
       .borrow(
-        safeId,
-        amount,
-        shieldingRate,
-        nearestSpotInLiquidationQueue,
-        nearestSpotInRedemptionQueue
+        actionParams.safeId,
+        actionParams.amount,
+        actionParams.shieldingRate,
+        actionParams.nearestSpotInLiquidationQueue,
+        actionParams.nearestSpotInRedemptionQueue
       );
-
-    await tx.wait();
   }
 
   async validate(
@@ -93,72 +74,97 @@ class BorrowAction extends Action {
     newSnapshot: Snapshot,
     actionParams: any
   ): Promise<boolean> {
-    const safeId = actionParams[0];
-    const amount = actionParams[1];
-    const shieldingRate = actionParams[2];
+    const safeId = actionParams.safeId;
+    const amount = actionParams.amount;
+    const shieldingRate = actionParams.shieldingRate;
 
-    const previousStableBaseCDP = previousSnapshot.contractSnapshot.stableBaseCDP;
-    const newStableBaseCDP = newSnapshot.contractSnapshot.stableBaseCDP;
+    const previousStableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
+    const newStableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
+    const previousStabilityPoolSnapshot = previousSnapshot.contractSnapshot.stabilityPool;
+    const newStabilityPoolSnapshot = newSnapshot.contractSnapshot.stabilityPool;
 
-    if (!previousStableBaseCDP || !newStableBaseCDP) {
-      throw new Error('StableBaseCDP snapshot not found');
+    const previousSafes = previousStableBaseCDPSnapshot.safes;
+    const newSafes = newStableBaseCDPSnapshot.safes;
+
+    const previousSafe = previousSafes[safeId];
+    const newSafe = newSafes[safeId];
+
+    const BASIS_POINTS_DIVISOR = 10000n;
+    const _shieldingFee = (amount * shieldingRate) / BASIS_POINTS_DIVISOR;
+
+    // Assuming canRefund is zero for simplicity, as full logic requires contract interaction
+    const canRefund = 0n;
+    const _amountToBorrow = amount - _shieldingFee + canRefund;
+
+    // Token Balance
+    const borrowerAddress = actor.account.address;
+    const previousBorrowerBalance = previousSnapshot.accountSnapshot[borrowerAddress] || 0n;
+    const newBorrowerBalance = newSnapshot.accountSnapshot[borrowerAddress] || 0n;
+    expect(newBorrowerBalance - previousBorrowerBalance).to.equal(_amountToBorrow, "Borrower SBD balance should increase by the borrowed amount minus the shielding fee.");
+
+    // Debt Tracking
+    expect(newStableBaseCDPSnapshot.totalDebt - previousStableBaseCDPSnapshot.totalDebt).to.equal(amount, "Total debt in the StableBaseCDP contract should increase by the borrowed amount.");
+
+    // Safe State
+    expect(newSafe.borrowedAmount - previousSafe.borrowedAmount).to.equal(amount, "Safe's borrowedAmount should increase by the borrowed amount.");
+    expect(newSafe.totalBorrowedAmount - previousSafe.totalBorrowedAmount).to.equal(amount, "Safe's totalBorrowedAmount should increase by the borrowed amount.");
+    expect(newSafe.feePaid - previousSafe.feePaid).to.equal(_shieldingFee, "Safe's feePaid should increase by the shielding fee amount.");
+
+    // Cumulative Debt and Collateral
+    if (previousStableBaseCDPSnapshot.cumulativeDebtPerUnitCollateral !== newStableBaseCDPSnapshot.cumulativeDebtPerUnitCollateral) {
+      // Validate _safe.borrowedAmount, _safe.totalBorrowedAmount, _safe.collateralAmount, totalDebt
+      const liquidationSnapshot = previousStableBaseCDPSnapshot.liquidationSnapshots[safeId];
+      if (liquidationSnapshot.collateralPerCollateralSnapshot !== previousStableBaseCDPSnapshot.cumulativeCollateralPerUnitCollateral) {
+        const debtIncrease = (previousSafe.collateralAmount * (newStableBaseCDPSnapshot.cumulativeDebtPerUnitCollateral - liquidationSnapshot.debtPerCollateralSnapshot)) / 1000000000000000000n; // PRECISION
+        const collateralIncrease = (previousSafe.collateralAmount * (newStableBaseCDPSnapshot.cumulativeCollateralPerUnitCollateral - liquidationSnapshot.collateralPerCollateralSnapshot)) / 1000000000000000000n; // PRECISION
+
+        //Safe
+        expect(newSafe.borrowedAmount - previousSafe.borrowedAmount).to.equal(debtIncrease + amount, "Safe's borrowedAmount should increase by debtIncrease.");
+        expect(newSafe.totalBorrowedAmount - previousSafe.totalBorrowedAmount).to.equal(debtIncrease + amount, "Safe's totalBorrowedAmount should increase by debtIncrease.");
+        expect(newSafe.collateralAmount - previousSafe.collateralAmount).to.equal(collateralIncrease, "Safe's collateralAmount should increase by collateralIncrease.");
+
+        //liquidationSnapshot
+        expect(liquidationSnapshot.debtPerCollateralSnapshot).to.equal(previousStableBaseCDPSnapshot.cumulativeDebtPerUnitCollateral, "liquidationSnapshot.debtPerCollateralSnapshot should equal cumulativeDebtPerUnitCollateral");
+        expect(liquidationSnapshot.collateralPerCollateralSnapshot).to.equal(previousStableBaseCDPSnapshot.cumulativeCollateralPerUnitCollateral, "liquidationSnapshot.collateralPerCollateralSnapshot should equal cumulativeCollateralPerUnitCollateral");
+
+        //Total collateral and debt
+        expect(newStableBaseCDPSnapshot.totalCollateral - previousStableBaseCDPSnapshot.totalCollateral).to.equal(collateralIncrease, "totalCollateral should increase by collateralIncrease");
+        expect(newStableBaseCDPSnapshot.totalDebt - previousStableBaseCDPSnapshot.totalDebt).to.equal(debtIncrease + amount, "totalDebt should increase by debtIncrease");
+      }
     }
 
-    // Validate Safe State
-    const previousSafe = previousStableBaseCDP.safes[safeId];
-    const newSafe = newStableBaseCDP.safes[safeId];
-
-    if (!previousSafe || !newSafe) {
-      throw new Error(`Safe with id ${safeId} not found`);
+    // Protocol Mode Transition (Example validation)
+    if (previousStableBaseCDPSnapshot.mode === 0 && newStableBaseCDPSnapshot.mode === 1) {
+      // Assuming 0 is BOOTSTRAP and 1 is NORMAL.  Replace with actual enum values.
+      expect(previousStableBaseCDPSnapshot.totalDebt).to.be.lessThan(10000n); // Example threshold
+      expect(newStableBaseCDPSnapshot.totalDebt).to.be.greaterThanOrEqual(10000n); // Example threshold
     }
 
-    const _shieldingFee = (amount * shieldingRate) / this.BASIS_POINTS_DIVISOR;
-    const expectedBorrowedAmount = previousSafe.borrowedAmount + amount;
-    expect(newSafe.borrowedAmount).to.equal(expectedBorrowedAmount, 'borrowedAmount should increase by the correct amount');
+    // SBD Token Supply (Assuming you can access the sbdToken contract address)
+    const sbdTokenAddress = "0x..."; // Replace with actual SBD token address
+    const previousSBDSupply = previousSnapshot.accountSnapshot[sbdTokenAddress] || 0n;
+    const newSBDSupply = newSnapshot.accountSnapshot[sbdTokenAddress] || 0n;
+    expect(newSBDSupply - previousSBDSupply).to.equal(_amountToBorrow, "SBD token supply should increase by the borrowed amount.");
 
-    const expectedTotalBorrowedAmount = previousSafe.totalBorrowedAmount + amount;
-    expect(newSafe.totalBorrowedAmount).to.equal(expectedTotalBorrowedAmount, 'totalBorrowedAmount should increase by the correct amount');
+    //StabilityPool fee distribution
+    const sbrStakersFee = (_shieldingFee * 1000n) / 10000n;
+    const stabilityPoolFee = _shieldingFee - sbrStakersFee;
 
-    const expectedFeePaid = previousSafe.feePaid + _shieldingFee;
-    expect(newSafe.feePaid).to.equal(expectedFeePaid, 'feePaid should increase by the correct shielding fee amount');
+    // Assuming you have access to dfireTokenStaking and stabilityPool contract addresses from a config or snapshot
+    const dfireTokenStakingAddress = "0x..."; // Replace with actual dfireTokenStaking contract address
+    const stabilityPoolAddress = "0x..."; // Replace with actual stabilityPool contract address
 
-    // Validate Debt and Protocol Mode
-    const expectedTotalDebt = previousStableBaseCDP.totalDebt + amount;
-    expect(newStableBaseCDP.totalDebt).to.equal(expectedTotalDebt, 'totalDebt should increase by the borrowed amount');
+    const previousDfireTokenStakingBalance = previousSnapshot.accountSnapshot[dfireTokenStakingAddress] || 0n;
+    const newDfireTokenStakingBalance = newSnapshot.accountSnapshot[dfireTokenStakingAddress] || 0n;
+    expect(newDfireTokenStakingBalance - previousDfireTokenStakingBalance).to.equal(sbrStakersFee, "dfireTokenStaking balance should increase by sbrStakersFee");
 
-     // Validate account balances
-    const actorAddress = actor.account.address;
-    const previousAccountBalance = previousSnapshot.accountSnapshot[actorAddress] || BigInt(0);
-    const newAccountBalance = newSnapshot.accountSnapshot[actorAddress] || BigInt(0);
-    //Assuming SBD is the token
-    const sbdTokenAddress = "0x..."; // Replace with the actual SBD token address. You may need to fetch it from the contract.
-    const previousSBDAccountBalance = previousSnapshot.contractSnapshot.stableBaseCDP.balances[actorAddress] || BigInt(0);
-    const newSBDAccountBalance = newSnapshot.contractSnapshot.stableBaseCDP.balances[actorAddress] || BigInt(0);
-    const expectedSBDAccountBalance = previousSBDAccountBalance + (amount - _shieldingFee);
+    const previousStabilityPoolBalance = previousSnapshot.accountSnapshot[stabilityPoolAddress] || 0n;
+    const newStabilityPoolBalance = newSnapshot.accountSnapshot[stabilityPoolAddress] || 0n;
+    expect(newStabilityPoolBalance - previousStabilityPoolBalance).to.equal(stabilityPoolFee, "stabilityPool balance should increase by stabilityPoolFee");
 
-    expect(newSBDAccountBalance).to.equal(expectedSBDAccountBalance, 'Account SBD balance should increase by amount - shieldingFee');
 
-    // Validate contract balances
-    const contractAddress = this.contract.target;
-    const previousContractBalance = previousSnapshot.accountSnapshot[contractAddress] || BigInt(0);
-    const newContractBalance = newSnapshot.accountSnapshot[contractAddress] || BigInt(0);
-
-     const previousSBDContractBalance = previousSnapshot.contractSnapshot.stableBaseCDP.balances[contractAddress] || BigInt(0);
-     const newSBDContractBalance = newSnapshot.contractSnapshot.stableBaseCDP.balances[contractAddress] || BigInt(0);
-
-    const expectedSBDContractBalance = previousSBDContractBalance + _shieldingFee;
-    expect(newSBDContractBalance).to.equal(expectedSBDContractBalance, 'Contract SBD balance should increase by shieldingFee');
-
-    // Validate PROTOCOL_MODE
-    if (previousStableBaseCDP.mode === 0 && newStableBaseCDP.totalDebt > BigInt(0)) {
-        expect(newStableBaseCDP.mode).to.equal(1, 'PROTOCOL_MODE should transition from BOOTSTRAP to NORMAL if the debt exceeds the threshold.');
-    }
-
-      // Validate doubly linked lists
-      // Need logic to validate updates in safesOrderedForLiquidation and safesOrderedForRedemption
+    // TODO: Validate safe.weight, and queue updates (liquidation and redemption).
 
     return true;
   }
 }
-
-export default BorrowAction;
