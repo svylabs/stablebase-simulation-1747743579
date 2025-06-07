@@ -1,12 +1,18 @@
 {
   "attributes": [
     {
-      "name": "stakesMapping",
-      "type": "tuple",
+      "name": "rewardSenderActive",
+      "type": "boolean",
+      "contract_function": "rewardSenderActive",
+      "parameters": []
+    },
+    {
+      "name": "stakes",
+      "type": "mapping",
       "contract_function": "stakes",
       "parameters": [
         {
-          "name": "",
+          "name": "user",
           "type": "address",
           "reference": "accountAddress"
         }
@@ -31,6 +37,18 @@
       "parameters": []
     },
     {
+      "name": "stakeByUser",
+      "type": "tuple",
+      "contract_function": "getStake",
+      "parameters": [
+        {
+          "name": "user",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
+    },
+    {
       "name": "userPendingReward",
       "type": "tuple",
       "contract_function": "userPendingReward",
@@ -41,16 +59,10 @@
           "reference": "accountAddress"
         }
       ]
-    },
-    {
-      "name": "rewardSenderActive",
-      "type": "bool",
-      "contract_function": "rewardSenderActive",
-      "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface Stake {\n    stake: bigint;\n    rewardSnapshot: bigint;\n    collateralSnapshot: bigint;\n}\n\ninterface DFIREStakingSnapshot {\n    stakesMapping: { [accountAddress: string]: Stake };\n    totalCollateralPerToken: bigint;\n    totalRewardPerToken: bigint;\n    totalStake: bigint;\n    userPendingReward: [bigint, bigint];\n    rewardSenderActive: boolean;\n}",
-    "interface_name": "DFIREStakingSnapshot"
+    "contract_snapshot_interface_code": "interface DFIREStakingState {\n  rewardSenderActive: boolean;\n  stakes: {\n    [accountAddress: string]: {\n      stake: bigint;\n      rewardSnapshot: bigint;\n      collateralSnapshot: bigint;\n    };\n  };\n  totalCollateralPerToken: bigint;\n  totalRewardPerToken: bigint;\n  totalStake: bigint;\n  stakeByUser: {\n      stake: bigint;\n      rewardSnapshot: bigint;\n      collateralSnapshot: bigint;\n    };\n  userPendingReward: {\n        0: bigint; \n        1: bigint; \n      };\n}",
+    "interface_name": "DFIREStakingState"
   }
 }
