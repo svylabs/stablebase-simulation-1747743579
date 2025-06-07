@@ -1,32 +1,32 @@
 {
   "attributes": [
     {
-      "name": "LastGoodPrice",
-      "type": "uint256",
-      "contract_function": "lastGoodPrice",
-      "parameters": []
-    },
-    {
-      "name": "Price",
-      "type": "uint256",
-      "contract_function": "price",
-      "parameters": []
-    },
-    {
-      "name": "FetchedPrice",
+      "name": "fetchedPrice",
       "type": "uint256",
       "contract_function": "fetchPrice",
       "parameters": []
     },
     {
-      "name": "Owner",
+      "name": "lastGoodPrice",
+      "type": "uint256",
+      "contract_function": "lastGoodPrice",
+      "parameters": []
+    },
+    {
+      "name": "currentPrice",
+      "type": "uint256",
+      "contract_function": "price",
+      "parameters": []
+    },
+    {
+      "name": "owner",
       "type": "address",
       "contract_function": "owner",
       "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface MockPriceOracleState {\n  lastGoodPrice: bigint;\n  price: bigint;\n  fetchedPrice: bigint;\n  owner: string;\n}",
-    "interface_name": "MockPriceOracleState"
+    "contract_snapshot_interface_code": "interface MockPriceOracleSnapshot {\n  fetchedPrice: bigint; // The price fetched from an external source\n  lastGoodPrice: bigint; // The last known good price\n  currentPrice: bigint; // The current price\n  owner: string; // The address of the contract owner\n}",
+    "interface_name": "MockPriceOracleSnapshot"
   }
 }
