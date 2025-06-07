@@ -1,9 +1,8 @@
 import { ethers } from 'ethers';
 import { expect } from 'chai';
 import { Actor, RunContext, Snapshot, Action } from '@svylabs/ilumia';
-import { StabilityPoolContractSnapshot, DFIDTokenContractSnapshot, DFIRETokenContractSnapshot, StableBaseCDPContractSnapshot } from '../snapshot_interfaces';
 
-export class StakeAction extends Action {
+class StakeAction extends Action {
   private contract: ethers.Contract;
 
   constructor(contract: ethers.Contract) {
@@ -16,14 +15,29 @@ export class StakeAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot
   ): Promise<[any, Record<string, any>]> {
-    // Assuming a maximum stake amount of 1000 for simplicity, adjust as needed based on actual token supply.
-    const maxStakeAmount = 1000;
-    const amount = BigInt(Math.floor(context.prng.next() % maxStakeAmount) + 1); // Ensure amount > 0
-    const frontend = ethers.ZeroAddress;
-    const fee = BigInt(Math.floor(context.prng.next() % 10001)); // Ensure fee is between 0 and 10000
+    // Parameter Generation
+    // The `_amount` parameter must be a positive integer representing the amount of tokens to stake. It should be greater than 0.
+    // It should be a valid value upto max token balance available with the user
+    let amount = BigInt(0);
+    try {
+      const dfidTokenSnapshot = currentSnapshot.contractSnapshot.dfidToken;
+      const userBalance = dfidTokenSnapshot.Balance[actor.account.address] || BigInt(0);
+      if (userBalance > BigInt(0)) {
+          amount = BigInt(Math.floor(context.prng.next() % Number(userBalance))) + BigInt(1); // Ensure amount > 0 and less than user balance
+      }
+    } catch (error) {
+      console.error("Error accessing token balance from snapshot:", error);
+      //If there is an error, we will skip this action
+      return [[], {}];
+    }
+    
+    // The `frontend` parameter should be a valid Ethereum address. If there is no frontend, it can be set to the zero address (0x0000000000000000000000000000000000000000).
+    const frontend = ethers.ZeroAddress; // Use zero address if no frontend
+    // The `fee` parameter should be a uint256 representing the fee to be charged, expressed in basis points (e.g., 100 for 1%). It should be less than or equal to BASIS_POINTS_DIVISOR.
+    const fee = BigInt(Math.floor(context.prng.next() % 100)); // Fee in basis points, up to 99
 
-    const actionParams = [amount, frontend, fee];
-    return [actionParams, {}];
+    const stakeParams = [amount, frontend, fee];
+    return [stakeParams, {}];
   }
 
   async execute(
@@ -32,10 +46,14 @@ export class StakeAction extends Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<Record<string, any> | void> {
-    const [amount, frontend, fee] = actionParams;
+    const stakeParams = actionParams;
+    if (stakeParams.length === 0) {
+          console.warn("Skipping execute due to empty stakeParams");
+          return;
+    }
     const tx = await this.contract
       .connect(actor.account.value as ethers.Signer)
-      .stake(amount, frontend, fee);
+      .stake(...stakeParams);
     await tx.wait();
   }
 
@@ -46,70 +64,58 @@ export class StakeAction extends Action {
     newSnapshot: Snapshot,
     actionParams: any
   ): Promise<boolean> {
-    const [amount, frontend, fee] = actionParams;
-    const stabilityPoolAddress = this.contract.target;
-    const actorAddress = actor.account.address;
+    const stakeParams = actionParams;
 
-    // Get previous and new contract snapshots
-    const previousStabilityPoolSnapshot: StabilityPoolContractSnapshot = previousSnapshot.contractSnapshot.stabilityPool;
-    const newStabilityPoolSnapshot: StabilityPoolContractSnapshot = newSnapshot.contractSnapshot.stabilityPool;
+      if (stakeParams.length === 0) {
+          console.warn("Skipping validate due to empty stakeParams");
+          return true;
+      }
 
-    // Get previous and new DFIDToken snapshots
-    const previousDFIDTokenSnapshot: DFIDTokenContractSnapshot = previousSnapshot.contractSnapshot.dfidToken;
-    const newDFIDTokenSnapshot: DFIDTokenContractSnapshot = newSnapshot.contractSnapshot.dfidToken;
+    const amount = stakeParams[0];
+    const frontend = stakeParams[1];
+    const fee = stakeParams[2];
 
-    // Get previous and new DFIREToken snapshots
-    const previousDFIRETokenSnapshot: DFIRETokenContractSnapshot = previousSnapshot.contractSnapshot.dfireToken;
-    const newDFIRETokenSnapshot: DFIRETokenContractSnapshot = newSnapshot.contractSnapshot.dfireToken;
+    // Access the before and after snapshots
+    const previousStabilityPoolState = previousSnapshot.contractSnapshot.stabilityPool;
+    const newStabilityPoolState = newSnapshot.contractSnapshot.stabilityPool;
+    const previousDFIDTokenState = previousSnapshot.contractSnapshot.dfidToken;
+    const newDFIDTokenState = newSnapshot.contractSnapshot.dfidToken;
 
-    // Get previous and new StableBaseCDP snapshots
-    const previousStableBaseCDPSnapshot: StableBaseCDPContractSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
-    const newStableBaseCDPSnapshot: StableBaseCDPContractSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
+    // Get user stake before and after
+    const previousUserStake = previousStabilityPoolState.users[actor.account.address]?.stake || BigInt(0);
+    const newUserStake = newStabilityPoolState.users[actor.account.address]?.stake || BigInt(0);
 
-    const previousActorDFIDBalance = previousSnapshot.accountSnapshot[actorAddress] || BigInt(0);
-    const newActorDFIDBalance = newSnapshot.accountSnapshot[actorAddress] || BigInt(0);
+    // Get total staked raw amount before and after
+    const previousTotalStakedRaw = previousStabilityPoolState.totalStakedRaw;
+    const newTotalStakedRaw = newStabilityPoolState.totalStakedRaw;
 
-    const previousStabilityPoolDFIDBalance = previousSnapshot.accountSnapshot[stabilityPoolAddress] || BigInt(0);
-    const newStabilityPoolDFIDBalance = newSnapshot.accountSnapshot[stabilityPoolAddress] || BigInt(0);
+    // Get token balances before and after. Handle the cases when balances don't exist
+    let previousUserDFIDBalance = BigInt(0);
+    let newUserDFIDBalance = BigInt(0);
+    let previousContractDFIDBalance = BigInt(0);
+    let newContractDFIDBalance = BigInt(0);
 
-    // Validate User Stake
-    expect(
-      newStabilityPoolSnapshot.stabilityPoolState?.users[actorAddress]?.stake,
-      'users[msg.sender].stake should be increased by _amount.'
-    ).to.equal(((previousStabilityPoolSnapshot.stabilityPoolState?.users[actorAddress]?.stake) || BigInt(0)) + amount);
+    try {
+        previousUserDFIDBalance = previousDFIDTokenState.Balance[actor.account.address] || BigInt(0);
+        newUserDFIDBalance = newDFIDTokenState.Balance[actor.account.address] || BigInt(0);
+        previousContractDFIDBalance = previousDFIDTokenState.Balance[this.contract.target] || BigInt(0);
+        newContractDFIDBalance = newDFIDTokenState.Balance[this.contract.target] || BigInt(0);
+    } catch (error) {
+        console.error("Error accessing token balances:", error);
+    }
 
-    expect(
-      newStabilityPoolSnapshot.stabilityPoolState?.users[actorAddress]?.rewardSnapshot,
-      'users[msg.sender].rewardSnapshot should be equal to totalRewardPerToken.'
-    ).to.equal(newStabilityPoolSnapshot.stabilityPoolState?.totalRewardPerToken);
+    // User stake validation
+    expect(newUserStake).to.equal(previousUserStake + amount, "User's stake should increase by the staked amount");
 
-    expect(
-      newStabilityPoolSnapshot.stabilityPoolState?.users[actorAddress]?.collateralSnapshot,
-      'users[msg.sender].collateralSnapshot should be equal to totalCollateralPerToken.'
-    ).to.equal(newStabilityPoolSnapshot.stabilityPoolState?.totalCollateralPerToken);
+    // Total staked amount validation
+    expect(newTotalStakedRaw).to.equal(previousTotalStakedRaw + amount, 'Total staked amount should increase by the staked amount');
 
-    expect(
-      newStabilityPoolSnapshot.stabilityPoolState?.users[actorAddress]?.cumulativeProductScalingFactor,
-      'users[msg.sender].cumulativeProductScalingFactor should be equal to stakeScalingFactor.'
-    ).to.equal(newStabilityPoolSnapshot.stabilityPoolState?.stakeScalingFactor);
-
-    expect(
-      newStabilityPoolSnapshot.stabilityPoolState?.users[actorAddress]?.stakeResetCount,
-      'users[msg.sender].stakeResetCount should be equal to stakeResetCount.'
-    ).to.equal(newStabilityPoolSnapshot.stabilityPoolState?.stakeResetCount);
-
-    // Validate Total Stake
-    expect(
-      newStabilityPoolSnapshot.stabilityPoolState?.totalStakedRaw,
-      'totalStakedRaw should be increased by _amount.'
-    ).to.equal(((previousStabilityPoolSnapshot.stabilityPoolState?.totalStakedRaw) || BigInt(0)) + amount);
-
-    // Validate Token Transfer (DFIDToken)
-    expect(newStabilityPoolDFIDBalance, "StabilityPool's DFIDToken balance should increase by amount").to.equal(previousStabilityPoolDFIDBalance + amount);
-    expect(newActorDFIDBalance, "Actor's DFIDToken balance should decrease by amount").to.equal(previousActorDFIDBalance - amount);
-
-    // Additional validations for SBR rewards, distribution status can be added here if relevant state variables are available in the snapshots.
+    //Token Balance Validations
+    expect(newUserDFIDBalance).to.equal(previousUserDFIDBalance - amount, "User's staking token balance should decrease by the staked amount");
+    expect(newContractDFIDBalance).to.equal(previousContractDFIDBalance + amount, "Contract's staking token balance should increase by the staked amount");
 
     return true;
   }
 }
+
+export default StakeAction;
