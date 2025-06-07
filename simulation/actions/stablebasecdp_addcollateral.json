@@ -1,0 +1,325 @@
+{
+  "action": {
+    "name": "Add Collateral",
+    "summary": "Adds collateral to a CDP.",
+    "contract_name": "StableBaseCDP",
+    "function_name": "addCollateral",
+    "probability": 0.6
+  },
+  "action_detail": {
+    "action_name": "Add Collateral",
+    "contract_name": "StableBaseCDP",
+    "function_name": "addCollateral",
+    "pre_execution_parameter_generation_rules": [
+      "safeId: Must be a valid, existing safeId (i.e., safes[safeId].collateralAmount > 0 before the transaction).",
+      "amount: Must be a non-zero positive integer, and msg.value must equal this amount.",
+      "nearestSpotInLiquidationQueue: Can be 0. If not 0, it must be a valid safeId that exists in the liquidation queue before the transaction (i.e., safesOrderedForLiquidation.nodes[nearestSpotInLiquidationQueue].value > 0).",
+      "msg.value: Must equal the 'amount' parameter.",
+      "The user must be the owner of the specified safe (checked by _onlyOwner(safeId) modifier)."
+    ],
+    "on_execution_state_updates_made": [
+      {
+        "category": "Collateral and Debt",
+        "state_update_descriptions": [
+          "The _updateSafe function is called, potentially updating collateralAmount and borrowedAmount due to accrued interest.",
+          "safes[safeId].collateralAmount increases by amount (after any potential update in _updateSafe).",
+          "safes[safeId].borrowedAmount may increase due to accrued interest if liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral.",
+          "safes[safeId].totalBorrowedAmount may increase due to accrued interest if liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral.",
+          "totalCollateral increases by amount plus any collateralIncrease due to accrued interest (from _updateSafe).",
+          "totalDebt may increase due to accrued interest (debtIncrease from _updateSafe) and is updated using the _updateTotalDebt function. PROTOCOL_MODE may change from BOOTSTRAP to NORMAL if totalDebt exceeds BOOTSTRAP_MODE_DEBT_THRESHOLD.",
+          "liquidationSnapshots[_safeId].debtPerCollateralSnapshot is updated to cumulativeDebtPerUnitCollateral if liquidationSnapshot.collateralPerCollateralSnapshot was not equal to cumulativeCollateralPerUnitCollateral before the transaction.",
+          "liquidationSnapshots[_safeId].collateralPerCollateralSnapshot is updated to cumulativeCollateralPerUnitCollateral if liquidationSnapshot.collateralPerCollateralSnapshot was not equal to cumulativeCollateralPerUnitCollateral before the transaction."
+        ]
+      },
+      {
+        "category": "Liquidation Queue",
+        "state_update_descriptions": [
+          "The position of safeId in the liquidation queue is updated based on the new collateral ratio. This involves calling safesOrderedForLiquidation.upsert, which may re-order the queue."
+        ]
+      }
+    ],
+    "post_execution_contract_state_validation_rules": [
+      {
+        "category": "Collateral and Debt",
+        "rule_descriptions": [
+          "safes[safeId].collateralAmount should be equal to the old collateralAmount plus the added amount and any potential collateralIncrease from accrued interest (if applicable).",
+          "totalCollateral should be equal to the old totalCollateral plus the added amount and any potential collateralIncrease from accrued interest (if applicable).",
+          "safes[safeId].borrowedAmount should be equal to the old borrowedAmount plus any potential debtIncrease from accrued interest (if applicable).",
+          "totalDebt should be equal to the old totalDebt plus any potential debtIncrease from accrued interest (if applicable).",
+          "PROTOCOL_MODE should remain unchanged unless totalDebt crossed the BOOTSTRAP_MODE_DEBT_THRESHOLD due to debtIncrease.",
+          "If _updateSafe was called, then liquidationSnapshots[safeId].debtPerCollateralSnapshot should be equal to cumulativeDebtPerUnitCollateral after the transaction.",
+          "If _updateSafe was called, then liquidationSnapshots[safeId].collateralPerCollateralSnapshot should be equal to cumulativeCollateralPerUnitCollateral after the transaction.",
+          "The safe's position in the liquidation queue should be updated correctly, reflecting the new collateral ratio."
+        ]
+      },
+      {
+        "category": "Liquidation Queue",
+        "rule_descriptions": [
+          "The position of safeId in the liquidation queue is correctly updated according to the new ratio."
+        ]
+      }
+    ]
+  },
+  "action_execution": {
+    "action_name": "Add Collateral",
+    "contract_name": "StableBaseCDP",
+    "function_name": "addCollateral",
+    "does_register_new_identifier": false,
+    "new_identifiers": [],
+    "all_state_updates": [
+      {
+        "contract_name": "StableBaseCDP",
+        "state_updated": [
+          {
+            "state_variable_name": "safes[safeId].collateralAmount",
+            "type": "uint256",
+            "what_does_it_track": "The amount of collateral deposited for a specific safe (CDP).",
+            "why_is_is_important": "Reflects the current collateralization of the CDP, impacting liquidation risk and available borrowing power.",
+            "when_is_it_updated": "When collateral is added to a safe.",
+            "how_to_validate_state_update": "Check the safes mapping for the given safeId, the collateralAmount should be increased by the amount.",
+            "has_conditional_updates": false,
+            "summary_of_update": "Updates the collateral amount of a specific safe.",
+            "conditions": [
+              "Safe must exist (safe.collateralAmount > 0)",
+              "msg.value must equal amount"
+            ]
+          },
+          {
+            "state_variable_name": "totalCollateral",
+            "type": "uint256",
+            "what_does_it_track": "The aggregate amount of collateral in the system.",
+            "why_is_is_important": "System-wide health metric used for calculating global collateralization ratio.",
+            "when_is_it_updated": "When collateral is added to a safe.",
+            "how_to_validate_state_update": "Check the totalCollateral state variable, it should be increased by the amount.",
+            "has_conditional_updates": false,
+            "summary_of_update": "Updates the total collateral held by the contract.",
+            "conditions": [
+              "Safe must exist (safe.collateralAmount > 0)",
+              "msg.value must equal amount"
+            ]
+          },
+          {
+            "state_variable_name": "safes[safeId].borrowedAmount",
+            "type": "uint256",
+            "what_does_it_track": "Tracks inactive debt and collateral.",
+            "why_is_is_important": "Ensures borrowed amount is up-to-date before adding collateral.",
+            "when_is_it_updated": "Before adding collateral, if the liquidation snapshot is outdated.",
+            "how_to_validate_state_update": "Check liquidationSnapshots mapping for the given safeId, debtPerCollateralSnapshot must be equal to cumulativeDebtPerUnitCollateral.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates the safe's borrowed amount based on cumulative debt per collateral.",
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "safes[safeId].totalBorrowedAmount",
+            "type": "uint256",
+            "what_does_it_track": "Total amount borrowed for the Safe.",
+            "why_is_is_important": "Tracks the total borrowed amount for the Safe.",
+            "when_is_it_updated": "Before adding collateral, if the liquidation snapshot is outdated.",
+            "how_to_validate_state_update": "Check the safes mapping for the given safeId, the totalBorrowedAmount should be increased by the debtIncrease.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates the safe's total borrowed amount.",
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "liquidationSnapshots[safeId].debtPerCollateralSnapshot",
+            "type": "uint256",
+            "what_does_it_track": "Stores the cumulative debt per unit collateral at the last snapshot.",
+            "why_is_is_important": "Used to calculate inactive debt and collateral.",
+            "when_is_it_updated": "Before adding collateral, if the liquidation snapshot is outdated.",
+            "how_to_validate_state_update": "Check liquidationSnapshots mapping for the given safeId, debtPerCollateralSnapshot must be equal to cumulativeDebtPerUnitCollateral.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates the liquidation snapshot's debt per collateral snapshot.",
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "safes[safeId].collateralAmount",
+            "type": "uint256",
+            "what_does_it_track": "Tracks inactive debt and collateral.",
+            "why_is_is_important": "Ensures collateral amount is up-to-date before adding collateral.",
+            "when_is_it_updated": "Before adding collateral, if the liquidation snapshot is outdated.",
+            "how_to_validate_state_update": "Check the safes mapping for the given safeId, the collateralAmount should be increased by the collateralIncrease.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates the safe's collateral amount based on cumulative collateral per unit collateral.",
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "liquidationSnapshots[safeId].collateralPerCollateralSnapshot",
+            "type": "uint256",
+            "what_does_it_track": "Stores the cumulative collateral per unit collateral at the last snapshot.",
+            "why_is_is_important": "Used to calculate inactive debt and collateral.",
+            "when_is_it_updated": "Before adding collateral, if the liquidation snapshot is outdated.",
+            "how_to_validate_state_update": "Check liquidationSnapshots mapping for the given safeId, collateralPerCollateralSnapshot must be equal to cumulativeCollateralPerUnitCollateral.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates the liquidation snapshot's collateral per collateral snapshot.",
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "totalDebt",
+            "type": "uint256",
+            "what_does_it_track": "Tracks the total debt in the protocol.",
+            "why_is_is_important": "Maintains a record of the total debt, critical for assessing system solvency and stability.",
+            "when_is_it_updated": "Before adding collateral, if the liquidation snapshot is outdated.",
+            "how_to_validate_state_update": "Check the totalDebt state variable, it should be increased by debtIncrease.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates total debt.",
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "PROTOCOL_MODE",
+            "type": "SBStructs.Mode",
+            "what_does_it_track": "Tracks the current operating mode of the protocol (BOOTSTRAP or NORMAL).",
+            "why_is_is_important": "Controls certain protocol behaviors (e.g., fee structure, liquidation parameters) during bootstrap and normal operation.",
+            "when_is_it_updated": "If the total debt crosses the BOOTSTRAP_MODE_DEBT_THRESHOLD.",
+            "how_to_validate_state_update": "Check the PROTOCOL_MODE state variable, it may change from BOOTSTRAP to NORMAL if totalDebt exceeds BOOTSTRAP_MODE_DEBT_THRESHOLD.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates the protocol mode based on the debt threshold.",
+            "conditions": [
+              "debt > BOOTSTRAP_MODE_DEBT_THRESHOLD",
+              "PROTOCOL_MODE == SBStructs.Mode.BOOTSTRAP"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "OrderedDoublyLinkedList",
+        "state_updated": [
+          {
+            "state_variable_name": "nodes[safeId]",
+            "type": "IDoublyLinkedList.Node",
+            "what_does_it_track": "The order of safes (CDPs) based on their liquidation ratio.",
+            "why_is_is_important": "Determines the order in which CDPs are liquidated, optimizing for system solvency.",
+            "when_is_it_updated": "When collateral is added or removed, or when debt changes, to maintain the correct liquidation order.",
+            "how_to_validate_state_update": "Check the nodes mapping for the given safeId, its value, prev, and next should reflect its position in the sorted list. Also, check head and tail.",
+            "has_conditional_updates": false,
+            "summary_of_update": "Updates or inserts a node into the liquidation queue.",
+            "conditions": []
+          },
+          {
+            "state_variable_name": "head",
+            "type": "uint256",
+            "what_does_it_track": "The first element in the ordered list.",
+            "why_is_is_important": "Points to the beginning of the list.",
+            "when_is_it_updated": "When the list is empty, or when a node is inserted at the beginning.",
+            "how_to_validate_state_update": "Check the head state variable, it should point to the safeId with the lowest liquidation ratio.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates the head of the linked list.",
+            "conditions": [
+              "head == 0"
+            ]
+          },
+          {
+            "state_variable_name": "tail",
+            "type": "uint256",
+            "what_does_it_track": "The last element in the ordered list.",
+            "why_is_is_important": "Points to the end of the list.",
+            "when_is_it_updated": "When the list is empty, or when a node is inserted at the end.",
+            "how_to_validate_state_update": "Check the tail state variable, it should point to the safeId with the highest liquidation ratio.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates the tail of the linked list.",
+            "conditions": [
+              "head == 0"
+            ]
+          },
+          {
+            "state_variable_name": "nodes[safeId].next",
+            "type": "uint256",
+            "what_does_it_track": "The next element in the list.",
+            "why_is_is_important": "Maintains the structure of the list.",
+            "when_is_it_updated": "When a node is inserted or removed.",
+            "how_to_validate_state_update": "Check the nodes[safeId].next state variable.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates the next pointer of a node in the list.",
+            "conditions": [
+              "_nearestSpot == _head",
+              "nodes[_nearestSpot].value >= node.value",
+              "_nearestSpot == _tail",
+              "nodes[_nearestSpot].value < node.value",
+              "node.prev != 0"
+            ]
+          },
+          {
+            "state_variable_name": "nodes[safeId].prev",
+            "type": "uint256",
+            "what_does_it_track": "The previous element in the list.",
+            "why_is_is_important": "Maintains the structure of the list.",
+            "when_is_it_updated": "When a node is inserted or removed.",
+            "how_to_validate_state_update": "Check the nodes[safeId].prev state variable.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates the previous pointer of a node in the list.",
+            "conditions": [
+              "_nearestSpot == _head",
+              "nodes[_nearestSpot].value >= node.value",
+              "_nearestSpot == _tail",
+              "nodes[_nearestSpot].value < node.value",
+              "node.next != 0"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "action_context": {
+    "contract_context": [
+      {
+        "contract_name": "StableBaseCDP",
+        "code_snippet": "function addCollateral(\n        uint256 safeId,\n        uint256 amount,\n        uint256 nearestSpotInLiquidationQueue\n    ) external payable _onlyOwner(safeId) {\n        Safe storage safe = safes[safeId];\n        _updateSafe(safeId, safe);\n        require(safe.collateralAmount > 0, \"Safe does not exist\");\n        require(msg.value == amount, \"Invalid amount\");\n\n        safe.collateralAmount += amount;\n        totalCollateral += amount;\n\n        uint256 _newRatio = (safe.borrowedAmount * PRECISION) /\n            safe.collateralAmount;\n        IDoublyLinkedList.Node memory node = safesOrderedForLiquidation.upsert(\n            safeId,\n            _newRatio,\n            nearestSpotInLiquidationQueue\n        );\n        emit LiquidationQueueUpdated(safeId, _newRatio, node.next);\n\n        emit AddedCollateral(\n            safeId,\n            amount,\n            _newRatio,\n            totalCollateral,\n            totalDebt\n        );\n    }\nfunction _updateSafe(\n        uint _safeId,\n        Safe storage _safe\n    ) internal returns (Safe memory) {\n        // Update borrowed amount\n        LiquidationSnapshot storage liquidationSnapshot = liquidationSnapshots[\n            _safeId\n        ];\n        if (\n            liquidationSnapshot.collateralPerCollateralSnapshot !=\n            cumulativeCollateralPerUnitCollateral\n        ) {\n            uint debtIncrease = (_safe.collateralAmount *\n                (cumulativeDebtPerUnitCollateral -\n                    liquidationSnapshot.debtPerCollateralSnapshot)) / PRECISION;\n            _safe.borrowedAmount += debtIncrease;\n            _safe.totalBorrowedAmount += debtIncrease;\n            liquidationSnapshot\n                .debtPerCollateralSnapshot = cumulativeDebtPerUnitCollateral;\n\n            // Update deposited amount\n            uint collateralIncrease = (_safe.collateralAmount *\n                (cumulativeCollateralPerUnitCollateral -\n                    liquidationSnapshot.collateralPerCollateralSnapshot)) /\n                PRECISION;\n            _safe.collateralAmount += collateralIncrease;\n            liquidationSnapshot\n                .collateralPerCollateralSnapshot = cumulativeCollateralPerUnitCollateral;\n\n            totalCollateral += collateralIncrease;\n            _updateTotalDebt(totalDebt, debtIncrease, true);\n            emit SafeUpdated(\n                _safeId,\n                _safe.collateralAmount,\n                _safe.borrowedAmount,\n                collateralIncrease,\n                debtIncrease,\n                totalCollateral,\n                totalDebt\n            );\n        }\n\n        return _safe;\n    }\nfunction _updateTotalDebt(\n        uint256 currentDebt,\n        uint256 delta,\n        bool add\n    ) internal returns (uint256) {\n        uint256 debt = currentDebt;\n        if (add) {\n            debt = currentDebt + delta;\n        } else {\n            debt = currentDebt - delta;\n        }\n        // Bootstrap Mode to Normal mode only once, Normal mode to bootstrap mode is not possible\n        if (\n            debt > BOOTSTRAP_MODE_DEBT_THRESHOLD &&\n            PROTOCOL_MODE == SBStructs.Mode.BOOTSTRAP\n        ) {\n            PROTOCOL_MODE = SBStructs.Mode.NORMAL;\n        }\n        totalDebt = debt;\n        return debt;\n    }",
+        "references": {
+          "references": [
+            {
+              "state_variable_name": "sbdToken",
+              "contract_name": "DFIDToken"
+            },
+            {
+              "state_variable_name": "priceOracle",
+              "contract_name": "MockPriceOracle"
+            },
+            {
+              "state_variable_name": "stabilityPool",
+              "contract_name": "StabilityPool"
+            },
+            {
+              "state_variable_name": "dfireTokenStaking",
+              "contract_name": "DFIREStaking"
+            },
+            {
+              "state_variable_name": "safesOrderedForLiquidation",
+              "contract_name": "OrderedDoublyLinkedList"
+            },
+            {
+              "state_variable_name": "safesOrderedForRedemption",
+              "contract_name": "OrderedDoublyLinkedList"
+            }
+          ]
+        }
+      },
+      {
+        "contract_name": "OrderedDoublyLinkedList",
+        "code_snippet": "function upsert(\n        uint256 id,\n        uint256 value,\n        uint256 _nearestSpot\n    ) external override onlyOwner returns (Node memory) {\n        if (\n            nodes[id].value == 0 && nodes[id].next == 0 && nodes[id].prev == 0\n        ) {\n            return _insert(id, value, _nearestSpot);\n        } else {\n            return _update(id, value, _nearestSpot);\n        }\n    }\nfunction _insert(\n        uint256 id,\n        uint256 value,\n        uint256 _nearestSpot\n    ) internal returns (Node memory) {\n        Node memory node = Node(value, 0, 0);\n        return _insert(id, node, _nearestSpot);\n    }\nfunction _insert(\n        uint256 id,\n        Node memory node,\n        uint256 _nearestSpot\n    ) internal returns (Node memory) {\n        uint256 _head = head;\n        if (_head == 0) {\n            head = id;\n            tail = id;\n        } else {\n            uint256 _tail = tail;\n            if (_nearestSpot == 0) {\n                _nearestSpot = _head;\n            }\n\n            if (\n                nodes[_nearestSpot].prev == 0 &&\n                nodes[_nearestSpot].next == 0 &&\n                nodes[_nearestSpot].value == 0\n            ) {\n                _nearestSpot = head;\n                //nearest = nodes[_nearestSpot];\n            }\n            // nearest: 7, node:10: 7, 7, 9, 11, 11\n            // nearest: 9, node: 7: 7, 7, 9, 11, 11\n            // nearest: 9, node: 12: 7, 7, 9, 11, 11\n\n            while (\n                _nearestSpot != _tail && nodes[_nearestSpot].value < node.value\n            ) {\n                _nearestSpot = nodes[_nearestSpot].next;\n                //nearest = nodes[_nearestSpot];\n            }\n            // nearest: 11, node:10: 7, 7, 9, 11, 11\n            // nearest: 9, node:7: 7, 7, 9, 11, 11\n            // nearest: 11(last), node: 12: 7, 7, 9, 11, 11\n\n            while (\n                _nearestSpot != _head && nodes[_nearestSpot].value >= node.value\n            ) {\n                _nearestSpot = nodes[_nearestSpot].prev;\n                //nearest = nodes[_nearestSpot];\n            }\n            // nearest: 7, node: 7: 7, 7, 9, 11, 11\n\n            if (_nearestSpot == _head) {\n                if (nodes[_nearestSpot].value >= node.value) {\n                    node.next = _nearestSpot;\n                    nodes[_nearestSpot].prev = id;\n                    head = id;\n                } else {\n                    node.prev = _nearestSpot;\n                    node.next = nodes[_nearestSpot].next;\n                    nodes[_nearestSpot].next = id;\n                    if (node.next != 0) {\n                        nodes[node.next].prev = id;\n                    } else {\n                        tail = id;\n                    }\n                }\n            } else if (_nearestSpot == _tail) {\n                // nearest: 11(last), node: 12: 7, 7, 9, 11, 11\n                if (nodes[_nearestSpot].value < node.value) {\n                    node.prev = _nearestSpot;\n                    nodes[_nearestSpot].next = id;\n                    tail = id;\n                } else {\n                    node.prev = nodes[_nearestSpot].prev;\n                    node.next = _nearestSpot;\n                    nodes[_nearestSpot].prev = id;\n                    if (node.prev != 0) {\n                        nodes[node.prev].next = id;\n                    } else {\n                        head = id;\n                    }\n                }\n            } else {\n                // nearest: 9, node: 10: 7, 7, 9, 11, 11\n                node.prev = _nearestSpot;\n                node.next = nodes[_nearestSpot].next;\n                nodes[_nearestSpot].next = id;\n                nodes[node.next].prev = id;\n            }\n        }\n        nodes[id] = node;\n        return node;\n    }\nfunction _update(\n        uint256 id,\n        uint256 value,\n        uint256 _nearestSpot\n    ) internal returns (Node memory) {\n        Node memory node = _remove(id);\n        node.value = value;\n        node.prev = 0;\n        node.next = 0;\n        return _insert(id, node, _nearestSpot);\n    }\nfunction _remove(uint256 id) internal returns (Node memory) {\n        Node memory node = nodes[id];\n        if (node.prev == 0) {\n            head = node.next;\n            nodes[node.next].prev = 0;\n        } else {\n            nodes[node.prev].next = node.next;\n            nodes[node.next].prev = node.prev;\n        }\n        if (node.next == 0) {\n            tail = node.prev;\n            nodes[node.prev].next = 0;\n        } else {\n            nodes[node.next].prev = node.prev;\n            nodes[node.prev].next = node.next;\n        }\n        delete nodes[id];\n        return node;\n    }",
+        "references": {
+          "references": [
+            {
+              "state_variable_name": "_stableBaseCDP",
+              "contract_name": "safesOrderedForLiquidation"
+            },
+            {
+              "state_variable_name": "_stableBaseCDP",
+              "contract_name": "safesOrderedForRedemption"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
