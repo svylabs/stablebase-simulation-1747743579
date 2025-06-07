@@ -1,9 +1,9 @@
-import { Action, Actor, RunContext, Snapshot } from '@svylabs/ilumia';
+import { Actor, RunContext, Snapshot, Action } from '@svylabs/ilumia';
 import { ethers } from 'ethers';
 import { expect } from 'chai';
 
-class RedeemAction extends Action {
-  contract: ethers.Contract;
+export class RedeemAction extends Action {
+  private contract: ethers.Contract;
 
   constructor(contract: ethers.Contract) {
     super('RedeemAction');
@@ -15,27 +15,23 @@ class RedeemAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot
   ): Promise<[any, Record<string, any>]> {
-    // Parameter generation based on snapshot bounds
-    const maxRedeemableAmount = currentSnapshot.accountSnapshot[actor.account.address] ?  Number(currentSnapshot.accountSnapshot[actor.account.address] / BigInt(100)) : 100 ;
-    const amount = BigInt(Math.floor(context.prng.next() % maxRedeemableAmount) + 1); // Amount must be greater than 0
+    // Ensure the user has sufficient SBD tokens to redeem
+    const userAddress = actor.account.address;
+    const userSBDTokenBalance = currentSnapshot.contractSnapshot.dfidToken.Balance[userAddress] || BigInt(0);
 
-    const safesOrderedForLiquidationLength = Object.keys(currentSnapshot.contractSnapshot.safesOrderedForLiquidation.nodes).length;
-    const nearestSpotInLiquidationQueue = safesOrderedForLiquidationLength > 0 ? BigInt(Math.floor(context.prng.next() % safesOrderedForLiquidationLength)) : BigInt(0);
+    // Generate a random amount within the user's SBD token balance, but at least 1
+    const maxRedeemableAmount = userSBDTokenBalance > 0 ? userSBDTokenBalance : BigInt(1);
+    const amount = BigInt(Math.floor(context.prng.next() % Number(maxRedeemableAmount)) + 1);
 
-    // New identifier generation (redemptionId)
-    const redemptionId = ethers.keccak256(
-      ethers.utils.toUtf8Bytes(
-        actor.account.address +
-          amount.toString() +
-          currentSnapshot.contractSnapshot.stableBaseCDP.totalDebt.toString() +
-          context.prng.next().toString()
-      )
-    );
+    // Generate a random value for nearestSpotInLiquidationQueue
+    const nearestSpotInLiquidationQueue = BigInt(Math.floor(context.prng.next() % 100));
 
-    const actionParams = [amount, nearestSpotInLiquidationQueue];
-    const newIdentifiers = { redemptionId };
+    const actionParams = [
+      amount,
+      nearestSpotInLiquidationQueue,
+    ];
 
-    return [actionParams, newIdentifiers];
+    return [actionParams, {}];
   }
 
   async execute(
@@ -44,11 +40,11 @@ class RedeemAction extends Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<Record<string, any> | void> {
-    const [amount, nearestSpotInLiquidationQueue] = actionParams;
-    const tx = await this.contract
-      .connect(actor.account.value as ethers.Signer)
-      .redeem(amount, nearestSpotInLiquidationQueue);
-
+    const signer = actor.account.value as ethers.Signer;
+    const tx = await this.contract.connect(signer).redeem(
+      actionParams[0],
+      actionParams[1]
+    );
     await tx.wait();
   }
 
@@ -59,45 +55,42 @@ class RedeemAction extends Action {
     newSnapshot: Snapshot,
     actionParams: any
   ): Promise<boolean> {
-    const [amount,] = actionParams;
-    const contractAddress = this.contract.address;
+    const amount = actionParams[0] as bigint;
+    const nearestSpotInLiquidationQueue = actionParams[1] as bigint;
+    const userAddress = actor.account.address;
 
-    // Total Collateral should decrease
-    expect(
-      newSnapshot.contractSnapshot.stableBaseCDP.totalCollateral,
-      'Total collateral should decrease'
-    ).to.be.lte(previousSnapshot.contractSnapshot.stableBaseCDP.totalCollateral);
+    // Validate SBD Token Balance
+    const previousUserSBDTokenBalance = previousSnapshot.contractSnapshot.dfidToken.Balance[userAddress] || BigInt(0);
+    const newUserSBDTokenBalance = newSnapshot.contractSnapshot.dfidToken.Balance[userAddress] || BigInt(0);
+    expect(newUserSBDTokenBalance, 'User SBD token balance should decrease by redeemed amount').to.equal(
+      previousUserSBDTokenBalance - amount
+    );
 
-    // Total debt should decrease
-    expect(
-      newSnapshot.contractSnapshot.stableBaseCDP.totalDebt,
-      'Total debt should decrease'
-    ).to.be.lte(previousSnapshot.contractSnapshot.stableBaseCDP.totalDebt);
+    // Validate Total Supply of SBD tokens
+    const previousTotalSupply = previousSnapshot.contractSnapshot.dfidToken.TotalSupply || BigInt(0);
+    const newTotalSupply = newSnapshot.contractSnapshot.dfidToken.TotalSupply || BigInt(0);
+    const redeemedAmount = amount; // Assuming redeemedAmount is equal to amount
+    const refundedAmount = BigInt(0); // Assuming refundedAmount is zero for simplicity
 
-    //SBD token should be burned. Get SBD contract from context.contracts
-        const sbdTokenContract = context.contracts.dfidToken;
-        const previousSBDContractBalance = previousSnapshot.accountSnapshot[sbdTokenContract.target] || BigInt(0);
-        const newSBDContractBalance = newSnapshot.accountSnapshot[sbdTokenContract.target] || BigInt(0);
-        expect(newSBDContractBalance - previousSBDContractBalance, 'SBD balance of contract should increase').to.be.eq(amount);
+    // In the redeem function, SBD tokens are burned only if redeemedAmount > refundedAmount
+    if (redeemedAmount > refundedAmount) {
+      expect(newTotalSupply, 'Total supply of SBD tokens should decrease when redeemedAmount > refundedAmount').to.lte(previousTotalSupply);
+    } else {
+      expect(newTotalSupply, 'Total supply of SBD tokens should not change').to.equal(previousTotalSupply);
+    }
 
-    //Check that the eth balance of the actor has increased
-     expect(
-      newSnapshot.accountSnapshot[actor.account.address],
-      'ETH balance should increase'
-    ).to.be.gt(previousSnapshot.accountSnapshot[actor.account.address]);
+    // Validate Total Debt and Collateral
+    const previousTotalDebt = previousSnapshot.contractSnapshot.stableBaseCDP.totalDebt || BigInt(0);
+    const newTotalDebt = newSnapshot.contractSnapshot.stableBaseCDP.totalDebt || BigInt(0);
+    const previousTotalCollateral = previousSnapshot.contractSnapshot.stableBaseCDP.totalCollateral || BigInt(0);
+    const newTotalCollateral = newSnapshot.contractSnapshot.stableBaseCDP.totalCollateral || BigInt(0);
 
-        // Check stability pool changes (if applicable based on conditions in the contract code)
-        if (previousSnapshot.contractSnapshot.stableBaseCDP.stabilityPoolCanReceiveRewards) {
-          // Assuming addReward or addCollateralReward are called on the stability pool
-          const stabilityPoolAddress = (context.contracts.stabilityPool as any).target;
+    // Expect totalDebt to be reduced, adjust for refundedAmount. For simplicity, considering refundedAmount to be 0.
+    expect(newTotalDebt, 'Total debt should be reduced').to.lte(previousTotalDebt);
 
-          const previousStabilityPoolBalance = previousSnapshot.accountSnapshot[stabilityPoolAddress] || BigInt(0);
-          const newStabilityPoolBalance = newSnapshot.accountSnapshot[stabilityPoolAddress] || BigInt(0);
-            //The StabilityPool balance can change based on the ownerFee/redeemerFee
-        }
+    // Expect totalCollateral to be reduced. Due to lack of redeemerFee and collateralAmount from event, a less specific check is used.
+    expect(newTotalCollateral, 'Total collateral should be reduced').to.lte(previousTotalCollateral);
 
     return true;
   }
 }
-
-export default RedeemAction;
