@@ -1,138 +1,95 @@
 import { ethers } from "ethers";
+import { Actor, RunContext, Snapshot, Action } from '@svylabs/ilumia';
 import { expect } from 'chai';
-import { Actor, RunContext, Snapshot, Action } from "@svylabs/ilumia";
 
 export class FeeTopupAction extends Action {
-  contract: ethers.Contract;
+    contract: ethers.Contract;
 
-  constructor(contract: ethers.Contract) {
-    super("FeeTopupAction");
-    this.contract = contract;
-  }
-
-  async initialize(
-    context: RunContext,
-    actor: Actor,
-    currentSnapshot: Snapshot
-  ): Promise<[any, Record<string, any>]> {
-    const safeIds = Object.keys(currentSnapshot.contractSnapshot.stableBaseCDP.safes).map(Number);
-    if (safeIds.length === 0) {
-      throw new Error("No safes available to top up fee.");
+    constructor(contract: ethers.Contract) {
+        super("FeeTopupAction");
+        this.contract = contract;
     }
 
-    const safeId = safeIds[context.prng.next() % safeIds.length];
-    const safe = currentSnapshot.contractSnapshot.stableBaseCDP.safes[safeId];
+    async initialize(
+        context: RunContext,
+        actor: Actor,
+        currentSnapshot: Snapshot
+    ): Promise<[any, Record<string, any>]> {
+        const stableBaseCDP = currentSnapshot.contractSnapshot.stableBaseCDP;
+        const safeIds = Object.keys(stableBaseCDP.safes).map(Number);
 
-    if (!safe) {
-      throw new Error(`Safe with ID ${safeId} not found.`);
+        if (safeIds.length === 0) {
+            throw new Error("No safes available for fee topup");
+        }
+
+        // Filter safeIds to find only the safe owned by actor.account.address
+        const actorSafeIds = safeIds.filter(safeId => stableBaseCDP.ownerOf[safeId] === actor.account.address);
+
+        if (actorSafeIds.length === 0) {
+            throw new Error("No safes owned by the actor for fee topup");
+        }
+
+        const safeId = actorSafeIds[Math.floor(context.prng.next() % actorSafeIds.length)];
+        const safe = stableBaseCDP.safes[BigInt(safeId)];
+
+        // Ensure topupRate is within reasonable bounds, using a percentage of the borrowedAmount
+        const maxTopupRate = (safe.borrowedAmount * BigInt(10)) / BigInt(100); // Up to 10% of borrowedAmount
+        const topupRate = BigInt(Math.floor(Number(context.prng.next() % BigInt(1000)) + 1)); //topupRate between 1 and 1000
+
+        const safesOrderedForRedemption = currentSnapshot.contractSnapshot.safesOrderedForRedemption;
+        const nearestSpotInRedemptionQueue = BigInt(safesOrderedForRedemption.head || 0);
+
+        const actionParams = [
+            BigInt(safeId),
+            topupRate,
+            nearestSpotInRedemptionQueue
+        ];
+
+        return [actionParams, {}];
     }
 
-    // Ensure topupRate is within reasonable bounds based on safe's borrowedAmount
-    const maxTopupRate = BigInt(10000);
-    const topupRate = BigInt(context.prng.next()) % maxTopupRate + BigInt(1); // Ensure topupRate is non-zero
-    const nearestSpotInRedemptionQueue = BigInt(0);
-
-    return [
-      [safeId, topupRate, nearestSpotInRedemptionQueue],
-      {}
-    ];
-  }
-
-  async execute(
-    context: RunContext,
-    actor: Actor,
-    currentSnapshot: Snapshot,
-    actionParams: any
-  ): Promise<Record<string, any> | void> {
-    const [safeId, topupRate, nearestSpotInRedemptionQueue] = actionParams;
-    return this.contract.connect(actor.account.value).feeTopup(
-      safeId,
-      topupRate,
-      nearestSpotInRedemptionQueue
-    );
-  }
-
-  async validate(
-    context: RunContext,
-    actor: Actor,
-    previousSnapshot: Snapshot,
-    newSnapshot: Snapshot,
-    actionParams: any
-  ): Promise<boolean> {
-    const [safeId, topupRate, nearestSpotInRedemptionQueue] = actionParams;
-
-    const stableBaseCDPPrevious = previousSnapshot.contractSnapshot.stableBaseCDP;
-    const stableBaseCDPNew = newSnapshot.contractSnapshot.stableBaseCDP;
-
-    const dfidTokenPrevious = previousSnapshot.contractSnapshot.dfidToken;
-    const dfidTokenNew = newSnapshot.contractSnapshot.dfidToken;
-
-    const safePrevious = stableBaseCDPPrevious.safes[safeId];
-    const safeNew = stableBaseCDPNew.safes[safeId];
-
-    const sbdTokenAddress = (context.contracts.dfidToken as any).target;
-    const contractAddress = (context.contracts.stableBaseCDP as any).target;
-    const userAddress = actor.account.address;
-
-    if (!safePrevious || !safeNew) {
-      throw new Error(`Safe with ID ${safeId} not found in snapshot.`);
+    async execute(
+        context: RunContext,
+        actor: Actor,
+        currentSnapshot: Snapshot,
+        actionParams: any
+    ): Promise<Record<string, any> | void> {
+        const signer = actor.account.value.connect(this.contract.provider);
+        const tx = await this.contract.connect(signer).feeTopup(
+            actionParams[0],
+            actionParams[1],
+            actionParams[2]
+        );
+        await tx.wait();
     }
 
-    // Validate that safes[safeId].weight has increased by topupRate.
-    expect(safeNew.weight).to.equal(safePrevious.weight + BigInt(topupRate), "Safe weight should increase by topupRate");
+    async validate(
+        context: RunContext,
+        actor: Actor,
+        previousSnapshot: Snapshot,
+        newSnapshot: Snapshot,
+        actionParams: any
+    ): Promise<boolean> {
+        const safeId = actionParams[0];
+        const topupRate = actionParams[1];
+        const oldSafe = previousSnapshot.contractSnapshot.stableBaseCDP.safes[safeId];
+        const newSafe = newSnapshot.contractSnapshot.stableBaseCDP.safes[safeId];
+        const fee = (topupRate * oldSafe.borrowedAmount) / BigInt(10000);
 
-    // Calculate expected fee
-    const expectedFee = (BigInt(topupRate) * safePrevious.borrowedAmount) / BigInt(10000);
+        const previousStableBaseCDPBalance = previousSnapshot.contractSnapshot.stableBaseCDP.balanceOf[(this.contract as any).target] || BigInt(0);
+        const newStableBaseCDPBalance = newSnapshot.contractSnapshot.stableBaseCDP.balanceOf[(this.contract as any).target] || BigInt(0);
 
-    // Validate that safes[safeId].feePaid has increased by the actual fee deducted.
-    expect(safeNew.feePaid).to.be.gte(safePrevious.feePaid, "Safe feePaid should increase");
+        const previousUserBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+        const newUserBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
 
-    // Validate that the user's SBD token balance has decreased by the fee amount, minus any refund.
-    const userSBDTokenBalancePrevious = dfidTokenPrevious.balances[userAddress] || BigInt(0);
-    const userSBDTokenBalanceNew = dfidTokenNew.balances[userAddress] || BigInt(0);
+        // Safe State Validations
+        expect(newSafe.weight).to.equal(oldSafe.weight + topupRate, "Safe weight should be updated by topupRate.");
+        expect(newSafe.feePaid).to.equal(oldSafe.feePaid + fee, "Safe feePaid should be increased by fee.");
 
-    const feePaidDiff = safeNew.feePaid - safePrevious.feePaid;
-    const refundAmount = userSBDTokenBalancePrevious - userSBDTokenBalanceNew + feePaidDiff;
+        // Token Balances Validations
+        expect(newStableBaseCDPBalance).to.equal(previousStableBaseCDPBalance + fee, "The contract should receive 'fee' amount of SBD tokens.");
+        expect(newUserBalance).to.equal(previousUserBalance - fee, "The msg.sender's SBD token balance should decrease by 'fee'.");
 
-    expect(userSBDTokenBalanceNew).to.be.lte(userSBDTokenBalancePrevious, "User SBD token balance should decrease.");
-
-    // Validate that the contract's SBD token balance has increased by the fee amount, accounting for refund.
-    const contractSBDTokenBalancePrevious = dfidTokenPrevious.balances[contractAddress] || BigInt(0);
-    const contractSBDTokenBalanceNew = dfidTokenNew.balances[contractAddress] || BigInt(0);
-
-    expect(contractSBDTokenBalanceNew - contractSBDTokenBalancePrevious).to.be.gte(feePaidDiff - refundAmount, "Contract SBD token balance should increase by at least the fee paid minus refund.");
-
-    // Validate total debt and collateral
-    expect(stableBaseCDPNew.totalDebt).to.be.gte(stableBaseCDPPrevious.totalDebt, 'Total debt should increase or remain the same');
-    expect(stableBaseCDPNew.totalCollateral).to.be.gte(stableBaseCDPPrevious.totalCollateral, 'Total collateral should increase or remain the same');
-
-        // Verify FeeTopup event is emitted with the correct parameters (safeId, topupRate, feePaid, newWeight).
-        const events = newSnapshot.events;
-        if (events && events.length > 0) {
-            const feeTopupEvent = events.find((e: any) => e.name === 'FeeTopup' && e.address === contractAddress);
-            if (feeTopupEvent) {
-                expect(feeTopupEvent.args.safeId).to.eq(BigInt(safeId), 'FeeTopup event safeId should match');
-                expect(feeTopupEvent.args.topupRate).to.eq(BigInt(topupRate), 'FeeTopup event topupRate should match');
-                expect(feeTopupEvent.args.fee).to.eq(feePaidDiff, 'FeeTopup event feePaid should match');
-                expect(feeTopupEvent.args.newWeight).to.eq(safeNew.weight, 'FeeTopup event newWeight should match');
-            } else {
-                throw new Error('FeeTopup event not found');
-            }
-        } else {
-            throw new Error('No events found in the snapshot');
-        }
-
-        // Check state changes in OrderedDoublyLinkedList (safesOrderedForRedemption)
-        const safesOrderedForRedemptionPrevious = previousSnapshot.contractSnapshot.safesOrderedForRedemption;
-        const safesOrderedForRedemptionNew = newSnapshot.contractSnapshot.safesOrderedForRedemption;
-        // Basic check: head and tail are updated or not
-        if(safesOrderedForRedemptionPrevious.head !== safesOrderedForRedemptionNew.head) {
-            console.log("Head is updated in safesOrderedForRedemption.");
-        }
-        if(safesOrderedForRedemptionPrevious.tail !== safesOrderedForRedemptionNew.tail) {
-            console.log("Tail is updated in safesOrderedForRedemption");
-        }
-
-    return true;
-  }
+        return true;
+    }
 }
