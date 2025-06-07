@@ -1,0 +1,73 @@
+{
+  "attributes": [
+    {
+      "name": "allowance",
+      "type": "bigint",
+      "contract_function": "allowance",
+      "parameters": [
+        {
+          "name": "owner",
+          "type": "address",
+          "reference": "accountAddress"
+        },
+        {
+          "name": "spender",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
+    },
+    {
+      "name": "balanceOf",
+      "type": "bigint",
+      "contract_function": "balanceOf",
+      "parameters": [
+        {
+          "name": "account",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
+    },
+    {
+      "name": "decimals",
+      "type": "number",
+      "contract_function": "decimals",
+      "parameters": []
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "contract_function": "name",
+      "parameters": []
+    },
+    {
+      "name": "symbol",
+      "type": "string",
+      "contract_function": "symbol",
+      "parameters": []
+    },
+    {
+      "name": "totalBurned",
+      "type": "bigint",
+      "contract_function": "totalBurned",
+      "parameters": []
+    },
+    {
+      "name": "totalSupply",
+      "type": "bigint",
+      "contract_function": "totalSupply",
+      "parameters": []
+    },
+    {
+      "name": "owner",
+      "type": "string",
+      "contract_function": "owner",
+      "parameters": []
+    }
+  ],
+  "typescript_interfaces": {
+    "contract_snapshot_interface_code": "interface DFIDTokenSnapshot {\n  allowance: bigint;\n  balanceOf: bigint;\n  decimals: number;\n  name: string;\n  symbol: string;\n  totalBurned: bigint;\n  totalSupply: bigint;\n  owner: string;\n}",
+    "interface_name": "DFIDTokenSnapshot"
+  }
+}
