@@ -28,7 +28,6 @@ export function createDfireStakersActor(account: Account, contracts: Record<stri
     actor = new Actor(
         "DfireStakers",
         account,
-        contracts,
         actions,
     );
     return actor;

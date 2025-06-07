@@ -23,7 +23,6 @@ export function createLiquidatorActor(account: Account, contracts: Record<string
     actor = new Actor(
         "Liquidator",
         account,
-        contracts,
         actions,
     );
     return actor;

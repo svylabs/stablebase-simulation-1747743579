@@ -28,7 +28,6 @@ export function createStabilityPoolDepositorsActor(account: Account, contracts: 
     actor = new Actor(
         "StabilityPoolDepositors",
         account,
-        contracts,
         actions,
     );
     return actor;

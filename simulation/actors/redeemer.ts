@@ -18,7 +18,6 @@ export function createRedeemerActor(account: Account, contracts: Record<string, 
     actor = new Actor(
         "Redeemer",
         account,
-        contracts,
         actions,
     );
     return actor;
