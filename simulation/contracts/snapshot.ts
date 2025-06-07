@@ -5,16 +5,40 @@ import { Contract, HardhatEthersSigner } from "ethers";
 import { Actor } from "@svylabs/ilumina";
 
 
+import { takedfidTokenContractSnapshot } from "./dfidToken_snapshot.ts";
+
+import { takedfireTokenContractSnapshot } from "./dfireToken_snapshot.ts";
+
+import { takedfireStakingContractSnapshot } from "./dfireStaking_snapshot.ts";
+
 import { takestabilityPoolContractSnapshot } from "./stabilityPool_snapshot.ts";
 
 import { takestableBaseCDPContractSnapshot } from "./stableBaseCDP_snapshot.ts";
 
+import { takesafesOrderedForLiquidationContractSnapshot } from "./safesOrderedForLiquidation_snapshot.ts";
+
+import { takesafesOrderedForRedemptionContractSnapshot } from "./safesOrderedForRedemption_snapshot.ts";
+
+import { takemockPriceOracleContractSnapshot } from "./mockPriceOracle_snapshot.ts";
+
 
 export interface ContractSnapshot {
 
-    stabilityPool: StabilityPoolSnapshot;
+    dfidToken: DFIDTokenSnapshot;
+
+    dfireToken: DFIRETokenSnapshot;
+
+    dfireStaking: DFIREStakingSnapshot;
+
+    stabilityPool: StabilityPoolState;
 
     stableBaseCDP: StableBaseCDPSnapshot;
+
+    safesOrderedForLiquidation: OrderedDoublyLinkedListSnapshot;
+
+    safesOrderedForRedemption: OrderedDoublyLinkedListSnapshot;
+
+    mockPriceOracle: MockPriceOracleSnapshot;
 
 }
 
@@ -34,9 +58,21 @@ export class ContractSnapshotProvider implements SnapshotProvider {
         };
         const contractSnapshot = {};
         
+        contractSnapshot["dfidToken"] = await takedfidTokenContractSnapshot(this.contracts.dfidToken, this.actors);
+        
+        contractSnapshot["dfireToken"] = await takedfireTokenContractSnapshot(this.contracts.dfireToken, this.actors);
+        
+        contractSnapshot["dfireStaking"] = await takedfireStakingContractSnapshot(this.contracts.dfireStaking, this.actors);
+        
         contractSnapshot["stabilityPool"] = await takestabilityPoolContractSnapshot(this.contracts.stabilityPool, this.actors);
         
         contractSnapshot["stableBaseCDP"] = await takestableBaseCDPContractSnapshot(this.contracts.stableBaseCDP, this.actors);
+        
+        contractSnapshot["safesOrderedForLiquidation"] = await takesafesOrderedForLiquidationContractSnapshot(this.contracts.safesOrderedForLiquidation, this.actors);
+        
+        contractSnapshot["safesOrderedForRedemption"] = await takesafesOrderedForRedemptionContractSnapshot(this.contracts.safesOrderedForRedemption, this.actors);
+        
+        contractSnapshot["mockPriceOracle"] = await takemockPriceOracleContractSnapshot(this.contracts.mockPriceOracle, this.actors);
         
         snapshot.contractSnapshot = contractSnapshot;
         for (const actor of this.actors) {

@@ -2,239 +2,192 @@
 
 import { ethers } from 'ethers';
 import { Actor, Snapshot } from '@svylabs/ilumina';
-import { StableBaseCDPSnapshot } from './snapshot_interfaces';
+import { StableBaseCDPSnapshot, Safe, RedemptionCalculationOutput } from './snapshot_interfaces';
 
 /**
  * Takes a snapshot of StableBaseCDP state
  * @param contract - ethers.Contract instance
- * @param actors - Array of Actor instances
+ * @param actors - List of actors to fetch user specific data
  * @returns Promise returning the interface StableBaseCDPSnapshot
  */
 export async function takestableBaseCDPContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<StableBaseCDPSnapshot> {
   try {
-    const balances: { [accountAddress: string]: bigint } = {};
-    const approvals: { [_safeId: bigint]: string } = {};
-    const inactiveDebtAndCollateral: { [_safeId: bigint]: [bigint, bigint] } = {};
-    const approvalForAll: { [accountAddress: string]: { [accountAddress: string]: boolean } } = {};
-    const owners: { [_safeId: bigint]: string } = {};
-    const safes: { [_safeId: bigint]: { collateralAmount: bigint; borrowedAmount: bigint; weight: bigint; totalBorrowedAmount: bigint; feePaid: bigint } } = {};
-    const tokenURIs: { [_safeId: bigint]: string } = {};
-    const liquidationSnapshots: { [_safeId: bigint]: { collateralPerCollateralSnapshot: bigint, debtPerCollateralSnapshot: bigint } } = {};
+    const collateralLoss = BigInt(await contract.collateralLoss());
+    const cumulativeCollateralPerUnitCollateral = BigInt(await contract.cumulativeCollateralPerUnitCollateral());
+    const cumulativeDebtPerUnitCollateral = BigInt(await contract.cumulativeDebtPerUnitCollateral());
+    const debtLoss = BigInt(await contract.debtLoss());
+    const mode = Number(await contract.mode());
+    const name = await contract.name();
+    const sbrStakingPoolCanReceiveRewards = await contract.sbrStakingPoolCanReceiveRewards();
+    const stabilityPoolCanReceiveRewards = await contract.stabilityPoolCanReceiveRewards();
+    const symbol = await contract.symbol();
+    const totalCollateral = BigInt(await contract.totalCollateral());
+    const totalDebt = BigInt(await contract.totalDebt());
 
-    // Fetch all _safeId values from actors
-    const safeIds: bigint[] = [];
-    const accountAddresses: string[] = [];
+    const approvedAddress: { [tokenId: bigint]: string } = {};
+    const inactiveDebtAndCollateral: { [safeId: bigint]: [bigint, bigint] } = {};
+    const isApprovedForAll: { [owner: string]: { [operator: string]: boolean } } = {};
+    const liquidationSnapshots: { [safeId: bigint]: bigint[] } = {};
+    const ownerOf: { [tokenId: bigint]: string } = {};
+    const safes: { [safeId: bigint]: Safe } = {};
+    const tokenURI: { [tokenId: bigint]: string } = {};
+    const supportsInterfaceValues: boolean[] = [];
+    const redemptionCalculationOutputs: { [redemptionId: string]: RedemptionCalculationOutput } = {};
 
     for (const actor of actors) {
       const identifiers = actor.getIdentifiers();
 
-      // Handle _safeId
+      // Handle tokenId for approvedAddress, ownerOf, and tokenURI
       if (identifiers['_safeId']) {
-        const safeIdValues = Array.isArray(identifiers['_safeId']) ? identifiers['_safeId'] : [identifiers['_safeId']];
-        safeIdValues.forEach((safeId: string | number | bigint) => {
-          const safeIdBigInt = BigInt(safeId);
-          if (!safeIds.includes(safeIdBigInt)) {
-            safeIds.push(safeIdBigInt);
-          }
-        });
+        const safeId = BigInt(identifiers['_safeId'] as string);
+        try {
+          const inactiveDebtAndCollateralValues = await contract.getInactiveDebtAndCollateral(safeId);
+          inactiveDebtAndCollateral[safeId] = [BigInt(inactiveDebtAndCollateralValues[0]), BigInt(inactiveDebtAndCollateralValues[1])];
+        } catch (e: any) {
+          console.error(`Error fetching inactiveDebtAndCollateral for safeId ${safeId}:`, e.message);
+        }
+
+        try {
+          const liquidationSnapshotsValues = await contract.liquidationSnapshots(safeId);
+          liquidationSnapshots[safeId] = liquidationSnapshotsValues.map((value: any) => BigInt(value));
+        } catch (e: any) {
+          console.error(`Error fetching liquidationSnapshots for safeId ${safeId}:`, e.message);
+        }
+
+        try {
+          const safe = await contract.safes(safeId);
+          safes[safeId] = {
+            collateralAmount: BigInt(safe.collateralAmount),
+            borrowedAmount: BigInt(safe.borrowedAmount),
+            weight: BigInt(safe.weight),
+            totalBorrowedAmount: BigInt(safe.totalBorrowedAmount),
+            feePaid: BigInt(safe.feePaid),
+          };
+        } catch (e: any) {
+          console.error(`Error fetching safes for safeId ${safeId}:`, e.message);
+        }
+
+      }
+      if (identifiers['tokenId']) {
+        const tokenId = BigInt(identifiers['tokenId'] as string);
+        try {
+          approvedAddress[tokenId] = await contract.getApproved(tokenId);
+        } catch (e: any) {
+          console.error(`Error fetching approvedAddress for tokenId ${tokenId}:`, e.message);
+        }
+
+        try {
+          ownerOf[tokenId] = await contract.ownerOf(tokenId);
+        } catch (e: any) {
+          console.error(`Error fetching ownerOf for tokenId ${tokenId}:`, e.message);
+        }
+
+        try {
+          tokenURI[tokenId] = await contract.tokenURI(tokenId);
+        } catch (e: any) {
+          console.error(`Error fetching tokenURI for tokenId ${tokenId}:`, e.message);
+        }
       }
 
-      // Handle accountAddress
       if (identifiers['accountAddress']) {
-          const address = identifiers['accountAddress'] as string;
-          if (!accountAddresses.includes(address)) {
-              accountAddresses.push(address);
+        const accountAddress = identifiers['accountAddress'] as string;
+          try {
+            const isApproved = await contract.isApprovedForAll(accountAddress, accountAddress);
+            if (!isApprovedForAll[accountAddress]) {
+              isApprovedForAll[accountAddress] = {};
+            }
+            isApprovedForAll[accountAddress][accountAddress] = isApproved;
+          } catch (e: any) {
+            console.error(`Error fetching isApprovedForAll for owner ${accountAddress} and operator ${accountAddress}:`, e.message);
           }
       }
-    }
+      if (identifiers['interfaceId']) {
+          const interfaceId = identifiers['interfaceId'] as string;
+          try {
+            const supportsInterface = await contract.supportsInterface(interfaceId);
+            supportsInterfaceValues.push(supportsInterface)
+          } catch (e: any) {
+            console.error(`Error fetching supportsInterface for interfaceId ${interfaceId}:`, e.message);
+          }
+        }
 
+        if (identifiers['redemptionId'] && identifiers['_safeId']) {
+            const redemptionId = identifiers['redemptionId'] as string;
+            const safe = safes[BigInt(identifiers['_safeId'] as string)]
 
-    // Fetch balances for all account addresses
-    for (const accountAddress of accountAddresses) {
-      try {
-        const balance = await contract.balanceOf(accountAddress);
-        balances[accountAddress] = BigInt(balance.toString());
-      } catch (error: any) {
-        console.error(`Error fetching Balance for ${accountAddress}: ${error.message}`);
-      }
-    }
-
-    // Fetch approvals for all _safeIds
-    for (const _safeId of safeIds) {
-      try {
-        const approvedAddress = await contract.getApproved(_safeId);
-        approvals[_safeId] = approvedAddress;
-      } catch (error: any) {
-        console.error(`Error fetching Approval for ${_safeId}: ${error.message}`);
-      }
-
-      try {
-        const inactiveDebtAndCollateralData = await contract.getInactiveDebtAndCollateral(_safeId);
-        inactiveDebtAndCollateral[_safeId] = [BigInt(inactiveDebtAndCollateralData[0].toString()), BigInt(inactiveDebtAndCollateralData[1].toString())];
-      } catch (error: any) {
-        console.error(`Error fetching InactiveDebtAndCollateral for ${_safeId}: ${error.message}`);
-      }
-
-      try {
-        const owner = await contract.ownerOf(_safeId);
-        owners[_safeId] = owner;
-      } catch (error: any) {
-        console.error(`Error fetching Owner for ${_safeId}: ${error.message}`);
-      }
-
-      try {
-        const safeData = await contract.safes(_safeId);
-        safes[_safeId] = { collateralAmount: BigInt(safeData.collateralAmount.toString()), borrowedAmount: BigInt(safeData.borrowedAmount.toString()), weight: BigInt(safeData.weight.toString()), totalBorrowedAmount: BigInt(safeData.totalBorrowedAmount.toString()), feePaid: BigInt(safeData.feePaid.toString()) };
-      } catch (error: any) {
-        console.error(`Error fetching Safe for ${_safeId}: ${error.message}`);
-      }
-
-      try {
-        const tokenURI = await contract.tokenURI(_safeId);
-        tokenURIs[_safeId] = tokenURI;
-      } catch (error: any) {
-        console.error(`Error fetching TokenURI for ${_safeId}: ${error.message}`);
-      }
-      try {
-        const liquidationSnapshot = await contract.liquidationSnapshots(_safeId);
-        liquidationSnapshots[_safeId] = { collateralPerCollateralSnapshot: BigInt(liquidationSnapshot.collateralPerCollateralSnapshot.toString()), debtPerCollateralSnapshot: BigInt(liquidationSnapshot.debtPerCollateralSnapshot.toString()) };
-      } catch (error: any) {
-          console.error(`Error fetching LiquidationSnapshots for ${_safeId}: ${error.message}`);
-      }
-    }
-
-    // Fetch approvalForAll for all account address pairs
-    for (const ownerAddress of accountAddresses) {
-        approvalForAll[ownerAddress] = {};
-        for (const operatorAddress of accountAddresses) {
+            // Dummy values, implement if needed
+            redemptionCalculationOutputs[redemptionId] = {
+                borrowMode: false,
+                _collateralToRedeem: BigInt(0),
+                _amountToRedeem: BigInt(0),
+                _amountToRefund: BigInt(0),
+                _ownerFee: BigInt(0),
+                _redeemerFee: BigInt(0),
+            };
             try {
-                const isApproved = await contract.isApprovedForAll(ownerAddress, operatorAddress);
-                approvalForAll[ownerAddress][operatorAddress] = isApproved;
-            } catch (error: any) {
-                console.error(`Error fetching ApprovalForAll for owner ${ownerAddress} and operator ${operatorAddress}: ${error.message}`);
-                approvalForAll[ownerAddress][operatorAddress] = false; // Default to false in case of error
+                // Assuming calculateRedemptionAmountsAndFee takes a Safe object
+                // and other parameters.
+                //Adapt this part based on the exact contract function signature
+
+                const collateralPrice = BigInt(1) // DUMMY VALUE NEEDS TO BE REPLACED
+                const amountToRedeem = BigInt(1); // DUMMY VALUE NEEDS TO BE REPLACED
+
+                if(safe){
+                    const redemptionCalculation = await contract.calculateRedemptionAmountsAndFee(
+                        safe,
+                        amountToRedeem,
+                        collateralPrice
+                    );
+
+                    redemptionCalculationOutputs[redemptionId] = {
+                        borrowMode: redemptionCalculation.borrowMode,
+                        _collateralToRedeem: BigInt(redemptionCalculation._collateralToRedeem),
+                        _amountToRedeem: BigInt(redemptionCalculation._amountToRedeem),
+                        _amountToRefund: BigInt(redemptionCalculation._amountToRefund),
+                        _ownerFee: BigInt(redemptionCalculation._ownerFee),
+                        _redeemerFee: BigInt(redemptionCalculation._redeemerFee),
+                    };
+
+                }
+
+
+            } catch (e: any) {
+                console.error(`Error fetching redemptionCalculation for redemptionId ${redemptionId}:`, e.message);
             }
         }
     }
 
-    let collateralLoss: bigint;
-    try {
-      const collateralLossResult = await contract.collateralLoss();
-      collateralLoss = BigInt(collateralLossResult.toString());
-    } catch (error: any) {
-      console.error(`Error fetching CollateralLoss: ${error.message}`);
-      collateralLoss = BigInt(0);
-    }
-
-    let cumulativeCollateralPerUnitCollateral: bigint;
-    try {
-      const cumulativeCollateralPerUnitCollateralResult = await contract.cumulativeCollateralPerUnitCollateral();
-      cumulativeCollateralPerUnitCollateral = BigInt(cumulativeCollateralPerUnitCollateralResult.toString());
-    } catch (error: any) {
-      console.error(`Error fetching CumulativeCollateralPerUnitCollateral: ${error.message}`);
-      cumulativeCollateralPerUnitCollateral = BigInt(0);
-    }
-
-    let cumulativeDebtPerUnitCollateral: bigint;
-    try {
-      const cumulativeDebtPerUnitCollateralResult = await contract.cumulativeDebtPerUnitCollateral();
-      cumulativeDebtPerUnitCollateral = BigInt(cumulativeDebtPerUnitCollateralResult.toString());
-    } catch (error: any) {
-      console.error(`Error fetching CumulativeDebtPerUnitCollateral: ${error.message}`);
-      cumulativeDebtPerUnitCollateral = BigInt(0);
-    }
-
-    let debtLoss: bigint;
-    try {
-      const debtLossResult = await contract.debtLoss();
-      debtLoss = BigInt(debtLossResult.toString());
-    } catch (error: any) {
-      console.error(`Error fetching DebtLoss: ${error.message}`);
-      debtLoss = BigInt(0);
-    }
-
-    let mode: number;
-    try {
-      const modeResult = await contract.mode();
-      mode = Number(modeResult);
-    } catch (error: any) {
-      console.error(`Error fetching Mode: ${error.message}`);
-      mode = 0;
-    }
-
-    let name: string;
-    try {
-      name = await contract.name();
-    } catch (error: any) {
-      console.error(`Error fetching Name: ${error.message}`);
-      name = '';
-    }
-
-    let sbrStakingPoolCanReceiveRewards: boolean;
-    try {
-      sbrStakingPoolCanReceiveRewards = await contract.sbrStakingPoolCanReceiveRewards();
-    } catch (error: any) {
-      console.error(`Error fetching SBRStakingPoolCanReceiveRewards: ${error.message}`);
-      sbrStakingPoolCanReceiveRewards = false;
-    }
-
-    let stabilityPoolCanReceiveRewards: boolean;
-    try {
-      stabilityPoolCanReceiveRewards = await contract.stabilityPoolCanReceiveRewards();
-    } catch (error: any) {
-      console.error(`Error fetching StabilityPoolCanReceiveRewards: ${error.message}`);
-      stabilityPoolCanReceiveRewards = false;
-    }
-
-    let symbol: string;
-    try {
-      symbol = await contract.symbol();
-    } catch (error: any) {
-      console.error(`Error fetching Symbol: ${error.message}`);
-      symbol = '';
-    }
-
-    let totalCollateral: bigint;
-    try {
-      const totalCollateralResult = await contract.totalCollateral();
-      totalCollateral = BigInt(totalCollateralResult.toString());
-    } catch (error: any) {
-      console.error(`Error fetching TotalCollateral: ${error.message}`);
-      totalCollateral = BigInt(0);
-    }
-
-    let totalDebt: bigint;
-    try {
-      const totalDebtResult = await contract.totalDebt();
-      totalDebt = BigInt(totalDebtResult.toString());
-    } catch (error: any) {
-      console.error(`Error fetching TotalDebt: ${error.message}`);
-      totalDebt = BigInt(0);
-    }
-
     return {
-      balances,
       collateralLoss,
       cumulativeCollateralPerUnitCollateral,
       cumulativeDebtPerUnitCollateral,
       debtLoss,
-      approvals,
+      approvedAddress,
       inactiveDebtAndCollateral,
-      approvalForAll,
+      isApprovedForAll,
+      liquidationSnapshots,
       mode,
       name,
-      owners,
+      ownerOf,
+      redemptionCalculation: Object.values(redemptionCalculationOutputs).length > 0 ? Object.values(redemptionCalculationOutputs)[0] : {
+                borrowMode: false,
+                _collateralToRedeem: BigInt(0),
+                _amountToRedeem: BigInt(0),
+                _amountToRefund: BigInt(0),
+                _ownerFee: BigInt(0),
+                _redeemerFee: BigInt(0),
+            }, // just return the first value, if multiple are present
       safes,
       sbrStakingPoolCanReceiveRewards,
       stabilityPoolCanReceiveRewards,
       symbol,
-      tokenURIs,
+      supportsInterface: supportsInterfaceValues.length > 0 ? supportsInterfaceValues[0] : false, // just return the first value, if multiple are present
+      tokenURI,
       totalCollateral,
       totalDebt,
-      liquidationSnapshots
     };
   } catch (error: any) {
-    console.error(`Error taking StableBaseCDP snapshot: ${error.message}`);
+    console.error('Error taking StableBaseCDP snapshot:', error.message);
     throw error;
   }
 }
