@@ -1,8 +1,8 @@
 {
   "attributes": [
     {
-      "name": "allowance",
-      "type": "bigint",
+      "name": "allowanceAmount",
+      "type": "uint256",
       "contract_function": "allowance",
       "parameters": [
         {
@@ -18,8 +18,8 @@
       ]
     },
     {
-      "name": "balanceOf",
-      "type": "bigint",
+      "name": "accountBalance",
+      "type": "uint256",
       "contract_function": "balanceOf",
       "parameters": [
         {
@@ -30,44 +30,38 @@
       ]
     },
     {
-      "name": "decimals",
-      "type": "number",
+      "name": "decimalPlaces",
+      "type": "uint8",
       "contract_function": "decimals",
       "parameters": []
     },
     {
-      "name": "name",
+      "name": "tokenName",
       "type": "string",
       "contract_function": "name",
       "parameters": []
     },
     {
-      "name": "symbol",
+      "name": "tokenSymbol",
       "type": "string",
       "contract_function": "symbol",
       "parameters": []
     },
     {
-      "name": "totalBurned",
-      "type": "bigint",
+      "name": "totalBurnedAmount",
+      "type": "uint256",
       "contract_function": "totalBurned",
       "parameters": []
     },
     {
-      "name": "totalSupply",
-      "type": "bigint",
+      "name": "totalTokenSupply",
+      "type": "uint256",
       "contract_function": "totalSupply",
-      "parameters": []
-    },
-    {
-      "name": "owner",
-      "type": "string",
-      "contract_function": "owner",
       "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface DFIDTokenSnapshot {\n  allowance: bigint;\n  balanceOf: bigint;\n  decimals: number;\n  name: string;\n  symbol: string;\n  totalBurned: bigint;\n  totalSupply: bigint;\n  owner: string;\n}",
+    "contract_snapshot_interface_code": "interface DFIDTokenSnapshot {\n  allowanceAmount: bigint;\n  accountBalance: bigint;\n  decimalPlaces: number;\n  tokenName: string;\n  tokenSymbol: string;\n  totalBurnedAmount: bigint;\n  totalTokenSupply: bigint;\n}",
     "interface_name": "DFIDTokenSnapshot"
   }
 }
