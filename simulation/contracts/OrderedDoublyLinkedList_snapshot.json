@@ -1,0 +1,61 @@
+{
+  "attributes": [
+    {
+      "name": "head",
+      "type": "uint256",
+      "contract_function": "getHead",
+      "parameters": []
+    },
+    {
+      "name": "node",
+      "type": "tuple",
+      "contract_function": "getNode",
+      "parameters": [
+        {
+          "name": "id",
+          "type": "uint256",
+          "reference": "_safeId"
+        }
+      ]
+    },
+    {
+      "name": "nodes",
+      "type": "mapping",
+      "contract_function": "nodes",
+      "parameters": [
+        {
+          "name": "",
+          "type": "uint256",
+          "reference": "_safeId"
+        }
+      ]
+    },
+    {
+      "name": "tail",
+      "type": "uint256",
+      "contract_function": "getTail",
+      "parameters": []
+    },
+    {
+      "name": "getNodes",
+      "type": "tuple[50]",
+      "contract_function": "getNodes",
+      "parameters": [
+        {
+          "name": "beginAt",
+          "type": "uint256",
+          "reference": "_safeId"
+        },
+        {
+          "name": "total",
+          "type": "uint256",
+          "reference": "_safeId"
+        }
+      ]
+    }
+  ],
+  "typescript_interfaces": {
+    "contract_snapshot_interface_code": "interface OrderedDoublyLinkedListState {\n  head: bigint;\n  tail: bigint;\n  nodes: { [key: bigint]: Node };\n  getNodes: [Node[], bigint];\n}\n\ninterface Node {\n  value: bigint;\n  prev: bigint;\n  next: bigint;\n}\n",
+    "interface_name": "OrderedDoublyLinkedListState"
+  }
+}
