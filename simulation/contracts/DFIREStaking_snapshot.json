@@ -1,0 +1,56 @@
+{
+  "attributes": [
+    {
+      "name": "stakeInfo",
+      "type": "tuple",
+      "contract_function": "getStake",
+      "parameters": [
+        {
+          "name": "user",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
+    },
+    {
+      "name": "rewardSenderActive",
+      "type": "boolean",
+      "contract_function": "rewardSenderActive",
+      "parameters": []
+    },
+    {
+      "name": "totalCollateralPerToken",
+      "type": "uint256",
+      "contract_function": "totalCollateralPerToken",
+      "parameters": []
+    },
+    {
+      "name": "totalRewardPerToken",
+      "type": "uint256",
+      "contract_function": "totalRewardPerToken",
+      "parameters": []
+    },
+    {
+      "name": "totalStake",
+      "type": "uint256",
+      "contract_function": "totalStake",
+      "parameters": []
+    },
+    {
+      "name": "userPendingReward",
+      "type": "tuple",
+      "contract_function": "userPendingReward",
+      "parameters": [
+        {
+          "name": "user",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
+    }
+  ],
+  "typescript_interfaces": {
+    "contract_snapshot_interface_code": "interface DFIREStakingState {\n  stakeInfo: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint; };\n  rewardSenderActive: boolean;\n  totalCollateralPerToken: bigint;\n  totalRewardPerToken: bigint;\n  totalStake: bigint;\n  userPendingReward: { reward: bigint; collateralReward: bigint; };\n}\n",
+    "interface_name": "DFIREStakingState"
+  }
+}
