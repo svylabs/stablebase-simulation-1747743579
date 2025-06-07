@@ -11,51 +11,45 @@
     "contract_name": "StableBaseCDP",
     "function_name": "addCollateral",
     "pre_execution_parameter_generation_rules": [
-      "safeId: Must be a valid, existing safeId (i.e., safes[safeId].collateralAmount > 0 before the transaction).",
-      "amount: Must be a non-zero positive integer, and msg.value must equal this amount.",
-      "nearestSpotInLiquidationQueue: Can be 0. If not 0, it must be a valid safeId that exists in the liquidation queue before the transaction (i.e., safesOrderedForLiquidation.nodes[nearestSpotInLiquidationQueue].value > 0).",
-      "msg.value: Must equal the 'amount' parameter.",
-      "The user must be the owner of the specified safe (checked by _onlyOwner(safeId) modifier)."
+      "The `safeId` parameter should correspond to an existing safe, i.e., `safes[safeId].collateralAmount > 0` should evaluate to true.",
+      "The `amount` parameter should be a positive integer representing the amount of collateral to add. This value also has to be sent as msg.value when calling this function.",
+      "The `nearestSpotInLiquidationQueue` parameter should be a `safeId` of another safe currently in the liquidation queue, and serves as a hint for the doubly linked list insertion. If the doubly linked list is empty, or this is the first element, it must be zero."
     ],
     "on_execution_state_updates_made": [
       {
-        "category": "Collateral and Debt",
+        "category": "Collateral & Debt Updates",
         "state_update_descriptions": [
-          "The _updateSafe function is called, potentially updating collateralAmount and borrowedAmount due to accrued interest.",
-          "safes[safeId].collateralAmount increases by amount (after any potential update in _updateSafe).",
-          "safes[safeId].borrowedAmount may increase due to accrued interest if liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral.",
-          "safes[safeId].totalBorrowedAmount may increase due to accrued interest if liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral.",
-          "totalCollateral increases by amount plus any collateralIncrease due to accrued interest (from _updateSafe).",
-          "totalDebt may increase due to accrued interest (debtIncrease from _updateSafe) and is updated using the _updateTotalDebt function. PROTOCOL_MODE may change from BOOTSTRAP to NORMAL if totalDebt exceeds BOOTSTRAP_MODE_DEBT_THRESHOLD.",
-          "liquidationSnapshots[_safeId].debtPerCollateralSnapshot is updated to cumulativeDebtPerUnitCollateral if liquidationSnapshot.collateralPerCollateralSnapshot was not equal to cumulativeCollateralPerUnitCollateral before the transaction.",
-          "liquidationSnapshots[_safeId].collateralPerCollateralSnapshot is updated to cumulativeCollateralPerUnitCollateral if liquidationSnapshot.collateralPerCollateralSnapshot was not equal to cumulativeCollateralPerUnitCollateral before the transaction."
+          "The `_updateSafe` function is called, potentially modifying `safe.borrowedAmount` and `safe.collateralAmount` based on cumulative snapshots of debt and collateral per unit collateral.",
+          "The `collateralAmount` field in the `safes` mapping for the given `safeId` is increased by `amount` (or potentially a different value if `_updateSafe` modifies it).",
+          "The `totalCollateral` state variable is increased by `amount` (or potentially a different value if `_updateSafe` modifies `safe.collateralAmount`).",
+          "The `liquidationSnapshots` mapping is updated for the given `safeId` with the current `cumulativeDebtPerUnitCollateral` and `cumulativeCollateralPerUnitCollateral` values.",
+          "The `_updateTotalDebt` internal function might be called, updating the `totalDebt` state variable if `cumulativeDebtPerUnitCollateral` has changed since the last snapshot."
         ]
       },
       {
         "category": "Liquidation Queue",
         "state_update_descriptions": [
-          "The position of safeId in the liquidation queue is updated based on the new collateral ratio. This involves calling safesOrderedForLiquidation.upsert, which may re-order the queue."
+          "The `safesOrderedForLiquidation` doubly linked list is updated to reflect the new collateral ratio of the safe.",
+          "The position of the safe in the liquidation queue is updated based on its new collateral ratio."
         ]
       }
     ],
     "post_execution_contract_state_validation_rules": [
       {
-        "category": "Collateral and Debt",
+        "category": "Collateral & Debt Updates",
         "rule_descriptions": [
-          "safes[safeId].collateralAmount should be equal to the old collateralAmount plus the added amount and any potential collateralIncrease from accrued interest (if applicable).",
-          "totalCollateral should be equal to the old totalCollateral plus the added amount and any potential collateralIncrease from accrued interest (if applicable).",
-          "safes[safeId].borrowedAmount should be equal to the old borrowedAmount plus any potential debtIncrease from accrued interest (if applicable).",
-          "totalDebt should be equal to the old totalDebt plus any potential debtIncrease from accrued interest (if applicable).",
-          "PROTOCOL_MODE should remain unchanged unless totalDebt crossed the BOOTSTRAP_MODE_DEBT_THRESHOLD due to debtIncrease.",
-          "If _updateSafe was called, then liquidationSnapshots[safeId].debtPerCollateralSnapshot should be equal to cumulativeDebtPerUnitCollateral after the transaction.",
-          "If _updateSafe was called, then liquidationSnapshots[safeId].collateralPerCollateralSnapshot should be equal to cumulativeCollateralPerUnitCollateral after the transaction.",
-          "The safe's position in the liquidation queue should be updated correctly, reflecting the new collateral ratio."
+          "The `collateralAmount` field in the `safes` mapping with key `safeId` should be increased. The exact amount depends on `_updateSafe`.",
+          "The `borrowedAmount` field in the `safes` mapping with key `safeId` should be updated after the execution of `_updateSafe` function. Check that the value is consistent with the cumulative snapshots.",
+          "The `totalCollateral` should be increased (or decreased if there were inactive collateral). The exact amount depends on `_updateSafe`.",
+          "Check that `cumulativeDebtPerUnitCollateral` and `cumulativeCollateralPerUnitCollateral` are properly updated.",
+          "Verify `totalDebt` is correctly updated based on potential debt increases."
         ]
       },
       {
         "category": "Liquidation Queue",
         "rule_descriptions": [
-          "The position of safeId in the liquidation queue is correctly updated according to the new ratio."
+          "The ratio of borrowed amount to collateral amount for the safe with ID `safeId` should be updated in the liquidation queue.",
+          "The position of the safe in the liquidation queue should be updated based on the new ratio."
         ]
       }
     ]
@@ -71,94 +65,95 @@
         "contract_name": "StableBaseCDP",
         "state_updated": [
           {
-            "state_variable_name": "safes[safeId].collateralAmount",
+            "state_variable_name": "safe.collateralAmount",
             "type": "uint256",
-            "what_does_it_track": "The amount of collateral deposited for a specific safe (CDP).",
-            "why_is_is_important": "Reflects the current collateralization of the CDP, impacting liquidation risk and available borrowing power.",
-            "when_is_it_updated": "When collateral is added to a safe.",
-            "how_to_validate_state_update": "Check the safes mapping for the given safeId, the collateralAmount should be increased by the amount.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Updates the collateral amount of a specific safe.",
+            "what_does_it_track": "The amount of collateral locked in a Safe.",
+            "why_is_is_important": "Tracks the total collateral held by a specific Safe (CDP).",
+            "when_is_it_updated": "When collateral is added to the Safe.",
+            "how_to_validate_state_update": "Check the Safe's collateralAmount after the function call. It should increase by the amount added.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Increased by the amount of collateral added (msg.value).",
             "conditions": [
-              "Safe must exist (safe.collateralAmount > 0)",
-              "msg.value must equal amount"
+              "msg.value must be equal to amount",
+              "safe.collateralAmount must be greater than 0"
             ]
           },
           {
             "state_variable_name": "totalCollateral",
             "type": "uint256",
-            "what_does_it_track": "The aggregate amount of collateral in the system.",
-            "why_is_is_important": "System-wide health metric used for calculating global collateralization ratio.",
-            "when_is_it_updated": "When collateral is added to a safe.",
-            "how_to_validate_state_update": "Check the totalCollateral state variable, it should be increased by the amount.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Updates the total collateral held by the contract.",
+            "what_does_it_track": "The sum of all collateral held in all Safes.",
+            "why_is_is_important": "Tracks the total collateral in the system.",
+            "when_is_it_updated": "When collateral is added to any Safe.",
+            "how_to_validate_state_update": "Check the totalCollateral after the function call.  It should increase by the amount added.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Increased by the amount of collateral added (msg.value).",
             "conditions": [
-              "Safe must exist (safe.collateralAmount > 0)",
-              "msg.value must equal amount"
+              "msg.value must be equal to amount",
+              "safe.collateralAmount must be greater than 0"
             ]
           },
           {
-            "state_variable_name": "safes[safeId].borrowedAmount",
+            "state_variable_name": "_newRatio",
             "type": "uint256",
-            "what_does_it_track": "Tracks inactive debt and collateral.",
-            "why_is_is_important": "Ensures borrowed amount is up-to-date before adding collateral.",
-            "when_is_it_updated": "Before adding collateral, if the liquidation snapshot is outdated.",
-            "how_to_validate_state_update": "Check liquidationSnapshots mapping for the given safeId, debtPerCollateralSnapshot must be equal to cumulativeDebtPerUnitCollateral.",
+            "what_does_it_track": "Ratio of borrowed amount to collateral amount for a given safe",
+            "why_is_is_important": "Tracks the debt to collateral ratio",
+            "when_is_it_updated": "When collateral is added to any Safe.",
+            "how_to_validate_state_update": "Calculate the new ratio, borrowedAmount / collateralAmount.  Verify on chain value matches.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the safe's borrowed amount based on cumulative debt per collateral.",
+            "summary_of_update": "The ratio is updated by dividing borrowed amount by collateral amount",
             "conditions": [
-              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+              "safe.collateralAmount must be greater than 0",
+              "msg.value must be equal to amount"
             ]
           },
           {
-            "state_variable_name": "safes[safeId].totalBorrowedAmount",
+            "state_variable_name": "safe.borrowedAmount",
             "type": "uint256",
-            "what_does_it_track": "Total amount borrowed for the Safe.",
-            "why_is_is_important": "Tracks the total borrowed amount for the Safe.",
-            "when_is_it_updated": "Before adding collateral, if the liquidation snapshot is outdated.",
-            "how_to_validate_state_update": "Check the safes mapping for the given safeId, the totalBorrowedAmount should be increased by the debtIncrease.",
+            "what_does_it_track": "The cumulative debt per unit of collateral.",
+            "why_is_is_important": "Allows accounting for interest accrued on debt.",
+            "when_is_it_updated": "When the collateral per collateral snapshot does not equal the cumulative collateral per unit collateral.",
+            "how_to_validate_state_update": "Verify borrowedAmount is updated with new debt.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the safe's total borrowed amount.",
-            "conditions": [
-              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
-            ]
-          },
-          {
-            "state_variable_name": "liquidationSnapshots[safeId].debtPerCollateralSnapshot",
-            "type": "uint256",
-            "what_does_it_track": "Stores the cumulative debt per unit collateral at the last snapshot.",
-            "why_is_is_important": "Used to calculate inactive debt and collateral.",
-            "when_is_it_updated": "Before adding collateral, if the liquidation snapshot is outdated.",
-            "how_to_validate_state_update": "Check liquidationSnapshots mapping for the given safeId, debtPerCollateralSnapshot must be equal to cumulativeDebtPerUnitCollateral.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates the liquidation snapshot's debt per collateral snapshot.",
+            "summary_of_update": "Increased by debtIncrease.",
             "conditions": [
               "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
             ]
           },
           {
-            "state_variable_name": "safes[safeId].collateralAmount",
+            "state_variable_name": "safe.totalBorrowedAmount",
             "type": "uint256",
-            "what_does_it_track": "Tracks inactive debt and collateral.",
-            "why_is_is_important": "Ensures collateral amount is up-to-date before adding collateral.",
-            "when_is_it_updated": "Before adding collateral, if the liquidation snapshot is outdated.",
-            "how_to_validate_state_update": "Check the safes mapping for the given safeId, the collateralAmount should be increased by the collateralIncrease.",
+            "what_does_it_track": "The cumulative debt per unit of collateral.",
+            "why_is_is_important": "Allows accounting for interest accrued on debt.",
+            "when_is_it_updated": "When the collateral per collateral snapshot does not equal the cumulative collateral per unit collateral.",
+            "how_to_validate_state_update": "Verify totalBorrowedAmount is updated with new debt.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the safe's collateral amount based on cumulative collateral per unit collateral.",
+            "summary_of_update": "Increased by debtIncrease.",
             "conditions": [
               "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
             ]
           },
           {
-            "state_variable_name": "liquidationSnapshots[safeId].collateralPerCollateralSnapshot",
+            "state_variable_name": "safe.collateralAmount",
             "type": "uint256",
-            "what_does_it_track": "Stores the cumulative collateral per unit collateral at the last snapshot.",
-            "why_is_is_important": "Used to calculate inactive debt and collateral.",
-            "when_is_it_updated": "Before adding collateral, if the liquidation snapshot is outdated.",
-            "how_to_validate_state_update": "Check liquidationSnapshots mapping for the given safeId, collateralPerCollateralSnapshot must be equal to cumulativeCollateralPerUnitCollateral.",
+            "what_does_it_track": "The cumulative collateral per unit of collateral.",
+            "why_is_is_important": "Allows accounting for interest accrued on collateral.",
+            "when_is_it_updated": "When the collateral per collateral snapshot does not equal the cumulative collateral per unit collateral.",
+            "how_to_validate_state_update": "Verify collateralAmount is updated with new collateral.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the liquidation snapshot's collateral per collateral snapshot.",
+            "summary_of_update": "Increased by collateralIncrease.",
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "totalCollateral",
+            "type": "uint256",
+            "what_does_it_track": "The cumulative collateral per unit of collateral.",
+            "why_is_is_important": "Allows accounting for interest accrued on collateral.",
+            "when_is_it_updated": "When the collateral per collateral snapshot does not equal the cumulative collateral per unit collateral.",
+            "how_to_validate_state_update": "Verify totalCollateral is updated with new collateral.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Increased by collateralIncrease.",
             "conditions": [
               "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
             ]
@@ -166,12 +161,25 @@
           {
             "state_variable_name": "totalDebt",
             "type": "uint256",
-            "what_does_it_track": "Tracks the total debt in the protocol.",
-            "why_is_is_important": "Maintains a record of the total debt, critical for assessing system solvency and stability.",
-            "when_is_it_updated": "Before adding collateral, if the liquidation snapshot is outdated.",
-            "how_to_validate_state_update": "Check the totalDebt state variable, it should be increased by debtIncrease.",
+            "what_does_it_track": "The total outstanding debt in the protocol.",
+            "why_is_is_important": "Maintains the total debt in the system, used for protocol mode transitions and overall debt tracking.",
+            "when_is_it_updated": "Whenever debt is added or subtracted, including through interest accrual.",
+            "how_to_validate_state_update": "Check totalDebt after the function call. It should reflect the added debt if adding collateral.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates total debt.",
+            "summary_of_update": "Increased by debtIncrease if adding collateral, decreased otherwise.",
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "liquidationSnapshots[_safeId]",
+            "type": "LiquidationSnapshot",
+            "what_does_it_track": "Collateral and debt values at the snapshot.",
+            "why_is_is_important": "Stores the snapshot of collateral and debt at the time of the last update, important for accurate debt calculation.",
+            "when_is_it_updated": "When the cumulative debt or collateral changes.",
+            "how_to_validate_state_update": "Verify liquidationSnapshots is updated.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates debtPerCollateralSnapshot and collateralPerCollateralSnapshot",
             "conditions": [
               "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
             ]
@@ -179,15 +187,14 @@
           {
             "state_variable_name": "PROTOCOL_MODE",
             "type": "SBStructs.Mode",
-            "what_does_it_track": "Tracks the current operating mode of the protocol (BOOTSTRAP or NORMAL).",
-            "why_is_is_important": "Controls certain protocol behaviors (e.g., fee structure, liquidation parameters) during bootstrap and normal operation.",
-            "when_is_it_updated": "If the total debt crosses the BOOTSTRAP_MODE_DEBT_THRESHOLD.",
-            "how_to_validate_state_update": "Check the PROTOCOL_MODE state variable, it may change from BOOTSTRAP to NORMAL if totalDebt exceeds BOOTSTRAP_MODE_DEBT_THRESHOLD.",
+            "what_does_it_track": "The protocol mode (BOOTSTRAP or NORMAL).",
+            "why_is_is_important": "Determines if the protocol should be in bootstrap or normal mode.",
+            "when_is_it_updated": "When total debt crosses the BOOTSTRAP_MODE_DEBT_THRESHOLD.",
+            "how_to_validate_state_update": "Check the PROTOCOL_MODE after the function call. It should be NORMAL if the debt condition is met.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the protocol mode based on the debt threshold.",
+            "summary_of_update": "Updated from BOOTSTRAP to NORMAL if debt exceeds the threshold.",
             "conditions": [
-              "debt > BOOTSTRAP_MODE_DEBT_THRESHOLD",
-              "PROTOCOL_MODE == SBStructs.Mode.BOOTSTRAP"
+              "debt > BOOTSTRAP_MODE_DEBT_THRESHOLD && PROTOCOL_MODE == SBStructs.Mode.BOOTSTRAP"
             ]
           }
         ]
@@ -196,74 +203,48 @@
         "contract_name": "OrderedDoublyLinkedList",
         "state_updated": [
           {
-            "state_variable_name": "nodes[safeId]",
+            "state_variable_name": "safesOrderedForLiquidation",
             "type": "IDoublyLinkedList.Node",
-            "what_does_it_track": "The order of safes (CDPs) based on their liquidation ratio.",
-            "why_is_is_important": "Determines the order in which CDPs are liquidated, optimizing for system solvency.",
-            "when_is_it_updated": "When collateral is added or removed, or when debt changes, to maintain the correct liquidation order.",
-            "how_to_validate_state_update": "Check the nodes mapping for the given safeId, its value, prev, and next should reflect its position in the sorted list. Also, check head and tail.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Updates or inserts a node into the liquidation queue.",
-            "conditions": []
+            "what_does_it_track": "A doubly-linked list of Safe IDs, ordered by their liquidation ratio.",
+            "why_is_is_important": "Maintains the order of Safes for liquidation purposes.",
+            "when_is_it_updated": "When a Safe's liquidation ratio changes (due to adding collateral, borrowing, or price fluctuations).",
+            "how_to_validate_state_update": "Inspect the linked list structure (head, tail, prev, next pointers) to ensure the Safe is in the correct position based on its ratio.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Inserts or updates a Safe's position in the liquidation queue based on its new liquidation ratio.",
+            "conditions": [
+              "nodes[id].value == 0 && nodes[id].next == 0 && nodes[id].prev == 0",
+              "nodes[_nearestSpot].prev == 0 && nodes[_nearestSpot].next == 0 && nodes[_nearestSpot].value == 0",
+              "_nearestSpot != _tail && nodes[_nearestSpot].value < node.value",
+              "_nearestSpot != _head && nodes[_nearestSpot].value >= node.value",
+              "_nearestSpot == _head",
+              "_nearestSpot == _tail",
+              "else"
+            ]
           },
           {
             "state_variable_name": "head",
             "type": "uint256",
-            "what_does_it_track": "The first element in the ordered list.",
-            "why_is_is_important": "Points to the beginning of the list.",
-            "when_is_it_updated": "When the list is empty, or when a node is inserted at the beginning.",
-            "how_to_validate_state_update": "Check the head state variable, it should point to the safeId with the lowest liquidation ratio.",
+            "what_does_it_track": "The head of the doubly linked list.",
+            "why_is_is_important": "Maintains the head of the doubly linked list.",
+            "when_is_it_updated": "If the head of the list is 0, sets the head.",
+            "how_to_validate_state_update": "Inspect the linked list structure (head) to ensure the Safe is in the correct position based on its ratio.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the head of the linked list.",
+            "summary_of_update": "Sets the head of the doubly linked list.",
             "conditions": [
-              "head == 0"
+              "_head == 0"
             ]
           },
           {
             "state_variable_name": "tail",
             "type": "uint256",
-            "what_does_it_track": "The last element in the ordered list.",
-            "why_is_is_important": "Points to the end of the list.",
-            "when_is_it_updated": "When the list is empty, or when a node is inserted at the end.",
-            "how_to_validate_state_update": "Check the tail state variable, it should point to the safeId with the highest liquidation ratio.",
+            "what_does_it_track": "The tail of the doubly linked list.",
+            "why_is_is_important": "Maintains the tail of the doubly linked list.",
+            "when_is_it_updated": "If the head of the list is 0, sets the tail.",
+            "how_to_validate_state_update": "Inspect the linked list structure (tail) to ensure the Safe is in the correct position based on its ratio.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the tail of the linked list.",
+            "summary_of_update": "Sets the tail of the doubly linked list.",
             "conditions": [
-              "head == 0"
-            ]
-          },
-          {
-            "state_variable_name": "nodes[safeId].next",
-            "type": "uint256",
-            "what_does_it_track": "The next element in the list.",
-            "why_is_is_important": "Maintains the structure of the list.",
-            "when_is_it_updated": "When a node is inserted or removed.",
-            "how_to_validate_state_update": "Check the nodes[safeId].next state variable.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates the next pointer of a node in the list.",
-            "conditions": [
-              "_nearestSpot == _head",
-              "nodes[_nearestSpot].value >= node.value",
-              "_nearestSpot == _tail",
-              "nodes[_nearestSpot].value < node.value",
-              "node.prev != 0"
-            ]
-          },
-          {
-            "state_variable_name": "nodes[safeId].prev",
-            "type": "uint256",
-            "what_does_it_track": "The previous element in the list.",
-            "why_is_is_important": "Maintains the structure of the list.",
-            "when_is_it_updated": "When a node is inserted or removed.",
-            "how_to_validate_state_update": "Check the nodes[safeId].prev state variable.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates the previous pointer of a node in the list.",
-            "conditions": [
-              "_nearestSpot == _head",
-              "nodes[_nearestSpot].value >= node.value",
-              "_nearestSpot == _tail",
-              "nodes[_nearestSpot].value < node.value",
-              "node.next != 0"
+              "_head == 0"
             ]
           }
         ]
@@ -310,12 +291,12 @@
         "references": {
           "references": [
             {
-              "state_variable_name": "_stableBaseCDP",
-              "contract_name": "safesOrderedForLiquidation"
+              "state_variable_name": "safesOrderedForLiquidation",
+              "contract_name": "OrderedDoublyLinkedList"
             },
             {
-              "state_variable_name": "_stableBaseCDP",
-              "contract_name": "safesOrderedForRedemption"
+              "state_variable_name": "safesOrderedForRedemption",
+              "contract_name": "OrderedDoublyLinkedList"
             }
           ]
         }
