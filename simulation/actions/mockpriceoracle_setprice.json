@@ -1,0 +1,86 @@
+{
+  "action": {
+    "name": "Set Price",
+    "summary": "Allows the owner to set the price.",
+    "contract_name": "MockPriceOracle",
+    "function_name": "setPrice",
+    "probability": 0.9
+  },
+  "action_detail": {
+    "action_name": "Set Price",
+    "contract_name": "MockPriceOracle",
+    "function_name": "setPrice",
+    "pre_execution_parameter_generation_rules": [
+      "The `_price` parameter for the `setPrice` function should be a uint256 representing the desired price.",
+      "The `_price` parameter should be a reasonable value, greater than 0. Consider setting the price to a realistic value, like 1 or 1000.",
+      "Ensure that the `_price` parameter is scaled appropriately. Since the `setPrice` function multiplies the input by 1e18, provide the desired price without scaling (e.g., if you want to set the price to 1, pass 1, not 1e18)."
+    ],
+    "on_execution_state_updates_made": [
+      {
+        "category": "Price",
+        "state_update_descriptions": [
+          "The `price` storage variable in the `MockPriceOracle` contract is updated to `_price * 1e18`."
+        ]
+      }
+    ],
+    "post_execution_contract_state_validation_rules": [
+      {
+        "category": "Price",
+        "rule_descriptions": [
+          "Verify that the `price` storage variable in the `MockPriceOracle` contract is updated to the value of `_price * 1e18` passed into the `setPrice` function.",
+          "Confirm that the `price` storage variable is not zero after the execution if `_price` was non-zero."
+        ]
+      },
+      {
+        "category": "Ownership",
+        "rule_descriptions": [
+          "Ensure that the `owner` storage variable remains unchanged after the execution of `setPrice`."
+        ]
+      },
+      {
+        "category": "Access Control",
+        "rule_descriptions": [
+          "Verify that only the contract owner can successfully call the `setPrice` function. Any other account should be reverted."
+        ]
+      }
+    ]
+  },
+  "action_execution": {
+    "action_name": "Set Price",
+    "contract_name": "MockPriceOracle",
+    "function_name": "setPrice",
+    "does_register_new_identifier": false,
+    "new_identifiers": [],
+    "all_state_updates": [
+      {
+        "contract_name": "MockPriceOracle",
+        "state_updated": [
+          {
+            "state_variable_name": "price",
+            "type": "uint256",
+            "what_does_it_track": "It tracks the current price.",
+            "why_is_is_important": "The `price` variable stores the current price, which is crucial for other contracts or users that rely on this oracle for price information. Updating this variable changes the core data provided by the oracle.",
+            "when_is_it_updated": "It is updated when the `setPrice` function is called.",
+            "how_to_validate_state_update": "Call the `price` function and compare it to the value that was set via `setPrice`.",
+            "has_conditional_updates": true,
+            "summary_of_update": "The `price` variable is updated to the value of the input `_price` multiplied by 1e18.",
+            "conditions": [
+              "The caller must be the owner of the contract (enforced by the `onlyOwner` modifier)."
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "action_context": {
+    "contract_context": [
+      {
+        "contract_name": "MockPriceOracle",
+        "code_snippet": "function setPrice(uint256 _price) external onlyOwner {\n        price = _price * 1e18;\n    }",
+        "references": {
+          "references": []
+        }
+      }
+    ]
+  }
+}
