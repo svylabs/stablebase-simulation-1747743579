@@ -1,0 +1,67 @@
+{
+  "attributes": [
+    {
+      "name": "Balance",
+      "type": "uint256",
+      "contract_function": "balanceOf",
+      "parameters": [
+        {
+          "name": "account",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
+    },
+    {
+      "name": "Decimals",
+      "type": "uint8",
+      "contract_function": "decimals",
+      "parameters": []
+    },
+    {
+      "name": "Name",
+      "type": "string",
+      "contract_function": "name",
+      "parameters": []
+    },
+    {
+      "name": "Symbol",
+      "type": "string",
+      "contract_function": "symbol",
+      "parameters": []
+    },
+    {
+      "name": "TotalBurned",
+      "type": "uint256",
+      "contract_function": "totalBurned",
+      "parameters": []
+    },
+    {
+      "name": "TotalSupply",
+      "type": "uint256",
+      "contract_function": "totalSupply",
+      "parameters": []
+    },
+    {
+      "name": "Allowance",
+      "type": "uint256",
+      "contract_function": "allowance",
+      "parameters": [
+        {
+          "name": "owner",
+          "type": "address",
+          "reference": "accountAddress"
+        },
+        {
+          "name": "spender",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
+    }
+  ],
+  "typescript_interfaces": {
+    "contract_snapshot_interface_code": "interface DFIRETokenSnapshot {\n  Balance: bigint;\n  Decimals: number;\n  Name: string;\n  Symbol: string;\n  TotalBurned: bigint;\n  TotalSupply: bigint;\n  Allowance: { [accountAddress: string]: bigint };\n}",
+    "interface_name": "DFIRETokenSnapshot"
+  }
+}
