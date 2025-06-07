@@ -1,8 +1,8 @@
 {
   "attributes": [
     {
-      "name": "allowances",
-      "type": "mapping",
+      "name": "Allowance",
+      "type": "view",
       "contract_function": "allowance",
       "parameters": [
         {
@@ -18,8 +18,8 @@
       ]
     },
     {
-      "name": "balances",
-      "type": "mapping",
+      "name": "Balance",
+      "type": "view",
       "contract_function": "balanceOf",
       "parameters": [
         {
@@ -30,38 +30,44 @@
       ]
     },
     {
-      "name": "name",
-      "type": "string",
-      "contract_function": "name",
-      "parameters": []
-    },
-    {
-      "name": "symbol",
-      "type": "string",
-      "contract_function": "symbol",
-      "parameters": []
-    },
-    {
-      "name": "decimals",
-      "type": "uint8",
+      "name": "Decimals",
+      "type": "view",
       "contract_function": "decimals",
       "parameters": []
     },
     {
-      "name": "totalSupply",
-      "type": "uint256",
-      "contract_function": "totalSupply",
+      "name": "Name",
+      "type": "view",
+      "contract_function": "name",
       "parameters": []
     },
     {
-      "name": "totalBurned",
-      "type": "uint256",
+      "name": "Owner",
+      "type": "view",
+      "contract_function": "owner",
+      "parameters": []
+    },
+    {
+      "name": "Symbol",
+      "type": "view",
+      "contract_function": "symbol",
+      "parameters": []
+    },
+    {
+      "name": "TotalBurned",
+      "type": "view",
       "contract_function": "totalBurned",
+      "parameters": []
+    },
+    {
+      "name": "TotalSupply",
+      "type": "view",
+      "contract_function": "totalSupply",
       "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface DFIRETokenSnapshot {\n  allowances: { [accountAddress: string]: bigint };\n  balances: { [accountAddress: string]: bigint };\n  name: string;\n  symbol: string;\n  decimals: number;\n  totalSupply: bigint;\n  totalBurned: bigint;\n}\n",
+    "contract_snapshot_interface_code": "interface DFIRETokenSnapshot {\n  Allowance: { [owner: string]: { [spender: string]: bigint } };\n  Balance: bigint;\n  Decimals: number;\n  Name: string;\n  Owner: string;\n  Symbol: string;\n  TotalBurned: bigint;\n  TotalSupply: bigint;\n}",
     "interface_name": "DFIRETokenSnapshot"
   }
 }
