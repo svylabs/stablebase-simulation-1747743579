@@ -1,0 +1,227 @@
+{
+  "action": {
+    "name": "Open Safe",
+    "summary": "Opens a new CDP (Safe).",
+    "contract_name": "StableBaseCDP",
+    "function_name": "openSafe",
+    "probability": 0.7
+  },
+  "action_detail": {
+    "action_name": "Open Safe",
+    "contract_name": "StableBaseCDP",
+    "function_name": "openSafe",
+    "pre_execution_parameter_generation_rules": [
+      "Generate a `_safeId` that is greater than 0 and has not been used before. Verify this by ensuring `safes[_safeId].collateralAmount == 0` and `_ownerOf(_safeId) == address(0)`, confirming that `_safeId` is a new, unused ID.",
+      "Generate an `_amount` greater than 0 representing the amount of collateral to deposit.",
+      "Ensure that `msg.value` (the amount of Ether sent with the transaction) is equal to `_amount`."
+    ],
+    "on_execution_state_updates_made": [
+      {
+        "category": "Safe Data",
+        "state_update_descriptions": [
+          "A new Safe is created and stored in the `safes` mapping using `_safeId` as the key.",
+          "The `collateralAmount` of the new Safe is set to `_amount`.",
+          "The `borrowedAmount` of the new Safe is initialized to 0.",
+          "The `weight` of the new Safe is initialized to 0.",
+          "The `totalBorrowedAmount` of the new Safe is initialized to 0.",
+          "The `feePaid` of the new Safe is initialized to 0.",
+          "A new `LiquidationSnapshot` is created and stored in the `liquidationSnapshots` mapping using `_safeId` as the key. The snapshot contains the current values of `cumulativeDebtPerUnitCollateral` and `cumulativeCollateralPerUnitCollateral`.",
+          "The `totalCollateral` is increased by `_amount`.",
+          "The `totalDebt` remains unchanged."
+        ]
+      },
+      {
+        "category": "NFT Minting",
+        "state_update_descriptions": [
+          "A new NFT representing the Safe is minted and assigned to the `msg.sender` with `_safeId` as the token ID using the `_safeMint` function.",
+          "The `_safeMint` function calls the ERC721 standard functions `_mint` and `_update`.",
+          "The `_owners` mapping is updated, associating the `_safeId` with the `msg.sender`.",
+          "The `_balances` mapping for `msg.sender` is incremented by 1.",
+          "A Transfer event is emitted, indicating the transfer of the NFT with tokenId `_safeId` from address(0) to `msg.sender`."
+        ]
+      },
+      {
+        "category": "Events",
+        "state_update_descriptions": [
+          "An `OpenSafe` event is emitted, logging the `_safeId`, `msg.sender`, `_amount`, `totalCollateral`, and `totalDebt`."
+        ]
+      }
+    ],
+    "post_execution_contract_state_validation_rules": [
+      {
+        "category": "Safe State",
+        "rule_descriptions": [
+          "The `collateralAmount` of the Safe with ID `_safeId` must equal `_amount`.",
+          "The `borrowedAmount` of the Safe with ID `_safeId` must be 0.",
+          "The `totalCollateral` must be increased by `_amount` compared to its initial value (the value before executing openSafe).",
+          "The `totalDebt` must remain unchanged compared to its initial value (the value before executing openSafe).",
+          "The owner of the NFT with token ID `_safeId` must be `msg.sender` (verified using `ownerOf(_safeId) == msg.sender`).",
+          "The `cumulativeDebtPerUnitCollateral` and `cumulativeCollateralPerUnitCollateral` values in the `liquidationSnapshots[_safeId]` should be equal to their values before `openSafe` was executed."
+        ]
+      },
+      {
+        "category": "NFT Ownership",
+        "rule_descriptions": [
+          "An NFT with ID `_safeId` should now exist, and its owner should be `msg.sender`."
+        ]
+      },
+      {
+        "category": "Event Emission",
+        "rule_descriptions": [
+          "An `OpenSafe` event must be emitted with the correct parameters (`_safeId`, `msg.sender`, `_amount`, `totalCollateral`, `totalDebt`)."
+        ]
+      }
+    ]
+  },
+  "action_execution": {
+    "action_name": "Open Safe",
+    "contract_name": "StableBaseCDP",
+    "function_name": "openSafe",
+    "does_register_new_identifier": true,
+    "new_identifiers": [
+      {
+        "name": "_safeId",
+        "type": "structured_id_external",
+        "has_max_identifier_limit_per_address": false,
+        "max_identifier_limit_per_address": 0,
+        "description": "Unique identifier for the newly created Safe (CDP). User needs to supply a unique ID greater than 0."
+      }
+    ],
+    "all_state_updates": [
+      {
+        "contract_name": "StableBaseCDP",
+        "state_updated": [
+          {
+            "state_variable_name": "safes",
+            "type": "struct",
+            "what_does_it_track": "Tracks the collateral amount, borrowed amount, weight, total borrowed amount, and fee paid for each safe.",
+            "why_is_is_important": "Stores the state of each Safe, including collateral and debt. ",
+            "when_is_it_updated": "When a new Safe is opened, and the provided _safeId is valid and not already in use.",
+            "how_to_validate_state_update": "Check the safes mapping at the given _safeId after the transaction to confirm the Safe struct is initialized correctly.",
+            "has_conditional_updates": true,
+            "summary_of_update": "The Safe struct associated with _safeId is initialized with the provided collateral amount and zero borrowed amount and other default values.",
+            "conditions": [
+              "_safeId > 0",
+              "safes[_safeId].collateralAmount == 0",
+              "_ownerOf(_safeId) == address(0)",
+              "_amount > 0",
+              "msg.value == _amount"
+            ]
+          },
+          {
+            "state_variable_name": "liquidationSnapshots",
+            "type": "mapping",
+            "what_does_it_track": "It tracks the liquidation snapshot for each safe id.",
+            "why_is_is_important": "Captures the debt and collateral ratios to be used during liquidation. ",
+            "when_is_it_updated": "When a new Safe is opened.",
+            "how_to_validate_state_update": "Check the liquidationSnapshots mapping at the given _safeId after the transaction to confirm that the debtPerCollateralSnapshot and collateralPerCollateralSnapshot are correctly set.",
+            "has_conditional_updates": true,
+            "summary_of_update": "The liquidationSnapshots mapping is updated with the current cumulative debt and collateral per unit collateral values for the new safe id.",
+            "conditions": [
+              "_safeId > 0",
+              "safes[_safeId].collateralAmount == 0",
+              "_ownerOf(_safeId) == address(0)",
+              "_amount > 0",
+              "msg.value == _amount"
+            ]
+          },
+          {
+            "state_variable_name": "totalCollateral",
+            "type": "uint256",
+            "what_does_it_track": "Total collateral deposited in the protocol.",
+            "why_is_is_important": "Tracks the total collateral in the system.",
+            "when_is_it_updated": "When a new Safe is opened and all validation checks pass.",
+            "how_to_validate_state_update": "Check the totalCollateral variable after the transaction to see if it has been incremented by the correct amount.",
+            "has_conditional_updates": true,
+            "summary_of_update": "The totalCollateral is increased by the amount of collateral deposited.",
+            "conditions": [
+              "_amount > 0",
+              "msg.value == _amount",
+              "_safeId > 0",
+              "safes[_safeId].collateralAmount == 0",
+              "_ownerOf(_safeId) == address(0)"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "ERC721Base",
+        "state_updated": [
+          {
+            "state_variable_name": "_owners",
+            "type": "address",
+            "what_does_it_track": "It tracks the owner of each safe.",
+            "why_is_is_important": "This records the ownership of the safe. ",
+            "when_is_it_updated": "A new safe is minted.",
+            "how_to_validate_state_update": "Check the _owners mapping to see if the new owner matches the intended owner.",
+            "has_conditional_updates": true,
+            "summary_of_update": "The owner of the tokenId is set to the 'to' address (msg.sender).",
+            "conditions": [
+              "to != address(0)",
+              "_ownerOf(tokenId) == address(0)",
+              "_amount > 0",
+              "msg.value == _amount",
+              "_safeId > 0",
+              "safes[_safeId].collateralAmount == 0",
+              "_ownerOf(_safeId) == address(0)"
+            ]
+          },
+          {
+            "state_variable_name": "_balances",
+            "type": "uint256",
+            "what_does_it_track": "It tracks the number of safes owned by each address.",
+            "why_is_is_important": "This tracks the number of safes owned by an address.",
+            "when_is_it_updated": "A safe is minted.",
+            "how_to_validate_state_update": "Check _balances mapping to see if the balance of the new owner has increased.",
+            "has_conditional_updates": true,
+            "summary_of_update": "The balance of the 'to' address (msg.sender) is incremented by 1.",
+            "conditions": [
+              "to != address(0)",
+              "_amount > 0",
+              "msg.value == _amount",
+              "_safeId > 0",
+              "safes[_safeId].collateralAmount == 0",
+              "_ownerOf(_safeId) == address(0)"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "action_context": {
+    "contract_context": [
+      {
+        "contract_name": "StableBaseCDP",
+        "code_snippet": "function openSafe(uint256 _safeId, uint256 _amount) external payable {\n        require(_amount > 0, \"Amount must be greater than 0\");\n        require(msg.value == _amount, \"Insufficient collateral\");\n        require(_safeId > 0, \"Invalid Safe ID\"); // To avoid race conditions somewhere in the code\n        require(safes[_safeId].collateralAmount == 0, \"Safe already exists\");\n        require(_ownerOf(_safeId) == address(0), \"Safe already exists\");\n\n        Safe memory safe = Safe({\n            collateralAmount: _amount,\n            borrowedAmount: 0,\n            weight: 0,\n            totalBorrowedAmount: 0,\n            feePaid: 0\n        });\n        LiquidationSnapshot memory liquidationSnapshot = LiquidationSnapshot({\n            debtPerCollateralSnapshot: cumulativeDebtPerUnitCollateral,\n            collateralPerCollateralSnapshot: cumulativeCollateralPerUnitCollateral\n        });\n        liquidationSnapshots[_safeId] = liquidationSnapshot;\n        safes[_safeId] = safe;\n        totalCollateral += _amount;\n\n        _safeMint(msg.sender, _safeId); // mint the NFT Safe to the owner\n        emit OpenSafe(_safeId, msg.sender, _amount, totalCollateral, totalDebt);\n    }\nfunction _ownerOf(uint256 tokenId) internal view virtual returns (address) {\n        return _owners[tokenId];\n    }\nfunction _safeMint(address to, uint256 tokenId) internal {\n        _safeMint(to, tokenId, \"\");\n    }\nfunction _safeMint(address to, uint256 tokenId, bytes memory data) internal virtual {\n        _mint(to, tokenId);\n        ERC721Utils.checkOnERC721Received(_msgSender(), address(0), to, tokenId, data);\n    }\nfunction _mint(address to, uint256 tokenId) internal {\n        if (to == address(0)) {\n            revert ERC721InvalidReceiver(address(0));\n        }\n        address previousOwner = _update(to, tokenId, address(0));\n        if (previousOwner != address(0)) {\n            revert ERC721InvalidSender(address(0));\n        }\n    }\nfunction _update(address to, uint256 tokenId, address auth) internal virtual returns (address) {\n        address from = _ownerOf(tokenId);\n\n        // Perform (optional) operator check\n        if (auth != address(0)) {\n            _checkAuthorized(from, auth, tokenId);\n        }\n\n        // Execute the update\n        if (from != address(0)) {\n            // Clear approval. No need to re-authorize or emit the Approval event\n            _approve(address(0), tokenId, address(0), false);\n\n            unchecked {\n                _balances[from] -= 1;\n            }\n        }\n\n        if (to != address(0)) {\n            unchecked {\n                _balances[to] += 1;\n            }\n        }\n\n        _owners[tokenId] = to;\n\n        emit Transfer(from, to, tokenId);\n\n        return from;\n    }\nfunction _checkAuthorized(address owner, address spender, uint256 tokenId) internal view virtual {\n        if (!_isAuthorized(owner, spender, tokenId)) {\n            if (owner == address(0)) {\n                revert ERC721NonexistentToken(tokenId);\n            } else {\n                revert ERC721InsufficientApproval(spender, tokenId);\n            }\n        }\n    }\nfunction _isAuthorized(address owner, address spender, uint256 tokenId) internal view virtual returns (bool) {\n        return\n            spender != address(0) &&\n            (owner == spender || isApprovedForAll(owner, spender) || _getApproved(tokenId) == spender);\n    }\nfunction isApprovedForAll(address owner, address operator) external view returns (bool);\nfunction _getApproved(uint256 tokenId) internal view virtual returns (address) {\n        return _tokenApprovals[tokenId];\n    }\nfunction _approve(address to, uint256 tokenId, address auth, bool emitEvent) internal virtual {\n        // Avoid reading the owner unless necessary\n        if (emitEvent || auth != address(0)) {\n            address owner = _requireOwned(tokenId);\n\n            // We do not use _isAuthorized because single-token approvals should not be able to call approve\n            if (auth != address(0) && owner != auth && !isApprovedForAll(owner, auth)) {\n                revert ERC721InvalidApprover(auth);\n            }\n\n            if (emitEvent) {\n                emit Approval(owner, to, tokenId);\n            }\n        }\n\n        _tokenApprovals[tokenId] = to;\n    }\nfunction _requireOwned(uint256 tokenId) internal view returns (address) {\n        address owner = _ownerOf(tokenId);\n        if (owner == address(0)) {\n            revert ERC721NonexistentToken(tokenId);\n        }\n        return owner;\n    }\nfunction _msgSender() internal view virtual returns (address) {\n        return msg.sender;\n    }",
+        "references": {
+          "references": [
+            {
+              "state_variable_name": "sbdToken",
+              "contract_name": "DFIDToken"
+            },
+            {
+              "state_variable_name": "priceOracle",
+              "contract_name": "MockPriceOracle"
+            },
+            {
+              "state_variable_name": "stabilityPool",
+              "contract_name": "StabilityPool"
+            },
+            {
+              "state_variable_name": "dfireTokenStaking",
+              "contract_name": "DFIREStaking"
+            },
+            {
+              "state_variable_name": "safesOrderedForLiquidation",
+              "contract_name": "OrderedDoublyLinkedList"
+            },
+            {
+              "state_variable_name": "safesOrderedForRedemption",
+              "contract_name": "OrderedDoublyLinkedList"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
