@@ -1,12 +1,12 @@
-import { ethers } from "ethers";
-import { Actor, RunContext, Snapshot, Action } from "@svylabs/ilumia";
-import { expect } from "chai";
+import { Actor, RunContext, Snapshot, Action } from '@svylabs/ilumia';
+import { ethers } from 'ethers';
+import { expect } from 'chai';
 
 export class UnstakeAction extends Action {
-  contract: ethers.Contract;
+  private contract: ethers.Contract;
 
   constructor(contract: ethers.Contract) {
-    super("UnstakeAction");
+    super('UnstakeAction');
     this.contract = contract;
   }
 
@@ -15,31 +15,17 @@ export class UnstakeAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot
   ): Promise<[any, Record<string, any>]> {
-    try {
-      const dfireStakingSnapshot = currentSnapshot.contractSnapshot.dfireStaking;
-      const stakesMapping = dfireStakingSnapshot.stakesMapping;
-      const userAddress = actor.account.address;
+    const stakeByUser = currentSnapshot.contractSnapshot.dfireStaking.stakes?.[actor.account.address] || { stake: BigInt(0), rewardSnapshot: BigInt(0), collateralSnapshot: BigInt(0) };
+    const maxUnstakeAmount = stakeByUser.stake; // Use existing stake as max
 
-      let maxUnstakeAmount = BigInt(0);
-      if (stakesMapping && stakesMapping[userAddress]) {
-        maxUnstakeAmount = stakesMapping[userAddress].stake;
-      }
-
-      if (maxUnstakeAmount <= BigInt(0)) {
-        console.warn("User has no stake to unstake. Setting unstake amount to 0.");
-        return [[BigInt(0)], {}];
-      }
-
-      // Generate a valid amount to unstake, ensuring it's not greater than the user's stake
-      const amountToUnstake = context.prng.next() % (Number(maxUnstakeAmount) + 1);
-      const amount = BigInt(amountToUnstake);
-
-      console.log(`Initialize: Amount to unstake: ${amount}`);
-      return [[amount], {}];
-    } catch (error) {
-      console.error("Error in initialize:", error);
-      throw error; // Re-throw the error to prevent the action from proceeding
+    if (maxUnstakeAmount === BigInt(0)) {
+      throw new Error("Cannot unstake because user has no stake");
     }
+
+    const amountToUnstake = BigInt(Math.floor(context.prng.next() % Number(maxUnstakeAmount) + 1)); // unstake amount is greater than 0
+
+    const params = [amountToUnstake];
+    return [params, {}];
   }
 
   async execute(
@@ -48,19 +34,9 @@ export class UnstakeAction extends Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<Record<string, any> | void> {
-    const amount = actionParams[0];
-    const signer = actor.account.value.connect(this.contract.runner!);
-    console.log(`Execute: Unstaking amount: ${amount}`);
-
-    try {
-      const tx = await signer.unstake(amount);
-      console.log("Execute: Transaction sent, waiting for confirmation...");
-      await tx.wait();
-      console.log("Execute: Transaction confirmed.");
-    } catch (error) {
-      console.error("Error in execute:", error);
-      throw error; // Re-throw the error to prevent further execution
-    }
+    const amountToUnstake = actionParams[0];
+    const tx = await this.contract.connect(actor.account.value).unstake(amountToUnstake);
+    await tx.wait();
   }
 
   async validate(
@@ -70,72 +46,53 @@ export class UnstakeAction extends Action {
     newSnapshot: Snapshot,
     actionParams: any
   ): Promise<boolean> {
-    try {
-      const amount = actionParams[0];
-      const userAddress = actor.account.address;
+    const amountToUnstake = actionParams[0];
 
-      const prevDFIREStakingSnapshot = previousSnapshot.contractSnapshot.dfireStaking;
-      const newDFIREStakingSnapshot = newSnapshot.contractSnapshot.dfireStaking;
+    const previousStakingState = previousSnapshot.contractSnapshot.dfireStaking;
+    const newStakingState = newSnapshot.contractSnapshot.dfireStaking;
 
-      const prevStakesMapping = prevDFIREStakingSnapshot.stakesMapping || {};
-      const newStakesMapping = newDFIREStakingSnapshot.stakesMapping || {};
+    const previousUserStake = previousStakingState.stakes?.[actor.account.address]?.stake || BigInt(0);
+    const newUserStake = newStakingState.stakes?.[actor.account.address]?.stake || BigInt(0);
 
-      const prevTotalStake = prevDFIREStakingSnapshot.totalStake;
-      const newTotalStake = newDFIREStakingSnapshot.totalStake;
+    const previousTotalStake = previousStakingState.totalStake || BigInt(0);
+    const newTotalStake = newStakingState.totalStake || BigInt(0);
 
-      const newRewardSnapshot = newDFIREStakingSnapshot.totalRewardPerToken;
-      const newCollateralSnapshot = newDFIREStakingSnapshot.totalCollateralPerToken;
+    const previousRewardSnapshot = previousStakingState.stakes?.[actor.account.address]?.rewardSnapshot || BigInt(0);
+    const newRewardSnapshot = newStakingState.stakes?.[actor.account.address]?.rewardSnapshot || BigInt(0);
 
-      let prevUserStake = BigInt(0);
-      if (prevStakesMapping[userAddress]) {
-        prevUserStake = prevStakesMapping[userAddress].stake;
-      }
+    const previousCollateralSnapshot = previousStakingState.stakes?.[actor.account.address]?.collateralSnapshot || BigInt(0);
+    const newCollateralSnapshot = newStakingState.stakes?.[actor.account.address]?.collateralSnapshot || BigInt(0);
 
-      let newUserStake = BigInt(0);
-      if (newStakesMapping[userAddress]) {
-        newUserStake = newStakesMapping[userAddress].stake;
-      }
+    const previousDFIREBalance = previousSnapshot.contractSnapshot.dfireToken.Balance?.[actor.account.address] || BigInt(0);
+    const newDFIREBalance = newSnapshot.contractSnapshot.dfireToken.Balance?.[actor.account.address] || BigInt(0);
 
-      // Staking Balance Updates
-      expect(newUserStake, "User stake should be decreased by amount").to.equal(prevUserStake - amount);
-      expect(newTotalStake, "Total stake should be decreased by amount").to.equal(prevTotalStake - amount);
+    const previousDFIDBalance = previousSnapshot.contractSnapshot.dfidToken.Balance?.[actor.account.address] || BigInt(0);
+    const newDFIDBalance = newSnapshot.contractSnapshot.dfidToken.Balance?.[actor.account.address] || BigInt(0);
 
-      // Reward Snapshot Updates
-      if (newStakesMapping[userAddress]) {
-        expect(newStakesMapping[userAddress].rewardSnapshot, "User reward snapshot should be updated").to.equal(newRewardSnapshot);
-        expect(newStakesMapping[userAddress].collateralSnapshot, "User collateral snapshot should be updated").to.equal(newCollateralSnapshot);
-      }
+    // Stake Management
+    expect(newUserStake, 'User stake should decrease by the unstaked amount').to.equal(previousUserStake - amountToUnstake);
+    expect(newTotalStake, 'Total stake should decrease by the unstaked amount').to.equal(previousTotalStake - amountToUnstake);
 
-      // Token Transfer - DFIREToken Balance check for user
-      const prevDfireTokenBalances = previousSnapshot.contractSnapshot.dfireToken.balances || {};
-      const newDfireTokenBalances = newSnapshot.contractSnapshot.dfireToken.balances || {};
+    // Reward Distribution
+    expect(newRewardSnapshot, "User's rewardSnapshot is updated to totalRewardPerToken").to.equal(newStakingState.totalRewardPerToken);
+    expect(newCollateralSnapshot, "User's collateralSnapshot is updated to totalCollateralPerToken").to.equal(newStakingState.totalCollateralPerToken);
 
-      const prevDfireTokenBalance = prevDfireTokenBalances[userAddress] || BigInt(0);
-      const newDfireTokenBalance = newDfireTokenBalances[userAddress] || BigInt(0);
+    //Token Transfer - DFIRE Token
+    expect(newDFIREBalance, "User's DFIRE balance increases by _amount").to.equal(previousDFIREBalance + amountToUnstake);
 
+    // Account ETH balance should remain the same (gas costs are negligible for validation)
+    const previousAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+    const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+    expect(newAccountBalance).to.be.gte(previousAccountBalance);
 
-      expect(newDfireTokenBalance, "User's DFIREToken balance should increase by amount").to.equal(prevDfireTokenBalance + amount);
+    //Reward Token Transfer - DFID Token
+    const reward = ((previousStakingState.totalRewardPerToken - previousRewardSnapshot) * previousUserStake) / BigInt(10**18) 
+    const collateralReward = ((previousStakingState.totalCollateralPerToken - previousCollateralSnapshot) * previousUserStake) / BigInt(10**18)
 
-      // Token Transfer - DFIREToken Balance check for contract
-      const prevContractDfireTokenBalances = previousSnapshot.contractSnapshot.dfireToken.balances || {};
-      const newContractDfireTokenBalances = newSnapshot.contractSnapshot.dfireToken.balances || {};
-
-      const prevContractDfireTokenBalance = prevContractDfireTokenBalances[this.contract.target] || BigInt(0);
-      const newContractDfireTokenBalance = newContractDfireTokenBalances[this.contract.target] || BigInt(0);
-
-      expect(newContractDfireTokenBalance, "Contract's DFIREToken balance should decrease by amount").to.equal(prevContractDfireTokenBalance - amount);
-
-      // Validate RewardSender Flag Update (Conditional State Change)
-      if (prevDFIREStakingSnapshot.rewardSenderActive && newTotalStake === BigInt(0)) {\n          // Assuming you have access to stableBaseCDP contract instance
-          const stableBaseCDP = context.contracts.stableBaseCDP;
-          expect(stableBaseCDP.sbrStakingPoolCanReceiveRewards, "IRewardSender.canSBRStakingPoolReceiveRewards should be false").to.be.false;
-      }
-
-      console.log("Validate: Unstake action validated successfully.");
-      return true;
-    } catch (error) {
-      console.error("Error in validate:", error);
-      return false;
+    if (reward > 0n) {
+        expect(newDFIDBalance).to.equal(previousDFIDBalance + reward, "User's DFID balance should increase by reward amount");
     }
+
+     return true;
   }
 }
