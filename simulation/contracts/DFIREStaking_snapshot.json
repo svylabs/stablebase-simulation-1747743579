@@ -1,22 +1,16 @@
 {
   "attributes": [
     {
-      "name": "stakeInfo",
+      "name": "stakesMapping",
       "type": "tuple",
-      "contract_function": "getStake",
+      "contract_function": "stakes",
       "parameters": [
         {
-          "name": "user",
+          "name": "",
           "type": "address",
           "reference": "accountAddress"
         }
       ]
-    },
-    {
-      "name": "rewardSenderActive",
-      "type": "boolean",
-      "contract_function": "rewardSenderActive",
-      "parameters": []
     },
     {
       "name": "totalCollateralPerToken",
@@ -47,10 +41,16 @@
           "reference": "accountAddress"
         }
       ]
+    },
+    {
+      "name": "rewardSenderActive",
+      "type": "bool",
+      "contract_function": "rewardSenderActive",
+      "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface DFIREStakingState {\n  stakeInfo: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint; };\n  rewardSenderActive: boolean;\n  totalCollateralPerToken: bigint;\n  totalRewardPerToken: bigint;\n  totalStake: bigint;\n  userPendingReward: { reward: bigint; collateralReward: bigint; };\n}\n",
-    "interface_name": "DFIREStakingState"
+    "contract_snapshot_interface_code": "interface Stake {\n    stake: bigint;\n    rewardSnapshot: bigint;\n    collateralSnapshot: bigint;\n}\n\ninterface DFIREStakingSnapshot {\n    stakesMapping: { [accountAddress: string]: Stake };\n    totalCollateralPerToken: bigint;\n    totalRewardPerToken: bigint;\n    totalStake: bigint;\n    userPendingReward: [bigint, bigint];\n    rewardSenderActive: boolean;\n}",
+    "interface_name": "DFIREStakingSnapshot"
   }
 }
