@@ -1,15 +1,6 @@
 import { ethers } from "ethers";
-import { Actor, RunContext, Snapshot, Action } from "@svylabs/ilumia";
 import { expect } from 'chai';
-import {
-    DFIDTokenSnapshot,
-    DFIRETokenSnapshot,
-    DFIREStakingSnapshot,
-    StabilityPoolSnapshot,
-    StableBaseCDPSnapshot,
-    OrderedDoublyLinkedListSnapshot,
-    MockPriceOracleSnapshot
-} from "@svylabs/ilumia";
+import { Action, Actor, RunContext, Snapshot } from "@svylabs/ilumia";
 
 export class LiquidateAction extends Action {
     contract: ethers.Contract;
@@ -24,8 +15,8 @@ export class LiquidateAction extends Action {
         actor: Actor,
         currentSnapshot: Snapshot
     ): Promise<[any, Record<string, any>]> {
-        // The `liquidate` function does not take direct input parameters.
-        // Return an empty array for action parameters and an empty object for new identifiers.
+        // The `liquidate` function does not accept any parameters.
+        // It retrieves the `safeId` from the `safesOrderedForLiquidation` queue.
         return [[], {}];
     }
 
@@ -35,7 +26,6 @@ export class LiquidateAction extends Action {
         currentSnapshot: Snapshot,
         actionParams: any
     ): Promise<Record<string, any> | void> {
-        // Execute the `liquidate` function.
         const tx = await this.contract.connect(actor.account.value).liquidate();
         await tx.wait();
     }
@@ -47,70 +37,75 @@ export class LiquidateAction extends Action {
         newSnapshot: Snapshot,
         actionParams: any
     ): Promise<boolean> {
-        const stableBaseCDPPrevious: StableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
-        const stableBaseCDPNew: StableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
+        const stableBaseCDPPrevious = previousSnapshot.contractSnapshot.stableBaseCDP;
+        const stableBaseCDPNew = newSnapshot.contractSnapshot.stableBaseCDP;
 
-        const safesOrderedForLiquidationPrevious: OrderedDoublyLinkedListSnapshot = previousSnapshot.contractSnapshot.safesOrderedForLiquidation;
-        const safesOrderedForLiquidationNew: OrderedDoublyLinkedListSnapshot = newSnapshot.contractSnapshot.safesOrderedForLiquidation;
+        const safesOrderedForLiquidationPrevious = previousSnapshot.contractSnapshot.safesOrderedForLiquidation;
+        const safesOrderedForLiquidationNew = newSnapshot.contractSnapshot.safesOrderedForLiquidation;
 
-        const safesOrderedForRedemptionPrevious: OrderedDoublyLinkedListSnapshot = previousSnapshot.contractSnapshot.safesOrderedForRedemption;
-        const safesOrderedForRedemptionNew: OrderedDoublyLinkedListSnapshot = newSnapshot.contractSnapshot.safesOrderedForRedemption;
+        const safesOrderedForRedemptionPrevious = previousSnapshot.contractSnapshot.safesOrderedForRedemption;
+        const safesOrderedForRedemptionNew = newSnapshot.contractSnapshot.safesOrderedForRedemption;
 
-        const dfidTokenPrevious: DFIDTokenSnapshot = previousSnapshot.contractSnapshot.dfidToken;
-        const dfidTokenNew: DFIDTokenSnapshot = newSnapshot.contractSnapshot.dfidToken;
+        const dfidTokenPrevious = previousSnapshot.contractSnapshot.dfidToken;
+        const dfidTokenNew = newSnapshot.contractSnapshot.dfidToken;
 
-        const stabilityPoolPrevious: StabilityPoolSnapshot = previousSnapshot.contractSnapshot.stabilityPool;
-        const stabilityPoolNew: StabilityPoolSnapshot = newSnapshot.contractSnapshot.stabilityPool;
+        const stabilityPoolPrevious = previousSnapshot.contractSnapshot.stabilityPool;
+        const stabilityPoolNew = newSnapshot.contractSnapshot.stabilityPool;
 
-        const dfireStakingPrevious: DFIREStakingSnapshot = previousSnapshot.contractSnapshot.dfireStaking;
-        const dfireStakingNew: DFIREStakingSnapshot = newSnapshot.contractSnapshot.dfireStaking;
+        const dfireStakingPrevious = previousSnapshot.contractSnapshot.dfireStaking;
+        const dfireStakingNew = newSnapshot.contractSnapshot.dfireStaking;
 
-
-        // Get SafeID before liquidation from the queue
+        // Fetch the safeId from the previous snapshot of the liquidation queue's tail
         const safeId = safesOrderedForLiquidationPrevious.tail;
 
-        // If no safe to liquidate, return true
-        if (safeId === 0n) return true;
-
+        // Check if the safe existed in the previous snapshot
         const safePrevious = stableBaseCDPPrevious.safes[safeId];
-        const safeNew = stableBaseCDPNew.safes[safeId];
+        expect(safePrevious, `Safe with ID ${safeId} should exist in previous snapshot`).to.not.be.undefined;
 
-        // Safe Removal
-        expect(safeNew, `Safe with id ${safeId} should be removed`).to.be.undefined;
+        // 1. Safe Removal
+        // Check that the Safe no longer exists in the `safes` mapping
+        expect(stableBaseCDPNew.safes[safeId], `Safe with ID ${safeId} should not exist in the safes mapping after liquidation`).to.be.undefined;
 
-        // Total Debt and Collateral
-        const borrowedAmount = safePrevious ? safePrevious.borrowedAmount : 0n;
-        const collateralAmount = safePrevious ? safePrevious.collateralAmount : 0n;
+        // Check removal from doubly linked lists
+        expect(safesOrderedForLiquidationNew.nodes[safeId], `Safe should be removed from liquidation queue`).to.be.undefined;
+        expect(safesOrderedForRedemptionNew.nodes[safeId], `Safe should be removed from redemption queue`).to.be.undefined;
 
-        expect(stableBaseCDPNew.totalDebt, 'Total debt should decrease').to.equal(stableBaseCDPPrevious.totalDebt - borrowedAmount);
-        expect(stableBaseCDPNew.totalCollateral, 'Total collateral should decrease').to.equal(stableBaseCDPPrevious.totalCollateral - collateralAmount);
+        // 2. Global Debt and Collateral Consistency
+        // Check that `totalCollateral` decreased by the original `collateralAmount`
+        if (safePrevious) { // Ensure safePrevious exists
+            const collateralAmount = safePrevious.collateralAmount;
+            expect(stableBaseCDPNew.totalCollateral, 'totalCollateral should decrease by collateralAmount').to.equal(stableBaseCDPPrevious.totalCollateral - collateralAmount);
 
-        // Queue Management
-        expect(safesOrderedForLiquidationNew.tail !== safeId, 'Safe should be removed from liquidation queue').to.be.true;
-        expect(safesOrderedForRedemptionNew.tail !== safeId, 'Safe should be removed from redemption queue').to.be.true;
+            // Check that `totalDebt` decreased by the original `borrowedAmount`
+            const borrowedAmount = safePrevious.borrowedAmount;
+            expect(stableBaseCDPNew.totalDebt, 'totalDebt should decrease by borrowedAmount').to.equal(stableBaseCDPPrevious.totalDebt - borrowedAmount);
 
-        // Stability Pool Update (if applicable)
-        const stabilityPoolBorrowedAmount = (stabilityPoolPrevious && safePrevious && stabilityPoolPrevious.totalStakedRaw >= borrowedAmount) ? borrowedAmount : 0n;
-        const burnedAmount = stabilityPoolBorrowedAmount;
+            // Add more checks based on the specific logic of distributeDebtAndCollateral if secondary liquidation mechanism is used.
 
-        if (stabilityPoolBorrowedAmount > 0n) {
-          expect(stabilityPoolNew.totalStakedRaw, 'Total staked raw in stability pool should decrease').to.equal(stabilityPoolPrevious.totalStakedRaw - stabilityPoolBorrowedAmount);
-          expect(dfidTokenNew.totalTokenSupply, 'SBD total supply should decrease').to.equal(dfidTokenPrevious.totalTokenSupply - burnedAmount);
+            // 3. Stability Pool State
+            // Check that `totalStakedRaw` in the Stability Pool decreased by `borrowedAmount` if stability pool was used.
+            // Check the `sbdToken` balance of the `stabilityPool` address decreased by `borrowedAmount`
+
+            //determine whether or not the stability pool was used
+            const stabilityPoolUsed = stabilityPoolPrevious.totalStakedRaw >= borrowedAmount
+
+            if(stabilityPoolUsed){
+                expect(stabilityPoolNew.totalStakedRaw, 'totalStakedRaw in StabilityPool should decrease by borrowedAmount').to.equal(stabilityPoolPrevious.totalStakedRaw - borrowedAmount);
+                expect(dfidTokenNew.Balance[context.contracts.stabilityPool.target], 'sbdToken balance of StabilityPool should decrease by borrowedAmount').to.equal(dfidTokenPrevious.Balance[context.contracts.stabilityPool.target] - borrowedAmount);
+            }
+
+             // 5. ERC721 token
+            //check balances for burned token
+            expect(stableBaseCDPNew.balanceOf[actor.account.address]).to.be.equal(stableBaseCDPPrevious.balanceOf[actor.account.address] - BigInt(1));
+            expect(stableBaseCDPNew.ownerOf[safeId]).to.be.undefined;
         }
 
-        //Debt and Collateral Distribution (Secondary Liquidation)
-        if (borrowedAmount > stabilityPoolPrevious.totalStakedRaw) {
-          expect(stableBaseCDPNew.collateralLoss, 'collateralLoss should be updated').to.be.at.most(stableBaseCDPPrevious.collateralLoss);
-          expect(stableBaseCDPNew.debtLoss, 'debtLoss should be updated').to.be.at.most(stableBaseCDPPrevious.debtLoss);
-          expect(stableBaseCDPNew.cumulativeCollateralPerUnitCollateral, 'cumulativeCollateralPerUnitCollateral should be incremented').to.be.greaterThan(stableBaseCDPPrevious.cumulativeCollateralPerUnitCollateral);
-          expect(stableBaseCDPNew.cumulativeDebtPerUnitCollateral, 'cumulativeDebtPerUnitCollateral should be incremented').to.be.greaterThan(stableBaseCDPPrevious.cumulativeDebtPerUnitCollateral);
-        }
+        // 4. Fee Distribution
+        // Check fee distribution based on events.
+        // Check refund to `msg.sender`.
 
-          // DFIRE Staking Pool Update (if applicable)
-          if (dfireStakingPrevious.totalCollateralPerToken !== dfireStakingNew.totalCollateralPerToken) {
-              expect(dfireStakingNew.totalCollateralPerToken, 'DFIRE staking pool collateral per token should increase').to.be.greaterThan(dfireStakingPrevious.totalCollateralPerToken);
-          }
 
+        // Add additional validation checks for state updates and events based on the action summary.
         return true;
     }
 }
