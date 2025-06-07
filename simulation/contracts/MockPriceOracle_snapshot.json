@@ -1,0 +1,26 @@
+{
+  "attributes": [
+    {
+      "name": "fetchedPrice",
+      "type": "view",
+      "contract_function": "fetchPrice",
+      "parameters": []
+    },
+    {
+      "name": "lastGoodPrice",
+      "type": "view",
+      "contract_function": "lastGoodPrice",
+      "parameters": []
+    },
+    {
+      "name": "currentPrice",
+      "type": "view",
+      "contract_function": "price",
+      "parameters": []
+    }
+  ],
+  "typescript_interfaces": {
+    "contract_snapshot_interface_code": "interface MockPriceOracleSnapshot {\n  fetchedPrice: bigint;\n  lastGoodPrice: bigint;\n  currentPrice: bigint;\n}",
+    "interface_name": "MockPriceOracleSnapshot"
+  }
+}
