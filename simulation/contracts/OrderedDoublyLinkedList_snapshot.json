@@ -2,9 +2,27 @@
   "attributes": [
     {
       "name": "head",
-      "type": "uint256",
-      "contract_function": "getHead",
+      "type": "bigint",
+      "contract_function": "head",
       "parameters": []
+    },
+    {
+      "name": "tail",
+      "type": "bigint",
+      "contract_function": "tail",
+      "parameters": []
+    },
+    {
+      "name": "nodes",
+      "type": "object",
+      "contract_function": "nodes",
+      "parameters": [
+        {
+          "name": "id",
+          "type": "uint256",
+          "reference": "_safeId"
+        }
+      ]
     },
     {
       "name": "node",
@@ -19,16 +37,22 @@
       ]
     },
     {
-      "name": "nodes",
-      "type": "mapping",
-      "contract_function": "nodes",
+      "name": "node",
+      "type": "tuple",
+      "contract_function": "get",
       "parameters": [
         {
-          "name": "",
+          "name": "id",
           "type": "uint256",
           "reference": "_safeId"
         }
       ]
+    },
+    {
+      "name": "head",
+      "type": "uint256",
+      "contract_function": "getHead",
+      "parameters": []
     },
     {
       "name": "tail",
@@ -37,8 +61,8 @@
       "parameters": []
     },
     {
-      "name": "getNodes",
-      "type": "tuple[50]",
+      "name": "nodes",
+      "type": "tuple[50],uint256",
       "contract_function": "getNodes",
       "parameters": [
         {
@@ -52,10 +76,16 @@
           "reference": "_safeId"
         }
       ]
+    },
+    {
+      "name": "owner",
+      "type": "address",
+      "contract_function": "owner",
+      "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface OrderedDoublyLinkedListState {\n  head: bigint;\n  tail: bigint;\n  nodes: { [key: bigint]: Node };\n  getNodes: [Node[], bigint];\n}\n\ninterface Node {\n  value: bigint;\n  prev: bigint;\n  next: bigint;\n}\n",
-    "interface_name": "OrderedDoublyLinkedListState"
+    "contract_snapshot_interface_code": "interface OrderedDoublyLinkedListSnapshot {\n  head: bigint;\n  tail: bigint;\n  nodes: { [key: string]: Node };\n  owner: string;\n}\n\ninterface Node {\n  value: bigint;\n  prev: bigint;\n  next: bigint;\n}",
+    "interface_name": "OrderedDoublyLinkedListSnapshot"
   }
 }
