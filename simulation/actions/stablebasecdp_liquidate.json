@@ -1,0 +1,583 @@
+{
+  "action": {
+    "name": "Liquidate",
+    "summary": "Initiates liquidation.",
+    "contract_name": "StableBaseCDP",
+    "function_name": "liquidate",
+    "probability": 0.9
+  },
+  "action_detail": {
+    "action_name": "Liquidate",
+    "contract_name": "StableBaseCDP",
+    "function_name": "liquidate",
+    "pre_execution_parameter_generation_rules": [
+      "The `liquidate` function does not take direct input parameters; its execution depends on the protocol's state.",
+      "A Safe with a specific `_safeId` must exist and be present in the `safesOrderedForLiquidation` queue, making it a candidate for liquidation.",
+      "The Safe's collateral value, calculated using `collateralAmount` and the current price feed, must be lower than `(borrowedAmount * liquidationRatio) / BASIS_POINTS_DIVISOR`. This condition indicates that the Safe is undercollateralized and eligible for liquidation.",
+      "The `totalStakedRaw` in the StabilityPool must be greater than or equal to the `borrowedAmount` of the Safe for liquidation to proceed through the stability pool mechanism. If this condition is not met, the Safe must not be the last one in the liquidation queue to be liquidated via the secondary liquidation mechanism."
+    ],
+    "on_execution_state_updates_made": [
+      {
+        "category": "Core Liquidation Process",
+        "state_update_descriptions": [
+          "`safesOrderedForLiquidation.getTail()` is invoked to retrieve the `_safeId` of the Safe that is next in line for liquidation. This step identifies the next Safe that is eligible for liquidation based on the contract's internal logic.",
+          "The `collateralAmount` and `borrowedAmount` for the Safe are fetched from the `safes` mapping using the `_safeId`. This retrieves the current state of the Safe.",
+          "The current collateral price is obtained from the `priceOracle` contract via `priceOracle.fetchPrice()`. This provides the current market value of the collateral asset.",
+          "The `collateralValue` is calculated as `(collateralAmount * collateralPrice) / PRECISION`. This determines the current market value of the Safe's collateral.",
+          "The contract verifies that `collateralValue < (borrowedAmount * liquidationRatio) / BASIS_POINTS_DIVISOR`. This check confirms that the Safe is undercollateralized and meets the criteria for liquidation. `liquidationRatio` is a pre-defined parameter.",
+          "`stabilityPool.isLiquidationPossible(borrowedAmount)` is called to determine if the Stability Pool has sufficient SBD to cover the `borrowedAmount`. The outcome of this check influences which liquidation path is chosen.",
+          "The `liquidationFee` is computed as `(collateralAmount * REDEMPTION_LIQUIDATION_FEE) / BASIS_POINTS_DIVISOR`. This represents the fee charged for liquidating the Safe.",
+          "`totalCollateral` is decremented by `collateralAmount` to reflect the removal of collateral from the system.",
+          "`totalDebt` is updated (decreased) by `borrowedAmount` to reduce the overall system debt."
+        ]
+      },
+      {
+        "category": "Liquidation Execution Mechanism",
+        "state_update_descriptions": [
+          "If `stabilityPool.isLiquidationPossible(borrowedAmount)` returns `true`:",
+          "`stabilityPool.performLiquidation{value: collateralAmount - liquidationFee}(borrowedAmount, collateralAmount - liquidationFee)` is executed, transferring the collateral (minus the fee) to the Stability Pool and initiating the liquidation process.",
+          "`sbdToken.burn(address(stabilityPool), borrowedAmount)` is invoked to burn the SBD tokens, equivalent to the `borrowedAmount`, from the Stability Pool's balance.",
+          "If `stabilityPool.isLiquidationPossible(borrowedAmount)` returns `false`:",
+          "The contract mandates that `_safeId` is not equal to `_last`, where `_last` represents the last safe in the liquidation queue. This requirement prevents liquidation failures when the Stability Pool cannot execute the liquidation. If the condition is not met, the transaction will revert.",
+          "`distributeDebtAndCollateral(borrowedAmount, collateralAmount - liquidationFee, totalCollateral)` is called to distribute the debt and collateral to other existing Safes.",
+          "`safesOrderedForLiquidation.remove(_safeId)` is called to remove the Safe from the liquidation queue.",
+          "`safesOrderedForRedemption.remove(_safeId)` is called to remove the Safe from the redemption queue.",
+          "`safes[_safeId]` is removed from the `safes` mapping using `delete safes[_safeId]`.",
+          "`_burn(_safeId)` is invoked to burn the NFT representing the Safe."
+        ]
+      },
+      {
+        "category": "Fee and Gas Compensation",
+        "state_update_descriptions": [
+          "`gasUsed` is computed as `gasStart - gasleft()`.",
+          "`gasCompensation` is calculated as `(gasUsed + EXTRA_GAS_COMPENSATION) * (block.basefee + (block.basefee * 10) / 100)`. This formula computes the gas cost, adding a 10% overhead.",
+          "`refund` is determined as `min(gasCompensation, liquidationFee)`, ensuring that the refund does not exceed the liquidation fee.",
+          "`_distributeLiquidationFeeAndGasCompensation(_safeId, (gasUsed + EXTRA_GAS_COMPENSATION), liquidationFee, refund)` is called to manage the distribution of the liquidation fee and gas compensation.",
+          "If `sbrStakingPoolCanReceiveRewards` is `true` and `liquidationFee > refund`, `dfireTokenStaking.addCollateralReward{value: liquidationFee - refund}(liquidationFee - refund)` is executed to send the liquidation fee to the DFIRE staking pool.",
+          "If sending the fee to the DFIRE staking pool fails, or if `sbrStakingPoolCanReceiveRewards` is `false` and `stabilityPoolCanReceiveRewards` is `true`, then `stabilityPool.addCollateralReward{value: liquidationFee - refund}(liquidationFee - refund)` is executed to send the liquidation fee to the Stability Pool.",
+          "If `refund > 0`, `msg.sender.call{value: refund}(\"\")` is executed to refund the gas compensation to the transaction sender (liquidator)."
+        ]
+      },
+      {
+        "category": "Debt and Collateral Redistribution (Secondary)",
+        "state_update_descriptions": [
+          "When StabilityPool liquidation is not possible, the `distributeDebtAndCollateral` function is used. `collateralToDistribute` is calculated as `collateralAmount + collateralLoss`, where `collateralLoss` represents any accumulated collateral losses.",
+          "`debtToDistribute` is calculated as `debtAmount + debtLoss`, where `debtLoss` represents any accumulated debt losses.",
+          "`collPerUnitColl` is calculated as `(collateralToDistribute * PRECISION) / totalCollateralAfterLiquidation`.",
+          "`cumulativeCollateralPerUnitCollateral` is incremented by `collPerUnitColl`.",
+          "`debtPerUnitColl` is calculated as `(debtToDistribute * PRECISION) / totalCollateralAfterLiquidation`.",
+          "`cumulativeDebtPerUnitCollateral` is incremented by `debtPerUnitColl`.",
+          "`collateralLoss` is updated to reflect any undistributed collateral: `collateralToDistribute - (collPerUnitColl * totalCollateralAfterLiquidation) / PRECISION`.",
+          "`debtLoss` is updated to reflect any undistributed debt: `debtToDistribute - (debtPerUnitColl * totalCollateralAfterLiquidation) / PRECISION`."
+        ]
+      }
+    ],
+    "post_execution_contract_state_validation_rules": [
+      {
+        "category": "Safe Removal",
+        "rule_descriptions": [
+          "Verify that `safes[_safeId]` no longer exists or has its fields zeroed out, confirming the removal of the Safe.",
+          "Confirm that the NFT associated with `_safeId` has been burned, signifying the Safe's complete removal from the system."
+        ]
+      },
+      {
+        "category": "Total Debt and Collateral",
+        "rule_descriptions": [
+          "Confirm that `totalDebt` has decreased by the `borrowedAmount` of the liquidated Safe.  Compare `totalDebt` before and after the liquidation.",
+          "Verify that `totalCollateral` has decreased by the `collateralAmount` of the liquidated Safe. Compare `totalCollateral` before and after the liquidation."
+        ]
+      },
+      {
+        "category": "Queue Management",
+        "rule_descriptions": [
+          "Ensure that the liquidated Safe's `_safeId` is no longer present in both `safesOrderedForLiquidation` and `safesOrderedForRedemption` queues."
+        ]
+      },
+      {
+        "category": "Stability Pool Update (if applicable)",
+        "rule_descriptions": [
+          "If liquidation occurred via the Stability Pool, confirm that `totalStakedRaw` in the Stability Pool has decreased by the `borrowedAmount` of the liquidated Safe. Compare `totalStakedRaw` before and after the liquidation.",
+          "If liquidation occurred via the Stability Pool, validate that `stakeScalingFactor` and `totalCollateralPerToken` within the Stability Pool have been updated correctly according to the liquidation process. Calculate the expected values and compare them to the actual values."
+        ]
+      },
+      {
+        "category": "DFIRE Staking Pool Update (if applicable)",
+        "rule_descriptions": [
+          "If the liquidation fee was directed to the DFIRE staking pool, verify that `totalCollateralPerToken` in the staking pool contract has increased by the expected amount. Calculate the expected increase and compare it to the actual value."
+        ]
+      },
+      {
+        "category": "Fee Distribution",
+        "rule_descriptions": [
+          "Confirm that the transaction sender (liquidator) has received a refund (if any) equal to the lesser of `gasCompensation` and `liquidationFee`. Check the liquidator's balance before and after the transaction to verify the refund."
+        ]
+      },
+      {
+        "category": "Debt and Collateral Distribution (Secondary Liquidation)",
+        "rule_descriptions": [
+          "If the secondary liquidation mechanism was used, ensure that `collateralLoss` in `StableBaseCDP` has been updated to reflect any undistributed collateral remaining after the `distributeDebtAndCollateral` function call.",
+          "If the secondary liquidation mechanism was used, ensure that `debtLoss` in `StableBaseCDP` has been updated to reflect any undistributed debt remaining after the `distributeDebtAndCollateral` function call.",
+          "If the secondary liquidation mechanism was used, ensure that `cumulativeCollateralPerUnitCollateral` in `StableBaseCDP` has been incremented by `collPerUnitColl` after the `distributeDebtAndCollateral` function call.",
+          "If the secondary liquidation mechanism was used, ensure that `cumulativeDebtPerUnitCollateral` in `StableBaseCDP` has been incremented by `debtPerUnitColl` after the `distributeDebtAndCollateral` function call."
+        ]
+      },
+      {
+        "category": "Reward Distribution (if applicable)",
+        "rule_descriptions": [
+          "If the liquidation fee was sent to the DFIRE staking pool, confirm that its balance has increased by `liquidationFee - refund`. Verify the balance change.",
+          "If the liquidation fee was sent to the Stability Pool, ensure that its `collateralLoss` has increased by `liquidationFee - refund`. Verify the `collateralLoss` change."
+        ]
+      }
+    ]
+  },
+  "action_execution": {
+    "action_name": "Liquidate",
+    "contract_name": "StableBaseCDP",
+    "function_name": "liquidate",
+    "does_register_new_identifier": false,
+    "new_identifiers": [],
+    "all_state_updates": [
+      {
+        "contract_name": "StableBaseCDP",
+        "state_updated": [
+          {
+            "state_variable_name": "safesOrderedForLiquidation",
+            "type": "address",
+            "what_does_it_track": "Order of safes to be liquidated.",
+            "why_is_is_important": "Maintaining an accurate queue is essential for proper liquidation order.",
+            "when_is_it_updated": "Always, if liquidation succeeds.",
+            "how_to_validate_state_update": "Check if the safeId is removed from the linked list using getHead() and getTail() of safesOrderedForLiquidation.",
+            "has_conditional_updates": false,
+            "summary_of_update": "The safe is removed from the liquidation queue using the remove() function of the IDoublyLinkedList interface.",
+            "conditions": []
+          },
+          {
+            "state_variable_name": "safesOrderedForRedemption",
+            "type": "address",
+            "what_does_it_track": "Order of safes to be redeemed.",
+            "why_is_is_important": "Maintaining an accurate queue is essential for proper redemption order.",
+            "when_is_it_updated": "Always, if liquidation succeeds.",
+            "how_to_validate_state_update": "Check if the safeId is removed from the linked list using getHead() and getTail() of safesOrderedForRedemption.",
+            "has_conditional_updates": false,
+            "summary_of_update": "The safe is removed from the redemption queue using the remove() function of the IDoublyLinkedList interface.",
+            "conditions": []
+          },
+          {
+            "state_variable_name": "safes",
+            "type": "Safe",
+            "what_does_it_track": "Safe data",
+            "why_is_is_important": "Removing the Safe from the mapping prevents further interaction with a liquidated Safe.",
+            "when_is_it_updated": "Always, if liquidation succeeds.",
+            "how_to_validate_state_update": "Check if safes[_safeId] is deleted after the function call.",
+            "has_conditional_updates": false,
+            "summary_of_update": "The Safe struct associated with _safeId is deleted from the safes mapping.",
+            "conditions": []
+          },
+          {
+            "state_variable_name": "totalCollateral",
+            "type": "uint256",
+            "what_does_it_track": "Total amount of collateral",
+            "why_is_is_important": "Reflects the total amount of collateral in the system.",
+            "when_is_it_updated": "Always, if liquidation succeeds.",
+            "how_to_validate_state_update": "Check the value of totalCollateral before and after the liquidate function call. It should decrease by the collateralAmount of liquidated safe.",
+            "has_conditional_updates": false,
+            "summary_of_update": "totalCollateral is decreased by the collateralAmount of the liquidated Safe.",
+            "conditions": []
+          },
+          {
+            "state_variable_name": "totalDebt",
+            "type": "uint256",
+            "what_does_it_track": "Total amount of debt",
+            "why_is_is_important": "Reflects the total amount of debt in the system.",
+            "when_is_it_updated": "Always, if liquidation succeeds.",
+            "how_to_validate_state_update": "Check the value of totalDebt before and after the liquidate function call. It should decrease by the borrowedAmount of liquidated safe.",
+            "has_conditional_updates": false,
+            "summary_of_update": "totalDebt is decreased by the borrowedAmount of the liquidated Safe.",
+            "conditions": []
+          },
+          {
+            "state_variable_name": "cumulativeCollateralPerUnitCollateral",
+            "type": "uint256",
+            "what_does_it_track": "Cumulative collateral per unit collateral",
+            "why_is_is_important": "Maintaining an accurate cumulative collateral ratio is essential for fairly distributing collateral.",
+            "when_is_it_updated": "When liquidation is performed using the secondary mechanism. The amount of collateral to distribute must be positive.",
+            "how_to_validate_state_update": "Verify the updated value of cumulativeCollateralPerUnitCollateral after the function call, comparing it with its initial value and the calculated increment.",
+            "has_conditional_updates": true,
+            "summary_of_update": "cumulativeCollateralPerUnitCollateral is increased by collPerUnitColl.",
+            "conditions": [
+              "collateralAmount > 0",
+              "debtAmount > 0",
+              "Liquidation using secondary mechanism"
+            ]
+          },
+          {
+            "state_variable_name": "cumulativeDebtPerUnitCollateral",
+            "type": "uint256",
+            "what_does_it_track": "Cumulative debt per unit collateral",
+            "why_is_is_important": "Maintaining an accurate cumulative debt ratio is essential for fairly distributing debt.",
+            "when_is_it_updated": "When liquidation is performed using the secondary mechanism. The amount of debt to distribute must be positive.",
+            "how_to_validate_state_update": "Verify the updated value of cumulativeDebtPerUnitCollateral after the function call, comparing it with its initial value and the calculated increment.",
+            "has_conditional_updates": true,
+            "summary_of_update": "cumulativeDebtPerUnitCollateral is increased by debtPerUnitColl.",
+            "conditions": [
+              "collateralAmount > 0",
+              "debtAmount > 0",
+              "Liquidation using secondary mechanism"
+            ]
+          },
+          {
+            "state_variable_name": "collateralLoss",
+            "type": "uint256",
+            "what_does_it_track": "Collateral loss",
+            "why_is_is_important": "Accumulates any collateral loss occurred during distribution.",
+            "when_is_it_updated": "When liquidation is performed using the secondary mechanism.",
+            "how_to_validate_state_update": "Verify the updated value of collateralLoss after the function call, comparing it with its initial value and calculated loss.",
+            "has_conditional_updates": true,
+            "summary_of_update": "collateralLoss is updated by subtracting the distributed collateral from the total collateral to distribute.",
+            "conditions": [
+              "collateralAmount > 0",
+              "debtAmount > 0",
+              "Liquidation using secondary mechanism"
+            ]
+          },
+          {
+            "state_variable_name": "debtLoss",
+            "type": "uint256",
+            "what_does_it_track": "Debt loss",
+            "why_is_is_important": "Accumulates any debt loss occurred during distribution.",
+            "when_is_it_updated": "When liquidation is performed using the secondary mechanism.",
+            "how_to_validate_state_update": "Verify the updated value of debtLoss after the function call, comparing it with its initial value and calculated loss.",
+            "has_conditional_updates": true,
+            "summary_of_update": "debtLoss is updated by subtracting the distributed debt from the total debt to distribute.",
+            "conditions": [
+              "collateralAmount > 0",
+              "debtAmount > 0",
+              "Liquidation using secondary mechanism"
+            ]
+          },
+          {
+            "state_variable_name": "PROTOCOL_MODE",
+            "type": "SBStructs.Mode",
+            "what_does_it_track": "Protocol mode",
+            "why_is_is_important": "Changing the mode will change the overall behaviour of the protocol.",
+            "when_is_it_updated": "PROTOCOL_MODE is updated from BOOTSTRAP to NORMAL mode when totalDebt is greater than BOOTSTRAP_MODE_DEBT_THRESHOLD.",
+            "how_to_validate_state_update": "Verify the updated value of PROTOCOL_MODE after the function call.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Update Protocol mode to NORMAL, if the debt exceed the threshold.",
+            "conditions": [
+              "debt > BOOTSTRAP_MODE_DEBT_THRESHOLD",
+              "PROTOCOL_MODE == SBStructs.Mode.BOOTSTRAP"
+            ]
+          },
+          {
+            "state_variable_name": "liquidationSnapshots",
+            "type": "LiquidationSnapshot",
+            "what_does_it_track": "debtPerCollateralSnapshot and collateralPerCollateralSnapshot values",
+            "why_is_is_important": "Capturing liquidation snapshots is essential for tracking debt and collateral.",
+            "when_is_it_updated": "The snapshots are updated if liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral",
+            "how_to_validate_state_update": "Verify the updated values of liquidationSnapshots[_safeId].debtPerCollateralSnapshot and liquidationSnapshots[_safeId].collateralPerCollateralSnapshot after the function call.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Update debt and collateral snapshot for the safe.",
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "OrderedDoublyLinkedList",
+        "state_updated": [
+          {
+            "state_variable_name": "nodes",
+            "type": "Node",
+            "what_does_it_track": "Nodes",
+            "why_is_is_important": "Maintaining a valid list of safes.",
+            "when_is_it_updated": "When a node representing a safe is removed.",
+            "how_to_validate_state_update": "Call getNode() to check if node has been deleted.",
+            "has_conditional_updates": false,
+            "summary_of_update": "Node is deleted from the nodes mapping.",
+            "conditions": []
+          },
+          {
+            "state_variable_name": "head",
+            "type": "uint256",
+            "what_does_it_track": "Head",
+            "why_is_is_important": "List must have valid head and tail.",
+            "when_is_it_updated": "If the node being removed is the head, the head is updated to the next node.",
+            "how_to_validate_state_update": "Verify head after calling remove.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Update head pointer if the node being removed is the head.",
+            "conditions": [
+              "node.prev == 0"
+            ]
+          },
+          {
+            "state_variable_name": "tail",
+            "type": "uint256",
+            "what_does_it_track": "Tail",
+            "why_is_is_important": "List must have valid head and tail.",
+            "when_is_it_updated": "If the node being removed is the tail, the tail is updated to the previous node.",
+            "how_to_validate_state_update": "Verify tail after calling remove.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Update tail pointer if the node being removed is the tail.",
+            "conditions": [
+              "node.next == 0"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "DFIDToken",
+        "state_updated": [
+          {
+            "state_variable_name": "_balances",
+            "type": "mapping(address => uint256)",
+            "what_does_it_track": "Mapping of account to balance",
+            "why_is_is_important": "Reflects the supply of SBD tokens held by each account.",
+            "when_is_it_updated": "When stability pool liquidation is possible, SBD tokens are burned from stability pool",
+            "how_to_validate_state_update": "Verify the balance of Stability Pool is reduced by borrowedAmount",
+            "has_conditional_updates": false,
+            "summary_of_update": "Reduce the SBD token balance of the stability pool by the borrowed amount.",
+            "conditions": [
+              "possible"
+            ]
+          },
+          {
+            "state_variable_name": "_totalSupply",
+            "type": "uint256",
+            "what_does_it_track": "Total supply of tokens",
+            "why_is_is_important": "The total token supply represents the total number of tokens in existence.",
+            "when_is_it_updated": "When stability pool liquidation is possible, SBD tokens are burned from stability pool",
+            "how_to_validate_state_update": "Check the total supply of SBD tokens decreased by borrowedAmount.",
+            "has_conditional_updates": false,
+            "summary_of_update": "Total supply of SBD tokens is reduced by the amount burned.",
+            "conditions": [
+              "possible"
+            ]
+          },
+          {
+            "state_variable_name": "totalBurned",
+            "type": "uint256",
+            "what_does_it_track": "Total supply of tokens",
+            "why_is_is_important": "Tracking the total burned tokens is important for understanding the token economics and supply dynamics.",
+            "when_is_it_updated": "When stability pool liquidation is possible, SBD tokens are burned from stability pool",
+            "how_to_validate_state_update": "Check the total burned SBD tokens increased by borrowedAmount",
+            "has_conditional_updates": false,
+            "summary_of_update": "totalBurned increased by amount",
+            "conditions": [
+              "possible"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "StabilityPool",
+        "state_updated": [
+          {
+            "state_variable_name": "totalStakedRaw",
+            "type": "uint256",
+            "what_does_it_track": "The total raw staked amount",
+            "why_is_is_important": "totalStakedRaw must be reduced during liquidation process",
+            "when_is_it_updated": "When liquidation is performed using stability pool",
+            "how_to_validate_state_update": "Verify if totalStakedRaw is reduced by amount.",
+            "has_conditional_updates": false,
+            "summary_of_update": "Reduce totalStakedRaw by amount.",
+            "conditions": [
+              "possible"
+            ]
+          },
+          {
+            "state_variable_name": "stakeScalingFactor",
+            "type": "uint256",
+            "what_does_it_track": "Stake Scaling Factor",
+            "why_is_is_important": "The stakeScalingFactor is a critical parameter for fairly distributing rewards and collateral.",
+            "when_is_it_updated": "When liquidation is performed using stability pool",
+            "how_to_validate_state_update": "Verify if stakeScalingFactor is updated to cumulativeProductScalingFactor.",
+            "has_conditional_updates": false,
+            "summary_of_update": "Update the stakeScalingFactor",
+            "conditions": [
+              "possible"
+            ]
+          },
+          {
+            "state_variable_name": "totalCollateralPerToken",
+            "type": "uint256",
+            "what_does_it_track": "Total Collateral Per Token",
+            "why_is_is_important": "It is used to calculate collateral rewards for stakers.",
+            "when_is_it_updated": "When liquidation is performed using stability pool",
+            "how_to_validate_state_update": "Verify that totalCollateralPerToken is increased by _totalCollateralPerToken",
+            "has_conditional_updates": false,
+            "summary_of_update": "Update the totalCollateralPerToken",
+            "conditions": [
+              "possible"
+            ]
+          },
+          {
+            "state_variable_name": "collateralLoss",
+            "type": "uint256",
+            "what_does_it_track": "Collateral loss",
+            "why_is_is_important": "The collateralLoss variable is crucial for tracking any loss of collateral that may occur during the distribution process.",
+            "when_is_it_updated": "When liquidation is performed using stability pool.",
+            "how_to_validate_state_update": "Verify the collateralLoss after the function call.",
+            "has_conditional_updates": false,
+            "summary_of_update": "Update the collateralLoss",
+            "conditions": [
+              "possible"
+            ]
+          },
+          {
+            "state_variable_name": "stakeResetSnapshots",
+            "type": "StakeResetSnapshot",
+            "what_does_it_track": "Stake reset snapshots",
+            "why_is_is_important": "Important for reseting the snapshot",
+            "when_is_it_updated": "If cumulativeProductScalingFactor is less than minimumScalingFactor",
+            "how_to_validate_state_update": "Verify the snapshot values after the reset.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Store stake reset snapshots",
+            "conditions": [
+              "possible",
+              "cumulativeProductScalingFactor < minimumScalingFactor"
+            ]
+          },
+          {
+            "state_variable_name": "stakeResetCount",
+            "type": "uint256",
+            "what_does_it_track": "Stake reset count",
+            "why_is_is_important": "It is important for incrementing stakeResetCount.",
+            "when_is_it_updated": "If cumulativeProductScalingFactor is less than minimumScalingFactor",
+            "how_to_validate_state_update": "Verify that stakeResetCount is incremented if cumulativeProductScalingFactor is less than minimumScalingFactor",
+            "has_conditional_updates": true,
+            "summary_of_update": "Increment stakeResetCount",
+            "conditions": [
+              "possible",
+              "cumulativeProductScalingFactor < minimumScalingFactor"
+            ]
+          }
+        ]
+      },
+      {
+        "contract_name": "DFIREStaking",
+        "state_updated": [
+          {
+            "state_variable_name": "totalCollateralPerToken",
+            "type": "uint256",
+            "what_does_it_track": "Total collateral per token",
+            "why_is_is_important": "It's essential to have accurate accounting of the total collateral rewards available for distribution to stakers.",
+            "when_is_it_updated": "When collateral reward is added, _totalStake is greater than 0 and dfireTokenStaking.addCollateralReward{value: liquidationFee - refund}(liquidationFee - refund) call is success.",
+            "how_to_validate_state_update": "Verify totalCollateralPerToken after function call.",
+            "has_conditional_updates": false,
+            "summary_of_update": "totalCollateralPerToken is increased by (_amount * PRECISION) / _totalStake",
+            "conditions": [
+              "liquidationFee > refund",
+              "sbrStakingPoolCanReceiveRewards",
+              "success",
+              "totalStake > 0"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "action_context": {
+    "contract_context": [
+      {
+        "contract_name": "StableBaseCDP",
+        "code_snippet": "function liquidate() external nonReentrant {\n        uint256 gasStart = gasleft();\n        uint256 _safeId = safesOrderedForLiquidation.getTail();\n        _liquidate(_safeId, gasStart);\n    }\nfunction _liquidate(uint256 _safeId, uint256 gasStart) internal {\n        uint256 _last = safesOrderedForLiquidation.getHead();\n        Safe storage safe = safes[_safeId];\n        _updateSafe(_safeId, safe);\n        safe = safes[_safeId];\n        uint256 borrowedAmount = safe.borrowedAmount;\n        uint256 collateralAmount = safe.collateralAmount;\n        //require(_isApprovedOrOwner(msg.sender, _safeId), \"Unauthorized\");\n        require(collateralAmount > 0, \"Safe does not exist\");\n        require(\n            borrowedAmount > 0,\n            \"Cannot liquidate a Safe with no borrowed amount\"\n        );\n\n        uint256 collateralPrice = priceOracle.fetchPrice();\n        uint256 collateralValue = (collateralAmount * collateralPrice) /\n            PRECISION;\n        // Check if the collateral is sufficient for liquidation\n        require(\n            collateralValue <\n                ((borrowedAmount * liquidationRatio) / BASIS_POINTS_DIVISOR),\n            \"Can't liquidate yet\"\n        );\n        bool possible = stabilityPool.isLiquidationPossible(borrowedAmount);\n\n        // Pay liquidation fee\n        uint256 liquidationFee = (collateralAmount *\n            REDEMPTION_LIQUIDATION_FEE) / BASIS_POINTS_DIVISOR;\n\n        totalCollateral -= collateralAmount;\n        _updateTotalDebt(totalDebt, borrowedAmount, false);\n\n        if (possible) {\n            require(\n                stabilityPool.performLiquidation{\n                    value: collateralAmount - liquidationFee\n                }(borrowedAmount, collateralAmount - liquidationFee),\n                \"Liquidation failed\"\n            );\n            // Burn the amount from stability pool\n            require(\n                sbdToken.burn(address(stabilityPool), borrowedAmount),\n                \"Burn failed\"\n            );\n\n            emit LiquidatedUsingStabilityPool(\n                _safeId,\n                borrowedAmount,\n                collateralAmount,\n                totalCollateral,\n                totalDebt\n            );\n        } else {\n            require(_safeId != _last, \"Cannot liquidate the last Safe\");\n            // Liquidate by distributing the debt and collateral to the existing borrowers.\n            distributeDebtAndCollateral(\n                borrowedAmount,\n                collateralAmount - liquidationFee,\n                totalCollateral\n            );\n            emit LiquidatedUsingSecondaryMechanism(\n                _safeId,\n                borrowedAmount,\n                collateralAmount,\n                totalCollateral,\n                totalDebt\n            );\n        }\n        _removeSafeFromBothQueues(_safeId);\n\n        // Remove the Safe from the mapping\n        _removeSafe(_safeId);\n        uint256 gasUsed = gasStart - gasleft();\n        uint256 gasCompensation = (gasUsed + EXTRA_GAS_COMPENSATION) *\n            (block.basefee + (block.basefee * 10) / 100); // 10% extra gas cost\n        uint256 refund = min(gasCompensation, liquidationFee);\n        _distributeLiquidationFeeAndGasCompensation(\n            _safeId,\n            (gasUsed + EXTRA_GAS_COMPENSATION),\n            liquidationFee,\n            refund\n        );\n    }\nfunction _updateSafe(\n        uint _safeId,\n        Safe storage _safe\n    ) internal returns (Safe memory) {\n        // Update borrowed amount\n        LiquidationSnapshot storage liquidationSnapshot = liquidationSnapshots[\n            _safeId\n        ];\n        if (\n            liquidationSnapshot.collateralPerCollateralSnapshot !=\n            cumulativeCollateralPerUnitCollateral\n        ) {\n            uint debtIncrease = (_safe.collateralAmount *\n                (cumulativeDebtPerUnitCollateral -\n                    liquidationSnapshot.debtPerCollateralSnapshot)) / PRECISION;\n            _safe.borrowedAmount += debtIncrease;\n            _safe.totalBorrowedAmount += debtIncrease;\n            liquidationSnapshot\n                .debtPerCollateralSnapshot = cumulativeDebtPerUnitCollateral;\n\n            // Update deposited amount\n            uint collateralIncrease = (_safe.collateralAmount *\n                (cumulativeCollateralPerUnitCollateral -\n                    liquidationSnapshot.collateralPerCollateralSnapshot)) /\n                PRECISION;\n            _safe.collateralAmount += collateralIncrease;\n            liquidationSnapshot\n                .collateralPerCollateralSnapshot = cumulativeCollateralPerUnitCollateral;\n\n            totalCollateral += collateralIncrease;\n            _updateTotalDebt(totalDebt, debtIncrease, true);\n            emit SafeUpdated(\n                _safeId,\n                _safe.collateralAmount,\n                _safe.borrowedAmount,\n                collateralIncrease,\n                debtIncrease,\n                totalCollateral,\n                totalDebt\n            );\n        }\n\n        return _safe;\n    }\nfunction _updateTotalDebt(\n        uint256 currentDebt,\n        uint256 delta,\n        bool add\n    ) internal returns (uint256) {\n        uint256 debt = currentDebt;\n        if (add) {\n            debt = currentDebt + delta;\n        } else {\n            debt = currentDebt - delta;\n        }\n        // Bootstrap Mode to Normal mode only once, Normal mode to bootstrap mode is not possible\n        if (\n            debt > BOOTSTRAP_MODE_DEBT_THRESHOLD &&\n            PROTOCOL_MODE == SBStructs.Mode.BOOTSTRAP\n        ) {\n            PROTOCOL_MODE = SBStructs.Mode.NORMAL;\n        }\n        totalDebt = debt;\n        return debt;\n    }\nfunction distributeDebtAndCollateral(\n        uint256 debtAmount,\n        uint256 collateralAmount,\n        uint256 totalCollateralAfterLiquidation\n    ) internal {\n        uint256 collateralToDistribute = collateralAmount + collateralLoss;\n        uint256 debtToDistribute = debtAmount + debtLoss;\n        uint256 collPerUnitColl = (collateralToDistribute * PRECISION) /\n            totalCollateralAfterLiquidation;\n        cumulativeCollateralPerUnitCollateral += collPerUnitColl;\n        uint256 debtPerUnitColl = (debtToDistribute * PRECISION) /\n            totalCollateralAfterLiquidation;\n        cumulativeDebtPerUnitCollateral += debtPerUnitColl;\n        collateralLoss =\n            collateralToDistribute -\n            (collPerUnitColl * totalCollateralAfterLiquidation) /\n            PRECISION;\n        debtLoss =\n            debtToDistribute -\n            (debtPerUnitColl * totalCollateralAfterLiquidation) /\n            PRECISION;\n    }\nfunction _removeSafeFromBothQueues(uint256 safeId) internal {\n        safesOrderedForLiquidation.remove(safeId);\n        emit SafeRemovedFromLiquidationQueue(safeId);\n        safesOrderedForRedemption.remove(safeId);\n        emit SafeRemovedFromRedemptionQueue(safeId);\n    }\nfunction _removeSafe(uint256 _safeId) internal {\n        //safes[_safeId].status = SafeStatus.CLOSED;\n        Safe memory safe = safes[_safeId];\n        delete safes[_safeId];\n        _burn(_safeId);\n        emit RemovedSafe(_safeId, safe);\n    }\nfunction _burn(uint256 tokenId) internal {\n        address previousOwner = _update(address(0), tokenId, address(0));\n        if (previousOwner == address(0)) {\n            revert ERC721NonexistentToken(tokenId);\n        }\n    }\nfunction _update(address to, uint256 tokenId, address auth) internal virtual returns (address) {\n        address from = _ownerOf(tokenId);\n\n        // Perform (optional) operator check\n        if (auth != address(0)) {\n            _checkAuthorized(from, auth, tokenId);\n        }\n\n        // Execute the update\n        if (from != address(0)) {\n            // Clear approval. No need to re-authorize or emit the Approval event\n            _approve(address(0), tokenId, address(0), false);\n\n            unchecked {\n                _balances[from] -= 1;\n            }\n        }\n\n        if (to != address(0)) {\n            unchecked {\n                _balances[to] += 1;\n            }\n        }\n\n        _owners[tokenId] = to;\n\n        emit Transfer(from, to, tokenId);\n\n        return from;\n    }\nfunction _ownerOf(uint256 tokenId) internal view virtual returns (address) {\n        return _owners[tokenId];\n    }\nfunction _checkAuthorized(address owner, address spender, uint256 tokenId) internal view virtual {\n        if (!_isAuthorized(owner, spender, tokenId)) {\n            if (owner == address(0)) {\n                revert ERC721NonexistentToken(tokenId);\n            } else {\n                revert ERC721InsufficientApproval(spender, tokenId);\n            }\n        }\n    }\nfunction _isAuthorized(address owner, address spender, uint256 tokenId) internal view virtual returns (bool) {\n        return\n            spender != address(0) &&\n            (owner == spender || isApprovedForAll(owner, spender) || _getApproved(tokenId) == spender);\n    }\nfunction isApprovedForAll(address owner, address operator) external view returns (bool);\nfunction _getApproved(uint256 tokenId) internal view virtual returns (address) {\n        return _tokenApprovals[tokenId];\n    }\nfunction _approve(address to, uint256 tokenId, address auth, bool emitEvent) internal virtual {\n        // Avoid reading the owner unless necessary\n        if (emitEvent || auth != address(0)) {\n            address owner = _requireOwned(tokenId);\n\n            // We do not use _isAuthorized because single-token approvals should not be able to call approve\n            if (auth != address(0) && owner != auth && !isApprovedForAll(owner, auth)) {\n                revert ERC721InvalidApprover(auth);\n            }\n\n            if (emitEvent) {\n                emit Approval(owner, to, tokenId);\n            }\n        }\n\n        _tokenApprovals[tokenId] = to;\n    }\nfunction _requireOwned(uint256 tokenId) internal view returns (address) {\n        address owner = _ownerOf(tokenId);\n        if (owner == address(0)) {\n            revert ERC721NonexistentToken(tokenId);\n        }\n        return owner;\n    }\nfunction min(uint256 a, uint256 b) internal pure returns (uint256) {\n        return a < b ? a : b;\n    }\nfunction _distributeLiquidationFeeAndGasCompensation(\n        uint256 safeId,\n        uint256 gasUsed,\n        uint256 liquidationFee,\n        uint256 refund\n    ) internal {\n        // Try to send the liquidation fee to sbr stakers\n        if (liquidationFee > refund) {\n            if (sbrStakingPoolCanReceiveRewards) {\n                bool success = dfireTokenStaking.addCollateralReward{\n                    value: liquidationFee - refund\n                }(liquidationFee - refund);\n                if (!success && stabilityPoolCanReceiveRewards) {\n                    success = stabilityPool.addCollateralReward{\n                        value: liquidationFee - refund\n                    }(liquidationFee - refund);\n                    if (!success) {\n                        refund = liquidationFee;\n                    }\n                } else if (success) {\n                    emit LiquidationFeePaid(\n                        safeId,\n                        address(dfireTokenStaking),\n                        liquidationFee - refund\n                    );\n                }\n            } else if (stabilityPoolCanReceiveRewards) {\n                bool success = stabilityPool.addCollateralReward{\n                    value: liquidationFee - refund\n                }(liquidationFee - refund);\n                if (!success) {\n                    refund = liquidationFee;\n                } else {\n                    emit LiquidationFeePaid(\n                        safeId,\n                        address(stabilityPool),\n                        liquidationFee - refund\n                    );\n                }\n            } else {\n                refund = liquidationFee;\n            }\n        }\n        if (refund > 0) {\n            // Refund the remaining liquidation fee to the user\n            (bool success, ) = msg.sender.call{value: refund}(\"\");\n            require(success, \"Transfer failed\");\n            emit LiquidationGasCompensationPaid(\n                safeId,\n                gasUsed,\n                msg.sender,\n                refund\n            );\n        }\n    }",
+        "references": {
+          "references": [
+            {
+              "state_variable_name": "sbdToken",
+              "contract_name": "DFIDToken"
+            },
+            {
+              "state_variable_name": "priceOracle",
+              "contract_name": "MockPriceOracle"
+            },
+            {
+              "state_variable_name": "stabilityPool",
+              "contract_name": "StabilityPool"
+            },
+            {
+              "state_variable_name": "dfireTokenStaking",
+              "contract_name": "DFIREStaking"
+            },
+            {
+              "state_variable_name": "safesOrderedForLiquidation",
+              "contract_name": "OrderedDoublyLinkedList"
+            },
+            {
+              "state_variable_name": "safesOrderedForRedemption",
+              "contract_name": "OrderedDoublyLinkedList"
+            }
+          ]
+        }
+      },
+      {
+        "contract_name": "OrderedDoublyLinkedList",
+        "code_snippet": "function getTail() external view override returns (uint256) {\n        return tail;\n    }\nfunction getHead() external view override returns (uint256) {\n        return head;\n    }\nfunction remove(\n        uint256 id\n    ) external override onlyOwner returns (Node memory) {\n        if (\n            nodes[id].value == 0 && nodes[id].next == 0 && nodes[id].prev == 0\n        ) {\n            // Node doesn't exist\n            return Node(0, 0, 0);\n        }\n        return _remove(id);\n    }\nfunction _remove(uint256 id) internal returns (Node memory) {\n        Node memory node = nodes[id];\n        if (node.prev == 0) {\n            head = node.next;\n            nodes[node.next].prev = 0;\n        } else {\n            nodes[node.prev].next = node.next;\n            nodes[node.next].prev = node.prev;\n        }\n        if (node.next == 0) {\n            tail = node.prev;\n            nodes[node.prev].next = 0;\n        } else {\n            nodes[node.next].prev = node.prev;\n            nodes[node.prev].next = node.next;\n        }\n        delete nodes[id];\n        return node;\n    }",
+        "references": {
+          "references": []
+        }
+      },
+      {
+        "contract_name": "MockPriceOracle",
+        "code_snippet": "function fetchPrice() external view override returns (uint256) {\n        return price;\n    }",
+        "references": {
+          "references": []
+        }
+      },
+      {
+        "contract_name": "StabilityPool",
+        "code_snippet": "function isLiquidationPossible(\n        uint256 amount\n    ) external view override returns (bool) {\n        return amount <= totalStakedRaw;\n    }\nfunction performLiquidation(\n        uint256 amount,\n        uint256 collateral\n    ) external payable onlyDebtContract returns (bool) {\n        //require(msg.sender == debtContract, \"Caller is not the debt contract\");\n        //uint256 totalEffectiveStake = getTotalEffectiveStake();\n        require(amount <= totalStakedRaw, \"Invalid liquidation amount\");\n        require(msg.value == collateral, \"Invalid collateral amount\");\n\n        uint256 previousScalingFactor = stakeScalingFactor;\n        //uint256 scalingFactorReduction = (_amount * precision) / totalStakedRaw;\n        // (1 - Amount / totalStakedRaw)\n        uint256 newScalingFactor = ((totalStakedRaw - amount) * precision) /\n            totalStakedRaw;\n        uint256 cumulativeProductScalingFactor = (stakeScalingFactor *\n            newScalingFactor) / precision;\n\n        stakeScalingFactor = cumulativeProductScalingFactor;\n\n        uint256 _collateral = collateral + collateralLoss;\n\n        uint256 _totalCollateralPerToken = ((_collateral *\n            previousScalingFactor *\n            precision) / totalStakedRaw) / precision;\n\n        // Update total collateral per token\n        totalCollateralPerToken += _totalCollateralPerToken;\n        collateralLoss =\n            _collateral -\n            ((_totalCollateralPerToken * totalStakedRaw * precision) /\n                previousScalingFactor) /\n            precision;\n\n        emit LiquidationPerformed(\n            amount,\n            collateral,\n            totalStakedRaw,\n            stakeScalingFactor,\n            totalCollateralPerToken\n        );\n\n        totalStakedRaw -= amount;\n\n        if (totalStakedRaw == 0 && rewardSenderActive) {\n            require(\n                IRewardSender(stableBaseCDP).setCanStabilityPoolReceiveRewards(\n                    false\n                ),\n                \"Unable to deactivate reward sender\"\n            );\n        }\n\n        if (cumulativeProductScalingFactor < minimumScalingFactor) {\n            StakeResetSnapshot memory resetSnapshot = StakeResetSnapshot({\n                scalingFactor: cumulativeProductScalingFactor,\n                totalRewardPerToken: totalRewardPerToken,\n                totalCollateralPerToken: totalCollateralPerToken,\n                totalSBRRewardPerToken: totalSbrRewardPerToken\n            });\n            stakeResetSnapshots[stakeResetCount] = resetSnapshot;\n            totalCollateralPerToken = 0;\n            totalRewardPerToken = 0;\n            totalSbrRewardPerToken = 0;\n            stakeScalingFactor = precision;\n            stakeResetCount++;\n            emit ScalingFactorReset(stakeResetCount - 1, resetSnapshot);\n        }\n        return true;\n    }\nfunction addCollateralReward(\n        uint256 amount\n    ) external payable returns (bool) {\n        require(amount > 0, \"Reward must be greater than zero\");\n        require(msg.value == amount, \"Invalid collateral amount\");\n        uint256 _totalStakedRaw = totalStakedRaw;\n        if (_totalStakedRaw == 0) {\n            return false;\n        }\n\n        uint256 _totalAmount = amount + collateralLoss;\n        uint256 _collateralPerToken = ((_totalAmount *\n            stakeScalingFactor *\n            precision) / _totalStakedRaw) / precision;\n\n        totalCollateralPerToken += _collateralPerToken;\n\n        collateralLoss =\n            _totalAmount -\n            (((_collateralPerToken * _totalStakedRaw * precision) /\n                stakeScalingFactor) / precision);\n\n        emit CollateralRewardAdded(amount);\n        return true;\n    }",
+        "references": {
+          "references": [
+            {
+              "state_variable_name": "stakingToken",
+              "contract_name": "DFIDToken"
+            },
+            {
+              "state_variable_name": "sbrToken",
+              "contract_name": "DFIREToken"
+            },
+            {
+              "state_variable_name": "stableBaseCDP",
+              "contract_name": "StableBaseCDP"
+            }
+          ]
+        }
+      },
+      {
+        "contract_name": "DFIDToken",
+        "code_snippet": "function burn(\n        address from,\n        uint256 amount\n    ) external onlyOwner returns (bool) {\n        require(from != address(0), \"Invalid address\");\n        require(amount > 0, \"Amount must be greater than 0\");\n        require(balanceOf(from) >= amount, \"Insufficient balance\");\n\n        _burn(from, amount); // Using OpenZeppelin's internal _burn function\n\n        totalBurned += amount;\n\n        emit Burn(from, amount);\n        return true;\n    }\nfunction balanceOf(address account) external view returns (uint256);\nfunction _burn(address account, uint256 value) internal {\n        if (account == address(0)) {\n            revert ERC20InvalidSender(address(0));\n        }\n        _update(account, address(0), value);\n    }\nfunction _update(address from, address to, uint256 value) internal virtual {\n        if (from == address(0)) {\n            // Overflow check required: The rest of the code assumes that totalSupply never overflows\n            _totalSupply += value;\n        } else {\n            uint256 fromBalance = _balances[from];\n            if (fromBalance < value) {\n                revert ERC20InsufficientBalance(from, fromBalance, value);\n            }\n            unchecked {\n                // Overflow not possible: value <= fromBalance <= totalSupply.\n                _balances[from] = fromBalance - value;\n            }\n        }\n\n        if (to == address(0)) {\n            unchecked {\n                // Overflow not possible: value <= totalSupply or value <= fromBalance <= totalSupply.\n                _totalSupply -= value;\n            }\n        } else {\n            unchecked {\n                // Overflow not possible: balance + value is at most totalSupply, which we know fits into a uint256.\n                _balances[to] += value;\n            }\n        }\n\n        emit Transfer(from, to, value);\n    }",
+        "references": {
+          "references": [
+            {
+              "state_variable_name": "_stableBaseCDP",
+              "contract_name": "stableBaseCDP"
+            }
+          ]
+        }
+      },
+      {
+        "contract_name": "DFIREStaking",
+        "code_snippet": "function addCollateralReward(\n        uint256 _amount\n    ) external payable returns (bool) {\n        //collateralToken.transferFrom(msg.sender, address(this), _amount);\n        uint _totalStake = totalStake;\n        if (_totalStake == 0) {\n            return false;\n        } else {\n            require(msg.value == _amount, \"Invalid collateral reward amount\");\n            totalCollateralPerToken += (_amount * PRECISION) / _totalStake;\n            emit CollateralRewardAdded(_amount);\n            return true;\n        }\n    }",
+        "references": {
+          "references": [
+            {
+              "state_variable_name": "stakingToken",
+              "contract_name": "DFIREToken"
+            },
+            {
+              "state_variable_name": "rewardToken",
+              "contract_name": "DFIDToken"
+            },
+            {
+              "state_variable_name": "stableBaseContract",
+              "contract_name": "StableBaseCDP"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
