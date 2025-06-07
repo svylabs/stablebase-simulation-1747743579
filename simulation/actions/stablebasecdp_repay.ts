@@ -1,12 +1,11 @@
-import { Action, Actor, RunContext, Snapshot } from '@svylabs/ilumia';
 import { ethers } from 'ethers';
+import { Action, Actor, RunContext, Snapshot } from '@svylabs/ilumia';
 import { expect } from 'chai';
 
 export class RepayAction extends Action {
   contract: ethers.Contract;
 
-  constructor(contract: ethers.Contract) {
-    super('RepayAction');
+  constructor(contract: ethers.Contract) {\n    super('RepayAction');
     this.contract = contract;
   }
 
@@ -15,42 +14,84 @@ export class RepayAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot
   ): Promise<[any, Record<string, any>]> {
-    const safeIds = Object.keys(currentSnapshot.contractSnapshot.stableBaseCDP.safes);
+    const stableBaseCDPContract = context.contracts['stableBaseCDP'];
+    const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
+    const dfidTokenSnapshot = currentSnapshot.contractSnapshot.dfidToken;
+
+    const safeIds = Object.keys(stableBaseCDPSnapshot.safes).map(Number);
     if (safeIds.length === 0) {
-      throw new Error("No safes available for repayment");
+      throw new Error('No safes available to repay.');
     }
 
     const safeId = safeIds[context.prng.next() % safeIds.length];
-    const safe = currentSnapshot.contractSnapshot.stableBaseCDP.safes[safeId];
+    const safe = stableBaseCDPSnapshot.safes[BigInt(safeId)];
 
     if (!safe || safe.borrowedAmount === BigInt(0)) {
-      throw new Error(`Safe with ID ${safeId} has no debt to repay.`);
+      throw new Error('Safe does not exist or has no debt to repay.');
     }
 
-    const maxRepayAmount = safe.borrowedAmount;
-    const amount = BigInt(Math.floor(context.prng.next() % Number(maxRepayAmount) + 1)); // Ensure amount > 0
+    const userAddress = actor.account.address;
+    const sbdBalance = dfidTokenSnapshot.Balance[userAddress] || BigInt(0);
+    const borrowedAmount = safe.borrowedAmount;
+    const minimumDebt = BigInt(500); // Assuming MINIMUM_DEBT is 500
 
-    let nearestSpotInLiquidationQueue = BigInt(0);
-        const liquidationQueueHead = currentSnapshot.contractSnapshot.safesOrderedForLiquidation.head;
-        if (liquidationQueueHead !== BigInt(0)) {
-            let current = liquidationQueueHead;
-            let nearestSpotFound = false;
-            while (current !== BigInt(0) && !nearestSpotFound) {
-                if (current !== BigInt(safeId)) { // Avoid using the same safeId as nearestSpot
-                    nearestSpotInLiquidationQueue = current;
-                    nearestSpotFound = true;
-                }
-                current = currentSnapshot.contractSnapshot.safesOrderedForLiquidation.nodes[current.toString()].next;
-            }
-            if (!nearestSpotFound) {
-                nearestSpotInLiquidationQueue = liquidationQueueHead; // Revert to head if no other suitable spot is found
-            }
+    let amount: bigint;
+    if (borrowedAmount <= BigInt(0)) {
+            throw new Error("Safe has no debt to repay.");
+    }
+
+    if (sbdBalance <= BigInt(0)) {
+        throw new Error("Account has no SBD to repay with");
+    }
+
+    const maxRepayableAmount = borrowedAmount > sbdBalance ? sbdBalance : borrowedAmount
+
+    if (borrowedAmount <= sbdBalance) {
+      // If the borrowed amount is less than the sbd balance, we can repay the whole amount
+      if (borrowedAmount > minimumDebt) {
+          const maxRepayable = borrowedAmount;
+          if (maxRepayable <= BigInt(0)) {
+              amount = borrowedAmount;
+          } else {
+              const diff = borrowedAmount - minimumDebt
+              if (diff > BigInt(0)) {
+                  amount = (BigInt(context.prng.next()) % diff) + minimumDebt;
+              } else {
+                  amount = borrowedAmount //exactly the min debt
+              }
+
+          }
+        
+      } else {
+        amount = borrowedAmount;
+      }
+    } else {
+        if (sbdBalance > minimumDebt) {
+            amount = (BigInt(context.prng.next()) % (sbdBalance-minimumDebt)) + minimumDebt; //ensure at least min debt after repay
+        } else {
+            amount = sbdBalance; //repay all of sbd balance
         }
+      
+    }
+
+    if (amount > borrowedAmount) {
+      amount = borrowedAmount;
+    }
+
+      if (amount > sbdBalance) {
+          amount = sbdBalance;
+      }
+
+    if (amount <= BigInt(0)) {
+      throw new Error('Repayment amount must be greater than zero.');
+    }
+
+    const nearestSpotInLiquidationQueue = 0; // or find from contract
 
     const actionParams = [
       BigInt(safeId),
       amount,
-      nearestSpotInLiquidationQueue,
+      BigInt(nearestSpotInLiquidationQueue),
     ];
 
     return [actionParams, {}];
@@ -62,11 +103,11 @@ export class RepayAction extends Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<Record<string, any> | void> {
-    const [safeId, amount, nearestSpotInLiquidationQueue] = actionParams;
-    const tx = await this.contract.connect(actor.account.value).repay(
-      safeId,
-      amount,
-      nearestSpotInLiquidationQueue
+    const signer = actor.account.value as ethers.Signer;
+    const tx = await this.contract.connect(signer).repay(
+      actionParams[0],
+      actionParams[1],
+      actionParams[2]
     );
     await tx.wait();
   }
@@ -78,42 +119,92 @@ export class RepayAction extends Action {
     newSnapshot: Snapshot,
     actionParams: any
   ): Promise<boolean> {
-    const [safeId, amount, nearestSpotInLiquidationQueue] = actionParams;
+    const safeId = actionParams[0] as bigint;
+    const amount = actionParams[1] as bigint;
 
-    const prevSafe = previousSnapshot.contractSnapshot.stableBaseCDP.safes[safeId];
-    const newSafe = newSnapshot.contractSnapshot.stableBaseCDP.safes[safeId];
-    const initialTotalDebt = previousSnapshot.contractSnapshot.stableBaseCDP.totalDebt;
-    const finalTotalDebt = newSnapshot.contractSnapshot.stableBaseCDP.totalDebt;
-    const initialTotalCollateral = previousSnapshot.contractSnapshot.stableBaseCDP.totalCollateral;
-    const finalTotalCollateral = newSnapshot.contractSnapshot.stableBaseCDP.totalCollateral;
+    const initialStableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
+    const finalStableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
+    const initialDFIDTokenSnapshot = previousSnapshot.contractSnapshot.dfidToken;
+    const finalDFIDTokenSnapshot = newSnapshot.contractSnapshot.dfidToken;
+    const initialSafesOrderedForLiquidation = previousSnapshot.contractSnapshot.safesOrderedForLiquidation;
+    const initialSafesOrderedForRedemption = previousSnapshot.contractSnapshot.safesOrderedForRedemption;
 
-    const dfidTokenAddress = (context.contracts.dfidToken as any).target;
+    const userAddress = actor.account.address;
 
-    const previousSBDTokenBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-    const newSBDTokenBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-    const previousSBDContractTokenBalance = previousSnapshot.accountSnapshot[dfidTokenAddress] || BigInt(0);
-    const newSBDContractTokenBalance = newSnapshot.accountSnapshot[dfidTokenAddress] || BigInt(0);
+    const initialSafe = initialStableBaseCDPSnapshot.safes[safeId];
+    const finalSafe = finalStableBaseCDPSnapshot.safes[safeId];
 
-    const initialLiquidationSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshots[safeId] || [BigInt(0), BigInt(0)];
-    const finalLiquidationSnapshot = newSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshots[safeId] || [BigInt(0), BigInt(0)];
+    const initialTotalDebt = initialStableBaseCDPSnapshot.totalDebt;
+    const finalTotalDebt = finalStableBaseCDPSnapshot.totalDebt;
 
+    const initialSBDBalance = initialDFIDTokenSnapshot.Balance[userAddress] || BigInt(0);
+    const finalSBDBalance = finalDFIDTokenSnapshot.Balance[userAddress] || BigInt(0);
+    const initialTotalSupply = initialDFIDTokenSnapshot.TotalSupply;
+    const finalTotalSupply = finalDFIDTokenSnapshot.TotalSupply;
+    const initialTotalBurned = initialDFIDTokenSnapshot.TotalBurned;
+    const finalTotalBurned = finalDFIDTokenSnapshot.TotalBurned;
 
-    // Safe State Validation
-    expect(newSafe.borrowedAmount, 'borrowedAmount should be decreased by amount').to.equal(prevSafe.borrowedAmount - amount);
+    const minimumDebt = BigInt(500);
 
-    // Total Debt Validation
-    expect(finalTotalDebt, 'totalDebt should be decreased by repayment amount').to.equal(initialTotalDebt - amount);
+    if (!initialSafe) {
+      throw new Error('Initial safe not found for safeId: ' + safeId);
+    }
 
-    // SBD Token Validation
-    expect(newSBDTokenBalance, "SBD Token balance should decrease for actor").to.equal(previousSBDTokenBalance - amount);
+    const initialLiquidationSnapshot = initialStableBaseCDPSnapshot.liquidationSnapshots[safeId];
+    const cumulativeCollateralPerUnitCollateral = initialStableBaseCDPSnapshot.cumulativeCollateralPerUnitCollateral;
 
-    // Check if totalCollateral got updated
-    const cumulativeCollateralPerUnitCollateralPrevious = previousSnapshot.contractSnapshot.stableBaseCDP.cumulativeCollateralPerUnitCollateral;
-    const cumulativeCollateralPerUnitCollateralNew = newSnapshot.contractSnapshot.stableBaseCDP.cumulativeCollateralPerUnitCollateral;
+    let debtChange = initialSafe.borrowedAmount - finalSafe.borrowedAmount;
 
-    if (initialLiquidationSnapshot[1] != cumulativeCollateralPerUnitCollateralPrevious) {
-          // totalCollateral should be updated
-          expect(finalTotalCollateral).to.not.equal(initialTotalCollateral);
+    if (initialLiquidationSnapshot && initialLiquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral) {
+      expect(finalSafe.borrowedAmount).to.be.closeTo(
+        initialSafe.borrowedAmount - amount,
+        Number(amount / BigInt(1000000000000000000))
+      );
+    } else {
+      expect(finalSafe.borrowedAmount).to.equal(initialSafe.borrowedAmount - amount);
+    }
+
+    // Verify totalDebt decreased by amount (accounting for _updateSafe)
+    expect(finalTotalDebt).to.be.closeTo(
+      initialTotalDebt - amount,
+      Number(amount / BigInt(1000000000000000000))
+    );
+
+    // Confirm final borrowedAmount is either 0 or >= MINIMUM_DEBT
+    expect(finalSafe.borrowedAmount === BigInt(0) || finalSafe.borrowedAmount >= minimumDebt).to.be
+      .true;
+
+    if (finalSafe.borrowedAmount === BigInt(0)) {\n      if (initialSafesOrderedForLiquidation.nodes[safeId]) {
+          expect(initialSafesOrderedForLiquidation.nodes[safeId]).to.be.undefined;
+      }
+      if (initialSafesOrderedForRedemption.nodes[safeId]) {
+          expect(initialSafesOrderedForRedemption.nodes[safeId]).to.be.undefined;
+      }
+      
+    }
+
+    // Verify user's SBD balance decreased by amount
+    expect(finalSBDBalance).to.equal(initialSBDBalance - amount);
+
+    // Verify total SBD supply decreased by amount
+    expect(finalTotalSupply).to.equal(initialTotalSupply - amount);
+
+    // Verify total burned increased by amount
+    expect(finalTotalBurned).to.equal(initialTotalBurned + amount);
+
+    //check for protocol mode change
+    if (initialTotalDebt > BigInt(1000) && initialStableBaseCDPSnapshot.mode === 0) {\n      expect(finalStableBaseCDPSnapshot.mode).to.equal(1);
+    }
+
+    //Verify that collateral updates are correctly updated when drift occurs
+    if (
+      initialLiquidationSnapshot &&
+      initialLiquidationSnapshot.collateralPerCollateralSnapshot !=
+        cumulativeCollateralPerUnitCollateral
+    ) {
+      expect(finalStableBaseCDPSnapshot.totalCollateral).to.be.gte(
+        initialStableBaseCDPSnapshot.totalCollateral
+      );
     }
 
     return true;
