@@ -28,9 +28,9 @@ export interface ContractSnapshot {
 
     dfireToken: DFIRETokenSnapshot;
 
-    dfireStaking: DFIREStakingSnapshot;
+    dfireStaking: DFIREStakingState;
 
-    stabilityPool: StabilityPoolState;
+    stabilityPool: StabilityPoolSnapshot;
 
     stableBaseCDP: StableBaseCDPSnapshot;
 

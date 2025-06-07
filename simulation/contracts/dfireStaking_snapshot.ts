@@ -2,117 +2,55 @@
 
 import { ethers } from 'ethers';
 import { Actor } from '@svylabs/ilumina';
-import { DFIREStakingSnapshot, Stake } from './snapshot_interfaces';
+import { DFIREStakingState } from './snapshot_interfaces';
 
 /**
  * Takes a snapshot of DFIREStaking state
  * @param contract - ethers.Contract instance
- * @param actors - Array of Actor instances representing users
- * @returns Promise resolving to the DFIREStakingSnapshot interface
+ * @param actors - List of actors to fetch user specific data
+ * @returns Promise returning the interface DFIREStakingState
  */
-export async function takedfireStakingContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<DFIREStakingSnapshot> {
-    try {
-        // Initialize the snapshot object
-        const snapshot: DFIREStakingSnapshot = {
-            stakesMapping: {},
-            totalCollateralPerToken: BigInt(0),
-            totalRewardPerToken: BigInt(0),
-            totalStake: BigInt(0),
-            userPendingReward: {},
-            rewardSenderActive: false,
-        };
+export async function takedfireStakingContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<DFIREStakingState> {
+  try {
+    const rewardSenderActive = await contract.rewardSenderActive();
+    const totalCollateralPerToken = await contract.totalCollateralPerToken();
+    const totalRewardPerToken = await contract.totalRewardPerToken();
+    const totalStake = await contract.totalStake();
 
-        // Fetch totalCollateralPerToken
-        try {
-            snapshot.totalCollateralPerToken = BigInt(await contract.totalCollateralPerToken());
-        } catch (error: any) {
-            console.error('Error fetching totalCollateralPerToken:', error);
-            throw new Error(`Failed to fetch totalCollateralPerToken: ${error.message}`);
-        }
+    const stakes: { [accountAddress: string]: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint; } } = {};
+    const stakeByUser: { [accountAddress: string]: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint; } } = {};
+    const userPendingReward: { [accountAddress: string]: [bigint, bigint] } = {};
 
-        // Fetch totalRewardPerToken
-        try {
-            snapshot.totalRewardPerToken = BigInt(await contract.totalRewardPerToken());
-        } catch (error: any) {
-            console.error('Error fetching totalRewardPerToken:', error);
-            throw new Error(`Failed to fetch totalRewardPerToken: ${error.message}`);
-        }
+    for (const actor of actors) {
+      const accountAddress = actor.accountAddress;
 
-        // Fetch totalStake
-        try {
-            snapshot.totalStake = BigInt(await contract.totalStake());
-        } catch (error: any) {
-            console.error('Error fetching totalStake:', error);
-            throw new Error(`Failed to fetch totalStake: ${error.message}`);
-        }
+      // Fetch stakes
+      const stakeData = await contract.stakes(accountAddress);
+      stakes[accountAddress] = {
+        stake: stakeData.stake,
+        rewardSnapshot: stakeData.rewardSnapshot,
+        collateralSnapshot: stakeData.collateralSnapshot,
+      };
 
-        // Fetch rewardSenderActive
-        try {
-            snapshot.rewardSenderActive = await contract.rewardSenderActive();
-        } catch (error: any) {
-            console.error('Error fetching rewardSenderActive:', error);
-            throw new Error(`Failed to fetch rewardSenderActive: ${error.message}`);
-        }
+      // Fetch stakeByUser
+      stakeByUser[accountAddress] = await contract.getStake(accountAddress);
 
-        // Fetch stakesMapping and userPendingReward for each actor
-        for (const actor of actors) {
-            const identifiers = actor.getIdentifiers();
-
-            let accountAddresses: string[] = [];
-
-            if (identifiers && identifiers.accountAddress) {
-                if (Array.isArray(identifiers.accountAddress)) {
-                    accountAddresses = identifiers.accountAddress;
-                } else {
-                    accountAddresses = [identifiers.accountAddress as string];
-                }
-            }
-
-            for (const accountAddress of accountAddresses) {
-                try {
-                    // Fetch stakesMapping for the current actor
-                    try {
-                        const stakesData = await contract.stakes(accountAddress);
-                        snapshot.stakesMapping[accountAddress] = {
-                            stake: BigInt(stakesData.stake),
-                            rewardSnapshot: BigInt(stakesData.rewardSnapshot),
-                            collateralSnapshot: BigInt(stakesData.collateralSnapshot),
-                        };
-                    } catch (error: any) {
-                        console.error(`Error fetching stakesMapping for address ${accountAddress}:`, error);
-                    }
-
-                    // Fetch userPendingReward for the current actor
-                    try {
-                        const pendingReward = await contract.userPendingReward(accountAddress);
-                        snapshot.userPendingReward[accountAddress] = [BigInt(pendingReward[0]), BigInt(pendingReward[1])];
-                    } catch (error: any) {
-                        console.error(`Error fetching userPendingReward for address ${accountAddress}:`, error);
-                    }
-
-                    // Fetch data using _safeId if available
-                    if (identifiers && identifiers._safeId) {
-                      // You can add logic here to fetch data using _safeId
-                      // Example: const safeData = await contract.getSafeData(identifiers._safeId);
-                      console.log(`Fetching data using _safeId: ${identifiers._safeId}`);
-                    }
-
-                    // Fetch data using redemptionId if available
-                    if (identifiers && identifiers.redemptionId) {
-                      // You can add logic here to fetch data using redemptionId
-                      // Example: const redemptionData = await contract.getRedemptionData(identifiers.redemptionId);
-                      console.log(`Fetching data using redemptionId: ${identifiers.redemptionId}`);
-                    }
-
-                } catch (error: any) {
-                    console.error(`Error fetching data for address ${accountAddress}:`, error);
-                }
-            }
-        }
-
-        return snapshot;
-    } catch (error: any) {
-        console.error('Error taking DFIREStaking snapshot:', error);
-        throw new Error(`Failed to take DFIREStaking snapshot: ${error.message}`);
+      // Fetch userPendingReward
+      const pendingReward = await contract.userPendingReward(accountAddress);
+      userPendingReward[accountAddress] = [pendingReward[0], pendingReward[1]];
     }
+
+    return {
+      rewardSenderActive,
+      stakes,
+      totalCollateralPerToken,
+      totalRewardPerToken,
+      totalStake,
+      stakeByUser,
+      userPendingReward,
+    };
+  } catch (error: any) {
+    console.error('Error in takedfireStakingContractSnapshot:', error);
+    throw new Error(`Failed to snapshot DFIREStaking contract: ${error.message}`);
+  }
 }

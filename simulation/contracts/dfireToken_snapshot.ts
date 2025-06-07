@@ -7,124 +7,57 @@ import { DFIRETokenSnapshot } from './snapshot_interfaces';
 /**
  * Takes a snapshot of DFIREToken state
  * @param contract - ethers.Contract instance
- * @param actors - An array of Actor instances to fetch user-specific data
+ * @param actors - Array of Actor instances
  * @returns Promise returning the interface DFIRETokenSnapshot
  */
 export async function takedfireTokenContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<DFIRETokenSnapshot> {
-    try {
-        // Initialize data structures to store allowances and balances
-        const allowances: { [accountAddress: string]: bigint } = {};
-        const balances: { [accountAddress: string]: bigint } = {};
-        
-        // Iterate over each actor to fetch user-specific data
-        for (const actor of actors) {
-            const accountAddress = actor.accountAddress;
+  try {
+    const Allowance: { [owner: string]: { [spender: string]: bigint } } = {};
+    const Balance: { [account: string]: bigint } = {};
 
-            // Fetch all possible allowances for the actor based on different identifiers
-            const identifiers = actor.getIdentifiers();
+    for (const actor of actors) {
+      const ownerAddress = actor.accountAddress;
+      Allowance[ownerAddress] = {};
 
-            // Iterate through all identifiers to find potential spenders and fetch allowances
-            for (const identifierKey in identifiers) {
-                if (identifiers.hasOwnProperty(identifierKey)) {
-                    const identifierValue = identifiers[identifierKey];
+      try {
+        Balance[ownerAddress] = await contract.balanceOf(ownerAddress);
+      } catch (error: any) {
+        console.error(`Error fetching balance for account ${ownerAddress}:`, error);
+        throw new Error(`Failed to fetch balance for account ${ownerAddress}: ${error.message}`);
+      }
 
-                    // Handle single identifier value
-                    if (typeof identifierValue === 'string') {
-                        try {
-                            // Fetch allowance for the actor against the identifier (spender)
-                            const allowance = await contract.allowance(accountAddress, identifierValue);
-                            allowances[accountAddress] = BigInt(allowance);
-                        } catch (error: any) {
-                            console.error(`Error fetching allowance for ${accountAddress} with spender ${identifierValue}:`, error);
-                            // Handle the error appropriately, e.g., set to 0 or re-throw
-                            allowances[accountAddress] = BigInt(0);
-                        }
-                    } else if (Array.isArray(identifierValue)) {
-                        // Handle array of identifier values
-                        for (const spender of identifierValue) {
-                            if (typeof spender === 'string') {
-                                try {
-                                    // Fetch allowance for the actor against each spender in the array
-                                    const allowance = await contract.allowance(accountAddress, spender);
-                                    allowances[accountAddress] = BigInt(allowance);
-                                } catch (error: any) {
-                                    console.error(`Error fetching allowance for ${accountAddress} with spender ${spender}:`, error);
-                                    // Handle the error appropriately, e.g., set to 0 or re-throw
-                                    allowances[accountAddress] = BigInt(0);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Fetch balance for each actor
-            try {
-                const balance = await contract.balanceOf(accountAddress);
-                balances[accountAddress] = BigInt(balance);
-            } catch (error: any) {
-                console.error(`Error fetching balance for ${accountAddress}:`, error);
-                // Handle the error appropriately, e.g., set to 0 or re-throw
-                balances[accountAddress] = BigInt(0);
-            }
-        }
-
-        // Fetch constant contract state variables
-        let name: string;
+      for (const actor2 of actors) {
+        const spenderAddress = actor2.accountAddress;
         try {
-            name = await contract.name();
+          const allowanceValue: bigint = await contract.allowance(ownerAddress, spenderAddress);
+          Allowance[ownerAddress][spenderAddress] = allowanceValue;
         } catch (error: any) {
-            console.error("Error fetching name:", error);
-            name = ''; // Provide a default value or re-throw the error
+          console.error(`Error fetching allowance for owner ${ownerAddress} and spender ${spenderAddress}:`, error);
+          // Do not throw, continue with other allowance pairs
+          Allowance[ownerAddress][spenderAddress] = BigInt(-1);
         }
-
-        let symbol: string;
-        try {
-            symbol = await contract.symbol();
-        } catch (error: any) {
-            console.error("Error fetching symbol:", error);
-            symbol = ''; // Provide a default value or re-throw the error
-        }
-
-        let decimals: number;
-        try {
-            decimals = await contract.decimals();
-        } catch (error: any) {
-            console.error("Error fetching decimals:", error);
-            decimals = 0; // Provide a default value or re-throw the error
-        }
-
-        let totalSupply: bigint;
-        try {
-            totalSupply = BigInt(await contract.totalSupply());
-        } catch (error: any) {
-            console.error("Error fetching totalSupply:", error);
-            totalSupply = BigInt(0); // Provide a default value or re-throw the error
-        }
-
-        let totalBurned: bigint;
-        try {
-            totalBurned = BigInt(await contract.totalBurned());
-        } catch (error: any) {
-            console.error("Error fetching totalBurned:", error);
-            totalBurned = BigInt(0); // Provide a default value or re-throw the error
-        }
-
-        // Construct the snapshot object
-        const snapshot: DFIRETokenSnapshot = {
-            allowances,
-            balances,
-            name,
-            symbol,
-            decimals,
-            totalSupply,
-            totalBurned,
-        };
-
-        return snapshot;
-
-    } catch (error: any) {
-        console.error("Error taking DFIREToken snapshot:", error);
-        throw new Error(`Failed to take DFIREToken snapshot: ${error.message}`);
+      }
     }
+
+    const Decimals: number = await contract.decimals();
+    const Name: string = await contract.name();
+    const Owner: string = await contract.owner();
+    const Symbol: string = await contract.symbol();
+    const TotalBurned: bigint = await contract.totalBurned();
+    const TotalSupply: bigint = await contract.totalSupply();
+
+    return {
+      Allowance,
+      Balance,
+      Decimals,
+      Name,
+      Owner,
+      Symbol,
+      TotalBurned,
+      TotalSupply,
+    };
+  } catch (error: any) {
+    console.error('Error taking DFIREToken snapshot:', error);
+    throw new Error(`Failed to take DFIREToken snapshot: ${error.message}`);
+  }
 }
