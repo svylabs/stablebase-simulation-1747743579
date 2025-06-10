@@ -4,7 +4,7 @@ import { ethers } from "ethers";
 import { expect } from "chai";
 
 export class SetPriceAction extends Action {
-  contract: ethers.Contract;
+  private contract: ethers.Contract;
 
   constructor(contract: ethers.Contract) {
     super("SetPriceAction");
@@ -16,13 +16,21 @@ export class SetPriceAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot
   ): Promise<[boolean, any, Record<string, any>]> {
-    // Generate a random price
-    const _price = BigInt(context.prng.next()) % BigInt(10000);
+    const mockPriceOracleState = currentSnapshot.contractSnapshot.mockPriceOracle;
+    const currentPrice = mockPriceOracleState.price;
 
-    // No new identifiers are created in this action.
-    const newIdentifiers: Record<string, any> = {};
+    // Generate a random price between 50% and 150% of the current price
+    const minPrice = currentPrice / 2n;
+    const maxPrice = currentPrice + currentPrice / 2n;
 
-    return [true, { _price }, newIdentifiers];
+    // Generate a random price within the calculated range
+    const priceRange = maxPrice - minPrice + 1n;
+    let price = minPrice + BigInt(Math.floor(context.prng.next() % Number(priceRange)));
+    if(price <= 0n){
+        price = 1n; //Setting a minimum possible price to 1 to avoid errors, and to make sure it is executable
+    }
+
+    return [true, [price], {}];
   }
 
   async execute(
@@ -31,16 +39,9 @@ export class SetPriceAction extends Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<Record<string, any> | void> {
-    const { _price } = actionParams;
-
-    // Execute the setPrice function
-    const tx = await this.contract
-      .connect(actor.account.value as ethers.Signer)
-      .setPrice(_price);
-
-    const receipt = await tx.wait();
-
-    return receipt;
+    const price = actionParams[0];
+    const tx = await this.contract.connect(actor.account.value).setPrice(price);
+    await tx.wait();
   }
 
   async validate(
@@ -51,24 +52,21 @@ export class SetPriceAction extends Action {
     actionParams: any,
     executionReceipt: ExecutionReceipt
   ): Promise<boolean> {
-    const { _price } = actionParams;
+    const price = actionParams[0];
 
-    // Validate that the price state variable is updated to `_price * 1e18`
-    const expectedNewPrice = _price * BigInt(10) ** BigInt(18);
+    const previousMockPriceOracleState = previousSnapshot.contractSnapshot.mockPriceOracle;
+    const newMockPriceOracleState = newSnapshot.contractSnapshot.mockPriceOracle;
 
-    // Call the `price()` function and verify that the returned value matches the expected value.
-    const newPrice = await this.contract.price();
-    expect(newPrice).to.equal(expectedNewPrice, "The price state variable should be updated to _price * 1e18");
+    // Validate that the price was updated correctly.
+    expect(newMockPriceOracleState.price).to.equal(
+      price,
+      "Price was not updated correctly"
+    );
 
-    // Validate ETH balance changes (if any)
-    const previousAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-    const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-
-    // Check if account balance decreased due to gas costs
-    expect(newAccountBalance).to.be.lte(previousAccountBalance, "Account balance should decrease or remain the same due to gas costs.");
-
-    //Validate Token balance for affected contracts
-    //No token transfer involved, hence no token balance validations required
+    // Validate eth balances
+    const previousAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || 0n;
+    const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || 0n;
+    expect(newAccountBalance).to.lte(previousAccountBalance - executionReceipt.gasCost, 'Eth balance should be reduced due to gas fees');
 
     return true;
   }
