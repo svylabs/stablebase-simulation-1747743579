@@ -1,12 +1,13 @@
-import { ethers } from 'ethers';
-import { expect } from 'chai';
-import { Actor, RunContext, Snapshot, Action } from '@svylabs/ilumia';
+import { Action, Actor, Snapshot } from "@svylabs/ilumina";
+import type RunContext, { ExecutionReceipt } from "@svylabs/ilumina";
+import { ethers } from "ethers";
+import { expect } from "chai";
 
-class StakeAction extends Action {
+export class StakeAction extends Action {
   private contract: ethers.Contract;
 
   constructor(contract: ethers.Contract) {
-    super('StakeAction');
+    super("StakeAction");
     this.contract = contract;
   }
 
@@ -14,30 +15,32 @@ class StakeAction extends Action {
     context: RunContext,
     actor: Actor,
     currentSnapshot: Snapshot
-  ): Promise<[any, Record<string, any>]> {
-    // Parameter Generation
-    // The `_amount` parameter must be a positive integer representing the amount of tokens to stake. It should be greater than 0.
-    // It should be a valid value upto max token balance available with the user
-    let amount = BigInt(0);
-    try {
-      const dfidTokenSnapshot = currentSnapshot.contractSnapshot.dfidToken;
-      const userBalance = dfidTokenSnapshot.Balance[actor.account.address] || BigInt(0);
-      if (userBalance > BigInt(0)) {
-          amount = BigInt(Math.floor(context.prng.next() % Number(userBalance))) + BigInt(1); // Ensure amount > 0 and less than user balance
-      }
-    } catch (error) {
-      console.error("Error accessing token balance from snapshot:", error);
-      //If there is an error, we will skip this action
-      return [[], {}];
-    }
-    
-    // The `frontend` parameter should be a valid Ethereum address. If there is no frontend, it can be set to the zero address (0x0000000000000000000000000000000000000000).
-    const frontend = ethers.ZeroAddress; // Use zero address if no frontend
-    // The `fee` parameter should be a uint256 representing the fee to be charged, expressed in basis points (e.g., 100 for 1%). It should be less than or equal to BASIS_POINTS_DIVISOR.
-    const fee = BigInt(Math.floor(context.prng.next() % 100)); // Fee in basis points, up to 99
+  ): Promise<[boolean, any, Record<string, any>]> {
+    const actorAddress = actor.account.address;
+    const actorDfidBalance = currentSnapshot.accountSnapshot[actorAddress] || BigInt(0);
 
-    const stakeParams = [amount, frontend, fee];
-    return [stakeParams, {}];
+    if (actorDfidBalance <= BigInt(0)) {
+      return [false, {}, {}];
+    }
+
+    let _amount:bigint;
+    if (actorDfidBalance > BigInt(0)) {
+         _amount = BigInt(Math.floor(context.prng.next() % Number(actorDfidBalance)));
+    } else {
+        _amount = BigInt(0);
+    }
+
+
+    const frontend = ethers.ZeroAddress;  // Can be a valid address or zero address
+    const fee = BigInt(0); //  No fee for now, 0 represents 0% fee.
+
+    const actionParams = {
+      _amount: _amount,
+      frontend: frontend,
+      fee: fee,
+    };
+
+    return [true, actionParams, {}];
   }
 
   async execute(
@@ -46,15 +49,13 @@ class StakeAction extends Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<Record<string, any> | void> {
-    const stakeParams = actionParams;
-    if (stakeParams.length === 0) {
-          console.warn("Skipping execute due to empty stakeParams");
-          return;
-    }
+    const { _amount, frontend, fee } = actionParams;
     const tx = await this.contract
       .connect(actor.account.value as ethers.Signer)
-      .stake(...stakeParams);
-    await tx.wait();
+      .stake(_amount, frontend, fee);
+
+    const receipt = await tx.wait();
+    return receipt;
   }
 
   async validate(
@@ -62,60 +63,53 @@ class StakeAction extends Action {
     actor: Actor,
     previousSnapshot: Snapshot,
     newSnapshot: Snapshot,
-    actionParams: any
+    actionParams: any,
+    executionReceipt: ExecutionReceipt
   ): Promise<boolean> {
-    const stakeParams = actionParams;
+    const { _amount } = actionParams;
 
-      if (stakeParams.length === 0) {
-          console.warn("Skipping validate due to empty stakeParams");
-          return true;
-      }
+    const actorAddress = actor.account.address;
 
-    const amount = stakeParams[0];
-    const frontend = stakeParams[1];
-    const fee = stakeParams[2];
+    const previousStabilityPoolSnapshot = previousSnapshot.contractSnapshot.stabilityPool;
+    const newStabilityPoolSnapshot = newSnapshot.contractSnapshot.stabilityPool;
 
-    // Access the before and after snapshots
-    const previousStabilityPoolState = previousSnapshot.contractSnapshot.stabilityPool;
-    const newStabilityPoolState = newSnapshot.contractSnapshot.stabilityPool;
-    const previousDFIDTokenState = previousSnapshot.contractSnapshot.dfidToken;
-    const newDFIDTokenState = newSnapshot.contractSnapshot.dfidToken;
+    const previousUserStake = previousStabilityPoolSnapshot.users?.[actorAddress]?.stake || BigInt(0);
+    const newUserStake = newStabilityPoolSnapshot.users?.[actorAddress]?.stake || BigInt(0);
 
-    // Get user stake before and after
-    const previousUserStake = previousStabilityPoolState.users[actor.account.address]?.stake || BigInt(0);
-    const newUserStake = newStabilityPoolState.users[actor.account.address]?.stake || BigInt(0);
+    const previousTotalStakedRaw = previousStabilityPoolSnapshot.totalStakedRaw || BigInt(0);
+    const newTotalStakedRaw = newStabilityPoolSnapshot.totalStakedRaw || BigInt(0);
 
-    // Get total staked raw amount before and after
-    const previousTotalStakedRaw = previousStabilityPoolState.totalStakedRaw;
-    const newTotalStakedRaw = newStabilityPoolState.totalStakedRaw;
+        //Cumulative scaling factor
+    const previousCumulativeProductScalingFactor = previousStabilityPoolSnapshot.users?.[actorAddress]?.cumulativeProductScalingFactor || BigInt(0);
+    const newCumulativeProductScalingFactor = newStabilityPoolSnapshot.users?.[actorAddress]?.cumulativeProductScalingFactor || BigInt(0);
 
-    // Get token balances before and after. Handle the cases when balances don't exist
-    let previousUserDFIDBalance = BigInt(0);
-    let newUserDFIDBalance = BigInt(0);
-    let previousContractDFIDBalance = BigInt(0);
-    let newContractDFIDBalance = BigInt(0);
+        //Stake reset count
+    const previousStakeResetCount = previousStabilityPoolSnapshot.users?.[actorAddress]?.stakeResetCount || BigInt(0);
+    const newStakeResetCount = newStabilityPoolSnapshot.users?.[actorAddress]?.stakeResetCount || BigInt(0);
 
-    try {
-        previousUserDFIDBalance = previousDFIDTokenState.Balance[actor.account.address] || BigInt(0);
-        newUserDFIDBalance = newDFIDTokenState.Balance[actor.account.address] || BigInt(0);
-        previousContractDFIDBalance = previousDFIDTokenState.Balance[this.contract.target] || BigInt(0);
-        newContractDFIDBalance = newDFIDTokenState.Balance[this.contract.target] || BigInt(0);
-    } catch (error) {
-        console.error("Error accessing token balances:", error);
-    }
+        //Stake Scaling Factor and Stake Reset Count
+    const stakeScalingFactor = newStabilityPoolSnapshot.stakeScalingFactor || BigInt(0);
+    const stakeResetCount = newStabilityPoolSnapshot.stakeResetCount || 0;
 
-    // User stake validation
-    expect(newUserStake).to.equal(previousUserStake + amount, "User's stake should increase by the staked amount");
+    // Account balance validation
+    const previousActorBalance = previousSnapshot.accountSnapshot[actorAddress] || BigInt(0);
+    const newActorBalance = newSnapshot.accountSnapshot[actorAddress] || BigInt(0);
+    expect(newActorBalance).to.equal(previousActorBalance - _amount, "Actor balance should decrease by staked amount");
 
-    // Total staked amount validation
-    expect(newTotalStakedRaw).to.equal(previousTotalStakedRaw + amount, 'Total staked amount should increase by the staked amount');
+    // Contract balance validation
+    const previousContractBalance = previousSnapshot.accountSnapshot[this.contract.target] || BigInt(0);
+    const newContractBalance = newSnapshot.accountSnapshot[this.contract.target] || BigInt(0);
+     expect(newContractBalance).to.equal(previousContractBalance + _amount, "Contract balance should increase by staked amount");
 
-    //Token Balance Validations
-    expect(newUserDFIDBalance).to.equal(previousUserDFIDBalance - amount, "User's staking token balance should decrease by the staked amount");
-    expect(newContractDFIDBalance).to.equal(previousContractDFIDBalance + amount, "Contract's staking token balance should increase by the staked amount");
+
+
+    expect(newUserStake).to.equal(previousUserStake + _amount, "User stake should increase by staked amount");
+    expect(newTotalStakedRaw).to.equal(previousTotalStakedRaw + _amount, "Total staked raw should increase by staked amount");
+        expect(newCumulativeProductScalingFactor).to.equal(stakeScalingFactor, "Cumulative Product Scaling Factor should be updated");
+        expect(newStakeResetCount).to.equal(BigInt(stakeResetCount), "Stake Reset Count should be updated");
+
+    // Additional validations can be added based on the provided action details and context.
 
     return true;
   }
 }
-
-export default StakeAction;
