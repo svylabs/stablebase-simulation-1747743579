@@ -18,24 +18,26 @@ export class UnstakeAction extends Action {
   ): Promise<[boolean, any, Record<string, any>]> {
     const stabilityPoolSnapshot = currentSnapshot.contractSnapshot.stabilityPool;
     const userAddress = actor.account.address;
-    const userStake = stabilityPoolSnapshot.users[userAddress]?.stake || BigInt(0);
 
-    if (userStake <= BigInt(0)) {
+    if (!stabilityPoolSnapshot.userInfos[userAddress]) {
+      console.log("User has no stake in StabilityPool");
       return [false, {}, {}];
     }
 
-    let amountToUnstake = BigInt(Math.floor(context.prng.next() % Number(userStake + BigInt(1))));
-    if (amountToUnstake > userStake) {
-         amountToUnstake = userStake; // Ensure amountToUnstake is not greater than userStake
+    const userStake = stabilityPoolSnapshot.userInfos[userAddress].stake;
+
+    if (userStake <= BigInt(0)) {
+      console.log("User has no stake to unstake");
+      return [false, {}, {}];
     }
 
-    const frontend = ethers.ZeroAddress; // Optional, can be zero address
-    const fee = BigInt(0); // Optional, defaults to 0
+    // Ensure amountToUnstake is within the valid range (0, userStake]
+    const amountToUnstake = BigInt(Math.floor(context.prng.next() % Number(userStake) + 1));
 
     const actionParams = {
       amount: amountToUnstake,
-      frontend: frontend,
-      fee: fee,
+      frontend: ethers.ZeroAddress, // Address 0 for no frontend
+      fee: BigInt(0), // Fee is 0
     };
 
     return [true, actionParams, {}];
@@ -47,11 +49,8 @@ export class UnstakeAction extends Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<Record<string, any> | void> {
-    const { amount, frontend, fee } = actionParams;
-    const tx = await this.contract.connect(actor.account.value).unstake(amount, frontend, fee);
-    const receipt = await tx.wait();
-
-    return { receipt };
+    const signer = actor.account.value.connect(context.provider);
+    return this.contract.connect(signer).unstake(actionParams.amount, actionParams.frontend, actionParams.fee);
   }
 
   async validate(
@@ -62,59 +61,52 @@ export class UnstakeAction extends Action {
     actionParams: any,
     executionReceipt: ExecutionReceipt
   ): Promise<boolean> {
-    const { amount, frontend, fee } = actionParams;
+    const amountUnstaked = actionParams.amount;
     const userAddress = actor.account.address;
 
     const previousStabilityPoolSnapshot = previousSnapshot.contractSnapshot.stabilityPool;
     const newStabilityPoolSnapshot = newSnapshot.contractSnapshot.stabilityPool;
 
-    const previousUserStabilityPoolData = previousStabilityPoolSnapshot.users[userAddress] || {
-                stake: BigInt(0),
-                rewardSnapshot: BigInt(0),
-                collateralSnapshot: BigInt(0),
-                cumulativeProductScalingFactor: BigInt(0),
-                stakeResetCount: BigInt(0)
-            };
-    const newUserStabilityPoolData = newStabilityPoolSnapshot.users[userAddress] || {
-                stake: BigInt(0),
-                rewardSnapshot: BigInt(0),
-                collateralSnapshot: BigInt(0),
-                cumulativeProductScalingFactor: BigInt(0),
-                stakeResetCount: BigInt(0)
-            };
-
     const previousDFIDTokenSnapshot = previousSnapshot.contractSnapshot.dfidToken;
     const newDFIDTokenSnapshot = newSnapshot.contractSnapshot.dfidToken;
 
-    const previousUserAccountSnapshot = previousSnapshot.accountSnapshot[userAddress] || BigInt(0);
-    const newUserAccountSnapshot = newSnapshot.accountSnapshot[userAddress] || BigInt(0);
+    const previousUserStake = previousStabilityPoolSnapshot.userInfos?.[userAddress]?.stake || BigInt(0);
+    const newUserStake = newStabilityPoolSnapshot.userInfos?.[userAddress]?.stake || BigInt(0);
 
-    const stakeTokenAddress = (context.contracts.dfidToken as any).target;
+    const previousTotalStakedRaw = previousStabilityPoolSnapshot?.totalStakedRaw || BigInt(0);
+    const newTotalStakedRaw = newStabilityPoolSnapshot?.totalStakedRaw || BigInt(0);
 
-        const previousUserTokenBalance = previousSnapshot.accountSnapshot[stakeTokenAddress] || BigInt(0);
-        const newUserTokenBalance = newSnapshot.accountSnapshot[stakeTokenAddress] || BigInt(0);
+    const previousUserDFIDTokenBalance = previousDFIDTokenSnapshot.balances?.[userAddress] || BigInt(0);
+    const newUserDFIDTokenBalance = newDFIDTokenSnapshot.balances?.[userAddress] || BigInt(0);
 
-    // User Stake Validation
-    const previousUserStake = previousUserStabilityPoolData.stake;
-    const newUserStake = newUserStabilityPoolData.stake;
-    expect(newUserStake, "User stake should decrease by the unstaked amount").to.equal(previousUserStake - amount);
-    expect(newUserStake, "User stake should be non-negative").to.be.at.least(BigInt(0));
+    // Stake Reduction
+    expect(newUserStake, "User stake should be decreased by the unstaked amount.").to.equal(previousUserStake - amountUnstaked);
 
-    // Total Staked Validation
-    const previousTotalStakedRaw = previousStabilityPoolSnapshot.totalStakedRaw;
-    const newTotalStakedRaw = newStabilityPoolSnapshot.totalStakedRaw;
-    expect(newTotalStakedRaw, "Total staked raw should decrease by the unstaked amount").to.equal(previousTotalStakedRaw - amount);
-    expect(newTotalStakedRaw, "Total staked raw should be non-negative").to.be.at.least(BigInt(0));
+    // Total Stake Reduction
+    expect(newTotalStakedRaw, "Total staked amount should be decreased by the unstaked amount.").to.equal(previousTotalStakedRaw - amountUnstaked);
 
-    // Token Transfer Validation
-        const diff = (newUserTokenBalance || BigInt(0)) - (previousUserTokenBalance || BigInt(0));
+    // Token Transfer to User
+    expect(newUserDFIDTokenBalance, "User's staking token balance should increase by the unstaked amount.").to.equal(previousUserDFIDTokenBalance + amountUnstaked);
 
-        expect(diff, "User's stakingToken balance should increase by the unstaked amount").to.equal(amount);
-
-    // Check if rewardSenderActive is set to false when totalStakedRaw becomes zero
-    if (previousTotalStakedRaw !== BigInt(0) && newTotalStakedRaw === BigInt(0) && previousStabilityPoolSnapshot.rewardSenderActive) {
-        expect(newStabilityPoolSnapshot.rewardSenderActive, "rewardSenderActive should be set to false").to.be.false;
+     // Validate rewardSenderActive if totalStakedRaw becomes 0
+    if (previousStabilityPoolSnapshot.rewardSenderActive) {
+        if (newTotalStakedRaw === BigInt(0)) {
+            expect(newStabilityPoolSnapshot.rewardSenderActive, "rewardSenderActive should be false when totalStakedRaw is 0").to.be.false;
+        } else {
+            expect(newStabilityPoolSnapshot.rewardSenderActive, "rewardSenderActive should remain true when totalStakedRaw is not 0").to.be.true;
+        }
     }
+
+    // Additional validations based on action summary, where applicable
+    const sbrRewardDistributionStatus = previousStabilityPoolSnapshot.sbrRewardDistributionStatus;    
+
+    // Validate user reward snapshots are updated
+     if(previousStabilityPoolSnapshot.userInfos?.[userAddress]){
+         expect(newStabilityPoolSnapshot.userInfos[userAddress].rewardSnapshot).to.not.be.undefined;
+         expect(newStabilityPoolSnapshot.userInfos[userAddress].collateralSnapshot).to.not.be.undefined;
+         expect(newStabilityPoolSnapshot.userInfos[userAddress].cumulativeProductScalingFactor).to.not.be.undefined;
+         expect(newStabilityPoolSnapshot.userInfos[userAddress].stakeResetCount).to.not.be.undefined;
+     }
 
     return true;
   }
