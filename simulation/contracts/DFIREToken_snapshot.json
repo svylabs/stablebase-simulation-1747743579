@@ -31,43 +31,43 @@
     },
     {
       "name": "decimals",
-      "type": "function",
+      "type": "uint8",
       "contract_function": "decimals",
       "parameters": []
     },
     {
-      "name": "tokenName",
-      "type": "function",
+      "name": "name",
+      "type": "string",
       "contract_function": "name",
       "parameters": []
     },
     {
-      "name": "contractOwner",
-      "type": "function",
+      "name": "owner",
+      "type": "address",
       "contract_function": "owner",
       "parameters": []
     },
     {
       "name": "symbol",
-      "type": "function",
+      "type": "string",
       "contract_function": "symbol",
       "parameters": []
     },
     {
       "name": "totalBurned",
-      "type": "function",
+      "type": "uint256",
       "contract_function": "totalBurned",
       "parameters": []
     },
     {
       "name": "totalSupply",
-      "type": "function",
+      "type": "uint256",
       "contract_function": "totalSupply",
       "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface DFIRETokenSnapshot {\n  allowances: { [accountAddress: string]: { [accountAddress: string]: bigint } };\n  balances: { [accountAddress: string]: bigint };\n  decimals: number;\n  tokenName: string;\n  contractOwner: string;\n  symbol: string;\n  totalBurned: bigint;\n  totalSupply: bigint;\n}",
+    "contract_snapshot_interface_code": "interface DFIRETokenSnapshot {\n  allowances: { [accountAddress: string]: { [accountAddress: string]: bigint } };\n  balances: { [accountAddress: string]: bigint };\n  decimals: number;\n  name: string;\n  owner: string;\n  symbol: string;\n  totalBurned: bigint;\n  totalSupply: bigint;\n}\n",
     "interface_name": "DFIRETokenSnapshot"
   }
 }
