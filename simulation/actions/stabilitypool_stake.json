@@ -11,68 +11,41 @@
     "contract_name": "StabilityPool",
     "function_name": "stake",
     "pre_execution_parameter_generation_rules": [
-      "The `_amount` parameter must be a positive integer representing the amount of tokens to stake. It should be greater than 0.",
-      "The `frontend` parameter should be a valid Ethereum address. If there is no frontend, it can be set to the zero address (0x0000000000000000000000000000000000000000).",
-      "The `fee` parameter should be a uint256 representing the fee to be charged, expressed in basis points (e.g., 100 for 1%). It should be less than or equal to BASIS_POINTS_DIVISOR.",
-      "The user must have approved the StabilityPool contract to spend at least `_amount` of their staking tokens. Check the `stakingToken.allowance(msg.sender, address(this))` is greater than or equal to `_amount`"
+      "The `_amount` parameter must be a positive integer representing the amount of tokens to stake.",
+      "The `frontend` parameter should be a valid address. It represents the address that will receive a fee from claimed rewards, can be the zero address if no fee is desired.",
+      "The `fee` parameter should be a valid fee represented as an integer, where 10000 represents 100%. It must be between 0 and `BASIS_POINTS_DIVISOR`."
     ],
     "on_execution_state_updates_made": [
       {
-        "category": "User State",
+        "category": "Stake Operation",
         "state_update_descriptions": [
-          "The user's stake (`users[msg.sender].stake`) is updated.",
-          "The user's reward snapshot (`users[msg.sender].rewardSnapshot`) is updated.",
-          "The user's collateral snapshot (`users[msg.sender].collateralSnapshot`) is updated.",
-          "The user's cumulative product scaling factor (`users[msg.sender].cumulativeProductScalingFactor`) is updated.",
-          "The user's stake reset count (`users[msg.sender].stakeResetCount`) is updated.",
-          "The SBR reward snapshot status (`sbrRewardSnapshots[msg.sender].status`) is updated if SBR reward distribution has ended."
-        ]
-      },
-      {
-        "category": "Contract State",
-        "state_update_descriptions": [
-          "The total staked raw amount (`totalStakedRaw`) is updated.",
-          "The reward distribution status of `stableBaseCDP` may be updated.",
-          "SBR reward related variables (`totalSbrRewardPerToken`, `sbrRewardLoss`) are updated, if SBR reward distribution is ongoing."
-        ]
-      },
-      {
-        "category": "Token Transfers",
-        "state_update_descriptions": [
-          "Staking tokens are transferred from the user to the StabilityPool contract.",
-          "Rewards, collateral and SBR tokens may be transferred to the user and frontend, if applicable."
+          "The `stake` field in the `users` mapping for the `msg.sender` is increased by `_amount` after adjusting for any stake scaling factors that may have been applied through stake resets. The `cumulativeProductScalingFactor` and `stakeResetCount` are updated for the user, reflecting the current stake scaling factor and reset count.",
+          "The `totalStakedRaw` variable is increased by `_amount`, representing the total raw amount of tokens staked in the pool.",
+          "User's reward and collateral snapshots are updated to the current global reward and collateral per-token values.",
+          "Pending reward, collateral, and SBR rewards are calculated based on the difference between the user's snapshot and current global values, proportional to their stake. These rewards are then transferred to the user, potentially incurring fees sent to the `frontend` address.",
+          "SBR reward distribution status is checked, and if active, SBR rewards are added to the pool based on the time elapsed since the last distribution and the distribution rate. If the distribution has ended, the user's SBR reward snapshot status is updated to CLAIMED.",
+          "If the pool was previously empty (`oldTotalStakedRaw == 0`) and `rewardSenderActive` is true, the `setCanStabilityPoolReceiveRewards` function on the `stableBaseCDP` contract is called to enable reward distribution from the reward sender.",
+          "The `Staked` event is emitted with the user's address and the staked amount.",
+          "The `RewardClaimed` event is emitted with the user's address, reward amount, reward frontend fee, collateral amount and collateral frontend fee.",
+          "The `DFireRewardClaimed` event is emitted if there were any SBR rewards claimed including user address, sbrReward and sbrRewardFee."
         ]
       }
     ],
     "post_execution_contract_state_validation_rules": [
       {
-        "category": "User State",
+        "category": "Stake Operation",
         "rule_descriptions": [
-          "The user's stake (`users[msg.sender].stake`) should be increased by the staked amount `_amount` compared to its previous value, after accounting for scaling factor changes.",
-          "The user's reward snapshot (`users[msg.sender].rewardSnapshot`) should be equal to `totalRewardPerToken` after the staking operation.",
-          "The user's collateral snapshot (`users[msg.sender].collateralSnapshot`) should be equal to `totalCollateralPerToken` after the staking operation.",
-          "The user's cumulativeProductScalingFactor should be equal to the current stakeScalingFactor",
-          "The user's stakeResetCount should be equal to the current stakeResetCount"
-        ]
-      },
-      {
-        "category": "Contract State",
-        "rule_descriptions": [
-          "The total staked amount (`totalStakedRaw`) should be increased by `_amount` compared to its previous value.",
-          "The staking token balance of the StabilityPool contract should increase by `_amount`."
-        ]
-      },
-      {
-        "category": "Token Balances",
-        "rule_descriptions": [
-          "The staking token balance of the user (`msg.sender`) should decrease by `_amount`.",
-          "The contract's staking token balance should increase by `_amount`."
-        ]
-      },
-      {
-        "category": "Events",
-        "rule_descriptions": [
-          "A `Staked` event should be emitted with the user's address (`msg.sender`) and the staked amount (`_amount`)."
+          "The `users[msg.sender].stake` should be increased by `_amount` after adjusting for any stake scaling factors that may have been applied through stake resets.",
+          "The `users[msg.sender].cumulativeProductScalingFactor` should be equal to `stakeScalingFactor`.",
+          "The `users[msg.sender].stakeResetCount` should be equal to `stakeResetCount`.",
+          "The `totalStakedRaw` should be increased by `_amount`.",
+          "The contract's `stakingToken` balance should increase by `_amount`.",
+          "The user's `stakingToken` balance should decrease by `_amount`.",
+          "Any reward tokens or collateral should be transferred correctly to the user and the frontend address (if a fee is specified).",
+          "The user's `rewardSnapshot` should be updated to the current `totalRewardPerToken`.",
+          "The user's `collateralSnapshot` should be updated to the current `totalCollateralPerToken`.",
+          "If SBR reward distribution is active (`sbrRewardDistributionStatus != SBRRewardDistribution.ENDED`), the `totalSbrRewardPerToken` may increase.",
+          "If SBR reward distribution is not active(`sbrRewardDistributionStatus == SBRRewardDistribution.ENDED`), `sbrRewardSnapshots[msg.sender].status` should be `SBRRewardDistribution.CLAIMED`."
         ]
       }
     ]
@@ -88,14 +61,14 @@
         "contract_name": "StabilityPool",
         "state_updated": [
           {
-            "state_variable_name": "users[msg.sender]",
-            "type": "mapping(address => UserInfo)",
-            "what_does_it_track": "The staking information of a user.",
-            "why_is_is_important": "Tracks the staking information for each user, including their stake, reward snapshot, collateral snapshot, cumulative product scaling factor, and stake reset count. Allows calculating and distributing rewards correctly to users based on their stake and historical snapshots of reward distribution states. ",
-            "when_is_it_updated": "When a user stakes tokens.",
-            "how_to_validate_state_update": "Check the user's stake value after the stake function is executed. It should increase by the staked amount.",
+            "state_variable_name": "users[msg.sender].stake",
+            "type": "uint256",
+            "what_does_it_track": "The amount of tokens staked by a user.",
+            "why_is_is_important": "Tracks user's stake in the pool",
+            "when_is_it_updated": "Always, when stake function is called",
+            "how_to_validate_state_update": "Check the user's stake variable directly",
             "has_conditional_updates": true,
-            "summary_of_update": "Increases the user's stake by the amount staked (_amount) and updates reward-related snapshots.",
+            "summary_of_update": "Increases the user's stake by the specified amount.",
             "conditions": [
               "_amount > 0"
             ]
@@ -103,164 +76,123 @@
           {
             "state_variable_name": "totalStakedRaw",
             "type": "uint256",
-            "what_does_it_track": "The total amount of tokens staked.",
-            "why_is_is_important": "Keeps track of the total amount of tokens staked in the StabilityPool. Used to calculate rewards and scaling factors accurately. ",
-            "when_is_it_updated": "When a user stakes tokens.",
-            "how_to_validate_state_update": "Check the totalStakedRaw value after the stake function is executed. It should increase by the staked amount.",
+            "what_does_it_track": "The total amount of tokens staked in the pool.",
+            "why_is_is_important": "Tracks total stake in the pool, important for reward calculation",
+            "when_is_it_updated": "Always, when stake function is called",
+            "how_to_validate_state_update": "Check the totalStakedRaw variable directly",
             "has_conditional_updates": false,
-            "summary_of_update": "Increases the totalStakedRaw by the staked amount (_amount).",
+            "summary_of_update": "Increases the total staked amount by the specified amount.",
+            "conditions": []
+          },
+          {
+            "state_variable_name": "stakingToken.transferFrom(msg.sender, address(this), _amount)",
+            "type": "transfer",
+            "what_does_it_track": "Transfer of staking tokens from user to the contract.",
+            "why_is_is_important": "Reflects the transfer of staked tokens.",
+            "when_is_it_updated": "Always, when the stake function is called.",
+            "how_to_validate_state_update": "Check the balance of the StabilityPool contract and the user before and after the transaction.",
+            "has_conditional_updates": false,
+            "summary_of_update": "Transfers the staked tokens from the user to the StabilityPool contract.",
             "conditions": []
           },
           {
             "state_variable_name": "lastSBRRewardDistributedTime",
             "type": "uint256",
-            "what_does_it_track": "Timestamp of last SBR reward distribution.",
-            "why_is_is_important": "Used in SBR reward calculation. Ensures rewards are distributed properly when SBR distribution starts",
-            "when_is_it_updated": "When staking and SBR reward distribution has not started.",
-            "how_to_validate_state_update": "Check the value of lastSBRRewardDistributedTime after staking if the condition is met.",
+            "what_does_it_track": "last time that SBR reward was distributed",
+            "why_is_is_important": "sbr rewards can be added",
+            "when_is_it_updated": "if sbrRewardDistributionStatus is not ENDED",
+            "how_to_validate_state_update": "check the value of sbrRewardDistributionStatus",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the lastSBRRewardDistributedTime to the current block timestamp if the SBR reward distribution has not started.",
+            "summary_of_update": "Add SBR Rewards",
             "conditions": [
-              "sbrRewardDistributionStatus == SBRRewardDistribution.NOT_STARTED"
-            ]
-          },
-          {
-            "state_variable_name": "sbrRewardDistributionEndTime",
-            "type": "uint256",
-            "what_does_it_track": "The timestamp when SBR reward distribution ends.",
-            "why_is_is_important": "Determines the duration of SBR reward distribution. Used in calculation of rewards for stakers. ",
-            "when_is_it_updated": "When staking and SBR reward distribution has not started.",
-            "how_to_validate_state_update": "Check the value of sbrRewardDistributionEndTime after staking if the condition is met.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Sets the sbrRewardDistributionEndTime to the current block timestamp + 365 days if the SBR reward distribution has not started.",
-            "conditions": [
-              "sbrRewardDistributionStatus == SBRRewardDistribution.NOT_STARTED"
-            ]
-          },
-          {
-            "state_variable_name": "sbrRewardDistributionStatus",
-            "type": "enum",
-            "what_does_it_track": "The current status of SBR reward distribution.",
-            "why_is_is_important": "Crucial for controlling the SBR reward distribution lifecycle, influencing how rewards are calculated and distributed. ",
-            "when_is_it_updated": "During staking and if the distribution status changes.",
-            "how_to_validate_state_update": "Check the value of sbrRewardDistributionStatus after staking under specified conditions.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates the sbrRewardDistributionStatus to STARTED if it was previously NOT_STARTED and to ENDED if the current timestamp is greater than sbrRewardDistributionEndTime.",
-            "conditions": [
-              "sbrRewardDistributionStatus == SBRRewardDistribution.NOT_STARTED",
-              "block.timestamp > sbrRewardDistributionEndTime"
+              "sbrRewardDistributionStatus != SBRRewardDistribution.ENDED"
             ]
           },
           {
             "state_variable_name": "totalSbrRewardPerToken",
             "type": "uint256",
-            "what_does_it_track": "Accumulated SBR rewards per token.",
-            "why_is_is_important": "Used to calculate how much SBR reward each staker is entitled to, based on their stake. ",
-            "when_is_it_updated": "When staking and SBR rewards are being distributed.",
-            "how_to_validate_state_update": "Check the value of totalSbrRewardPerToken after staking under specified conditions. It should increase based on reward calculations.",
+            "what_does_it_track": "Total SBR rewards per token.",
+            "why_is_is_important": "check SBR rewards to distribute",
+            "when_is_it_updated": "if sbrRewardDistributionStatus is STARTED",
+            "how_to_validate_state_update": "verify the value of sbrRewardDistributionStatus is STARTED",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the totalSbrRewardPerToken based on the time elapsed and the distribution rate if sbrRewardDistributionStatus is STARTED and totalStakedRaw > 0.",
+            "summary_of_update": "Calculate and distribute sbr rewards.",
             "conditions": [
-              "sbrRewardDistributionStatus == SBRRewardDistribution.STARTED",
-              "totalStakedRaw > 0"
+              "sbrRewardDistributionStatus == SBRRewardDistribution.STARTED"
             ]
           },
           {
-            "state_variable_name": "sbrRewardLoss",
-            "type": "uint256",
-            "what_does_it_track": "Unallocated SBR rewards due to precision loss.",
-            "why_is_is_important": "Accounts for any precision loss in SBR reward calculations, ensuring that any remaining SBR rewards are tracked properly. ",
-            "when_is_it_updated": "When staking and SBR rewards are being distributed.",
-            "how_to_validate_state_update": "Check the value of sbrRewardLoss after staking under specified conditions. It should reflect any unallocated rewards.",
+            "state_variable_name": "sbrRewardDistributionStatus",
+            "type": "uint8",
+            "what_does_it_track": "SBR reward distribution status",
+            "why_is_is_important": "check SBR rewards distribution",
+            "when_is_it_updated": "if sbrRewardDistributionStatus is NOT_STARTED",
+            "how_to_validate_state_update": "verify the value of sbrRewardDistributionStatus is NOT_STARTED",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the sbrRewardLoss based on the difference between the calculated SBR reward and the actual distributed reward if sbrRewardDistributionStatus is STARTED and totalStakedRaw > 0.",
+            "summary_of_update": "Starts SBR reward distribution.",
             "conditions": [
-              "sbrRewardDistributionStatus == SBRRewardDistribution.STARTED",
-              "totalStakedRaw > 0"
+              "sbrRewardDistributionStatus == SBRRewardDistribution.NOT_STARTED"
             ]
           },
           {
-            "state_variable_name": "sbrRewardSnapshots[msg.sender].rewardSnapshot",
+            "state_variable_name": "totalRewardPerToken",
             "type": "uint256",
-            "what_does_it_track": "A user's snapshot of SBR rewards.",
-            "why_is_is_important": "Records a user's snapshot of SBR rewards, allowing for accurate calculation of rewards when the user claims them. ",
-            "when_is_it_updated": "When a user stakes and the SBR reward distribution is ongoing.",
-            "how_to_validate_state_update": "Check the value of sbrRewardSnapshots[msg.sender].rewardSnapshot after staking under specified conditions. It should match the totalSbrRewardPerToken.",
+            "what_does_it_track": "total reward per token.",
+            "why_is_is_important": "Calculates pending rewards",
+            "when_is_it_updated": "if user.cumulativeProductScalingFactor != 0",
+            "how_to_validate_state_update": "verify the value of user.cumulativeProductScalingFactor",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the sbrRewardSnapshots[msg.sender].rewardSnapshot with the current totalSbrRewardPerToken if the SBR reward distribution is not ENDED.",
+            "summary_of_update": "Calculates and transfers pending rewards, collateral, and SBR rewards.",
+            "conditions": [
+              "user.cumulativeProductScalingFactor != 0"
+            ]
+          },
+          {
+            "state_variable_name": "totalSbrRewardPerToken",
+            "type": "uint256",
+            "what_does_it_track": "Total SBR reward per token",
+            "why_is_is_important": "SBR rewards are available to claim",
+            "when_is_it_updated": "if sbrRewardDistributionStatus != SBRRewardDistribution.ENDED",
+            "how_to_validate_state_update": "verify the value of sbrRewardDistributionStatus",
+            "has_conditional_updates": true,
+            "summary_of_update": "Update the snapshot of sbr rewards.",
             "conditions": [
               "sbrRewardDistributionStatus != SBRRewardDistribution.ENDED"
             ]
           },
           {
             "state_variable_name": "sbrRewardSnapshots[msg.sender].status",
-            "type": "enum",
-            "what_does_it_track": "Status of a user's SBR reward claim.",
-            "why_is_is_important": "Tracks whether a user has claimed their SBR rewards, preventing duplicate claims. ",
-            "when_is_it_updated": "When a user stakes, the SBR reward distribution is ended, and the user has not claimed rewards.",
-            "how_to_validate_state_update": "Check the value of sbrRewardSnapshots[msg.sender].status after staking under specified conditions. It should be CLAIMED.",
+            "type": "uint8",
+            "what_does_it_track": "Distribution status",
+            "why_is_is_important": "sbr rewards distribution status",
+            "when_is_it_updated": "if sbrRewardSnapshots[msg.sender].status != SBRRewardDistribution.CLAIMED",
+            "how_to_validate_state_update": "verify the value of sbrRewardSnapshots[msg.sender].status",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates sbrRewardSnapshots[msg.sender].status to CLAIMED if the SBR reward distribution is ENDED and the status is not already CLAIMED.",
+            "summary_of_update": "set SBR reward distribution to Claimed.",
             "conditions": [
-              "sbrRewardDistributionStatus == SBRRewardDistribution.ENDED",
               "sbrRewardSnapshots[msg.sender].status != SBRRewardDistribution.CLAIMED"
-            ]
-          },
-          {
-            "state_variable_name": "users[msg.sender].rewardSnapshot",
-            "type": "uint256",
-            "what_does_it_track": "A user's reward snapshot.",
-            "why_is_is_important": "Maintains a snapshot of reward distribution at the time of staking, allowing fair distribution of rewards later when the user claims them. ",
-            "when_is_it_updated": "When a user stakes.",
-            "how_to_validate_state_update": "Check the value of users[msg.sender].rewardSnapshot after staking. It should match the totalRewardPerToken.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Updates the users[msg.sender].rewardSnapshot with the current totalRewardPerToken.",
-            "conditions": []
-          },
-          {
-            "state_variable_name": "users[msg.sender].collateralSnapshot",
-            "type": "uint256",
-            "what_does_it_track": "A user's collateral snapshot.",
-            "why_is_is_important": "Maintains a snapshot of collateral distribution at the time of staking, allowing fair distribution of collateral later when the user claims them. ",
-            "when_is_it_updated": "When a user stakes.",
-            "how_to_validate_state_update": "Check the value of users[msg.sender].collateralSnapshot after staking. It should match the totalCollateralPerToken.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Updates the users[msg.sender].collateralSnapshot with the current totalCollateralPerToken.",
-            "conditions": []
-          },
-          {
-            "state_variable_name": "users[msg.sender].stake",
-            "type": "uint256",
-            "what_does_it_track": "Users current stake.",
-            "why_is_is_important": "Stores the current amount staked by user. It's important for calculating rewards and collateral. ",
-            "when_is_it_updated": "When the user stakes.",
-            "how_to_validate_state_update": "Check the user's stake after they stake.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates the user's effective stake based on stake scaling factor.",
-            "conditions": [
-              "user.cumulativeProductScalingFactor != 0"
             ]
           },
           {
             "state_variable_name": "users[msg.sender].cumulativeProductScalingFactor",
             "type": "uint256",
-            "what_does_it_track": "Scaling factor.",
-            "why_is_is_important": "Tracks the product of scaling factors applied to the user's stake. It's important to calculate rewards and collateral properly. ",
-            "when_is_it_updated": "When a user stakes.",
-            "how_to_validate_state_update": "Check the value of scaling factor for the user.",
+            "what_does_it_track": "User's cumulative product scaling factor",
+            "why_is_is_important": "Updates user's scaling factor for accurate reward calculations.",
+            "when_is_it_updated": "Always.",
+            "how_to_validate_state_update": "check value of user.cumulativeProductScalingFactor",
             "has_conditional_updates": false,
-            "summary_of_update": "Updates the cumulative product scaling factor.",
+            "summary_of_update": "Update user's scaling factor and reset count",
             "conditions": []
           },
           {
             "state_variable_name": "users[msg.sender].stakeResetCount",
             "type": "uint256",
-            "what_does_it_track": "Stake reset count.",
-            "why_is_is_important": "Tracks the number of stake resets that have occurred for a user. It's important to calculate rewards and collateral after a stake reset has occurred.",
-            "when_is_it_updated": "When a user stakes.",
-            "how_to_validate_state_update": "Check the value of stake reset count for the user.",
+            "what_does_it_track": "stakeResetCount",
+            "why_is_is_important": "Tracks the user's stake reset count.",
+            "when_is_it_updated": "Always.",
+            "how_to_validate_state_update": "Check user.stakeResetCount",
             "has_conditional_updates": false,
-            "summary_of_update": "Updates the stake reset count.",
+            "summary_of_update": "User's stake reset count",
             "conditions": []
           }
         ]
