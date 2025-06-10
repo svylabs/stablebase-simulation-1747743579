@@ -2,148 +2,58 @@
 
 import { ethers } from 'ethers';
 import { Actor, Snapshot } from '@svylabs/ilumina';
-import { OrderedDoublyLinkedListSnapshot, Node } from './snapshot_interfaces';
+import { OrderedDoublyLinkedListState, Node, NodeReturn, NodesReturn } from './snapshot_interfaces';
 
 /**
  * Takes a snapshot of OrderedDoublyLinkedList state
  * @param contract - ethers.Contract instance
- * @param actors - Array of Actor instances. Each actor can have multiple safeIds.
- *                 Example: [{ accountAddress: '0x...', _safeId: [1, 2, 3] }, { accountAddress: '0x...', _safeId: 4 }]
- * @returns Promise returning the OrderedDoublyLinkedListSnapshot
+ * @param actors - An array of Actor objects.
+ * @returns Promise returning the interface OrderedDoublyLinkedListState
  */
-export async function takesafesOrderedForRedemptionContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<OrderedDoublyLinkedListSnapshot> {
-  try {
-    const Head = (await contract.getHead()) as bigint;
-    const Tail = (await contract.getTail()) as bigint;
-    const HeadValue = (await contract.head()) as bigint;
-    const TailValue = (await contract.tail()) as bigint;
+export async function takesafesOrderedForRedemptionContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<OrderedDoublyLinkedListState> {
+    try {
+        const head = BigInt(await contract.getHead());
+        const tail = BigInt(await contract.getTail());
 
-    // Fetch NodeByIdMapping for all actors
-    const NodeByIdMapping: { [key: string]: Node } = {};
+        const nodes: { [key: string]: Node } = {};
 
-    for (const actor of actors) {
-      const safeIds = actor.getIdentifiers()['_safeId'];
-      if (!safeIds) {
-        continue; // Skip this actor if no safeIds are present
-      }
+        // Process each actor to fetch node data
+        for (const actor of actors) {
+            const identifiers = actor.getIdentifiers();
+            if (identifiers && identifiers._safeId) {
+                const safeIds = Array.isArray(identifiers._safeId) ? identifiers._safeId : [identifiers._safeId];
 
-      const safeIdArray = Array.isArray(safeIds) ? safeIds : [safeIds];
+                for (const safeId of safeIds) {
+                    if (safeId !== undefined) {
+                        const safeIdBigInt = BigInt(safeId);
 
-      for (const safeId of safeIdArray) {
-        if (typeof safeId !== 'string' && typeof safeId !== 'number') {
-          console.warn(`Invalid safeId type: ${typeof safeId} for actor ${actor.accountAddress}. Expected string or number.`);
-          continue;
+                        // Fetch node using nodes mapping
+                        const nodeMapping = await contract.nodes(safeIdBigInt);
+
+                        // Fetch node using getNode
+                        const nodeData = await contract.getNode(safeIdBigInt);
+
+                        //Fetch nodes using getNodes
+                        // const nodesData = await contract.getNodes(safeIdBigInt, safeIdBigInt);
+
+
+                        nodes[safeIdBigInt.toString()] = {
+                            value: BigInt(nodeMapping.value),
+                            prev: BigInt(nodeMapping.prev),
+                            next: BigInt(nodeMapping.next),
+                        };
+                    }
+                }
+            }
         }
-
-        try {
-          const safeIdBigInt = BigInt(safeId);
-          const node = (await contract.nodes(safeIdBigInt)) as any; // Type 'any' because the return type is a tuple-like structure
-          NodeByIdMapping[safeId.toString()] = {
-            value: BigInt(node.value),
-            prev: BigInt(node.prev),
-            next: BigInt(node.next),
-          };
-        } catch (nodeError: any) {
-          console.error(`Error fetching node for safeId ${safeId} (actor ${actor.accountAddress}):`, nodeError);
-        }
-      }
-    }
-
-    // Helper function to fetch node data
-    async function fetchNodeData(actor: Actor, contract: ethers.Contract, functionName: string, safeIdKey: string): Promise<Node | null> {
-      const safeIds = actor.getIdentifiers()[safeIdKey];
-      if (!safeIds) return null;
-
-      const safeIdArray = Array.isArray(safeIds) ? safeIds : [safeIds];
-      if (safeIdArray.length === 0) return null;
-
-      if (typeof safeIdArray[0] !== 'string' && typeof safeIdArray[0] !== 'number') {
-        console.warn(`Invalid safeId type: ${typeof safeIdArray[0]} for actor ${actor.accountAddress}. Expected string or number.`);
-        return null;
-      }
-
-      try {
-        const safeIdBigInt = BigInt(safeIdArray[0]);
-        let nodeData;
-        if (functionName === 'get') {
-            nodeData = (await contract.get(safeIdBigInt)) as any;  // Type 'any' because the return type is a tuple-like structure
-        } else {
-            nodeData = (await contract.getNode(safeIdBigInt)) as any; // Type 'any' because the return type is a tuple-like structure
-        }
-
 
         return {
-          value: BigInt(nodeData.value),
-          prev: BigInt(nodeData.prev),
-          next: BigInt(nodeData.next),
+            head,
+            tail,
+            nodes,
         };
-      } catch (error: any) {
-        console.error(`Error fetching node data (${functionName}) for actor ${actor.accountAddress}:`, error);
-        return null;
-      }
+    } catch (error: any) {
+        console.error('Error in takesafesOrderedForRedemptionContractSnapshot:', error);
+        throw new Error(`Failed to snapshot OrderedDoublyLinkedList state: ${error.message}`);
     }
-
-    // Fetch Node and NodeById
-    let NodeData: Node = { value: BigInt(0), prev: BigInt(0), next: BigInt(0) };
-    if (actors.length > 0) {
-      const node = await fetchNodeData(actors[0], contract, 'get', '_safeId');
-      if (node) {
-        NodeData = node;
-      }
-    }
-
-    let NodeById: Node = { value: BigInt(0), prev: BigInt(0), next: BigInt(0) };
-    if (actors.length > 0) {
-      const node = await fetchNodeData(actors[0], contract, 'getNode', '_safeId');
-      if (node) {
-        NodeById = node;
-      }
-    }
-
-    // Fetch Nodes and TotalFound for the first actor, if available
-    let Nodes: Node[] = [];
-    let TotalFound: bigint = BigInt(0);
-    if (actors.length > 0) {
-      const firstActor = actors[0];
-      const safeIds = firstActor.getIdentifiers()['_safeId'];
-
-      if (safeIds) {
-        const safeIdArray = Array.isArray(safeIds) ? safeIds : [safeIds];
-        if (safeIdArray.length > 0) {
-          if (typeof safeIdArray[0] !== 'string' && typeof safeIdArray[0] !== 'number') {
-            console.warn(`Invalid safeId type: ${typeof safeIdArray[0]}. Expected string or number.`);
-          } else {
-            try {
-              const safeIdBigInt = BigInt(safeIdArray[0]);
-              // Assuming you want to fetch nodes starting from the first safeId and a total of 50
-              const nodesResult = (await contract.getNodes(safeIdBigInt, BigInt(50))) as any; // Type 'any' because the return type is a tuple-like structure
-              TotalFound = BigInt(nodesResult[1]);
-              Nodes = nodesResult[0].map((node: any) => ({
-                value: BigInt(node.value),
-                prev: BigInt(node.prev),
-                next: BigInt(node.next),
-              }));
-            } catch (nodesError: any) {
-              console.error(`Error fetching nodes for actor ${firstActor.accountAddress}:`, nodesError);
-            }
-          }
-        }
-      }
-    }
-
-    return {
-      Head,
-      Tail,
-      HeadValue,
-      TailValue,
-      NodeByIdMapping,
-      Node: NodeData,
-      NodeById,
-      Nodes,
-      TotalFound,
-    };
-  } catch (error: any) {
-    console.error('Error in takesafesOrderedForRedemptionContractSnapshot:', error);
-    throw new Error(`Failed to snapshot OrderedDoublyLinkedList state: ${error.message}`);
-  }
 }

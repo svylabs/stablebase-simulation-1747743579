@@ -2,112 +2,54 @@
 
 import { ethers } from 'ethers';
 import { Actor, Snapshot } from '@svylabs/ilumina';
-import { OrderedDoublyLinkedListSnapshot, Node } from './snapshot_interfaces';
+import { OrderedDoublyLinkedListState, Node } from './snapshot_interfaces';
 
 /**
- * Takes a snapshot of the OrderedDoublyLinkedList contract state.
- *
- * @param contract - ethers.Contract instance for the OrderedDoublyLinkedList contract.
- * @param actors - An array of Actor objects, each containing identifiers.
- * @returns A Promise that resolves to an OrderedDoublyLinkedListSnapshot object.
+ * Takes a snapshot of OrderedDoublyLinkedList state
+ * @param contract - ethers.Contract instance
+ * @param actors - Array of Actor instances
+ * @returns Promise returning the interface OrderedDoublyLinkedListState
  */
-export async function takesafesOrderedForLiquidationContractSnapshot(
-  contract: ethers.Contract,
-  actors: Actor[],
-): Promise<OrderedDoublyLinkedListSnapshot> {
+export async function takesafesOrderedForLiquidationContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<OrderedDoublyLinkedListState> {
   try {
-    // Initialize the snapshot object.
-    const snapshot: Partial<OrderedDoublyLinkedListSnapshot> = {};
+    const head = BigInt(await contract.getHead());
+    const tail = BigInt(await contract.getTail());
+    const nodes: { [key: string]: Node } = {};
 
-    // Fetch Head and Tail values.
-    snapshot.Head = BigInt(await contract.getHead() as bigint);
-    snapshot.Tail = BigInt(await contract.getTail() as bigint);
-    snapshot.HeadValue = BigInt(await contract.head() as bigint);
-    snapshot.TailValue = BigInt(await contract.tail() as bigint);
-
-    // Initialize NodeByIdMapping.
-    snapshot.NodeByIdMapping = {};
-
-    // Process each actor to fetch Node-related data.
+    // Process actors to fetch node-related data
     for (const actor of actors) {
       const identifiers = actor.getIdentifiers();
-
-      // Check if _safeId exists and is an array.
-      if (identifiers['_safeId']) {
-        const safeIds = Array.isArray(identifiers['_safeId']) ? identifiers['_safeId'] : [identifiers['_safeId']];
+      if (identifiers && identifiers._safeId) {
+        const safeIds = Array.isArray(identifiers._safeId) ? identifiers._safeId : [identifiers._safeId];
 
         for (const safeId of safeIds) {
           const safeIdBigInt = BigInt(safeId);
 
-          // Fetch Node by ID.
+          // Fetch node by ID
           try {
-            const nodeById: any = await contract.getNode(safeIdBigInt);
-            snapshot.NodeById = {
-              value: BigInt(nodeById.value),
-              prev: BigInt(nodeById.prev),
-              next: BigInt(nodeById.next),
+            const nodeData = await contract.nodes(safeIdBigInt);
+            const node: Node = {
+              value: BigInt(nodeData.value),
+              prev: BigInt(nodeData.prev),
+              next: BigInt(nodeData.next),
             };
-          } catch (error: any) {
-            console.error(`Error fetching NodeById for safeId ${safeId}:`, error);
-            // Handle the error appropriately, e.g., set a default value or skip.
-            snapshot.NodeById = { value: BigInt(0), prev: BigInt(0), next: BigInt(0) }; // Default Value
+            nodes[safeIdBigInt.toString()] = node;
+          } catch (nodeError: any) {
+            console.error(`Error fetching node for safeId ${safeIdBigInt}:`, nodeError);
+            // Handle the error appropriately, e.g., by logging or setting a default value
           }
 
-          // Fetch Node by ID mapping.
-          try {
-            const nodeByIdMapping: any = await contract.nodes(safeIdBigInt);
-            snapshot.NodeByIdMapping[safeId] = {
-              value: BigInt(nodeByIdMapping.value),
-              prev: BigInt(nodeByIdMapping.prev),
-              next: BigInt(nodeByIdMapping.next),
-            };
-          } catch (error: any) {
-            console.error(`Error fetching NodeByIdMapping for safeId ${safeId}:`, error);
-            // Handle the error appropriately. Setting to default value
-            snapshot.NodeByIdMapping[safeId] = { value: BigInt(0), prev: BigInt(0), next: BigInt(0) };
-          }
-
-          // Fetch Node
-          try {
-            const node: any = await contract.get(safeIdBigInt);
-            snapshot.Node = {
-              value: BigInt(node.value),
-              prev: BigInt(node.prev),
-              next: BigInt(node.next),
-            };
-          } catch (error: any) {
-            console.error(`Error fetching Node for safeId ${safeId}:`, error);
-            // Handle the error appropriately, e.g., set a default value or skip.
-            snapshot.Node = { value: BigInt(0), prev: BigInt(0), next: BigInt(0) }; // Default Value
-          }
-
-          // Fetch Nodes and TotalFound
-          try {
-            const nodesData: any = await contract.getNodes(safeIdBigInt, safeIdBigInt);
-            snapshot.Nodes = [];
-            snapshot.TotalFound = BigInt(nodesData.totalFound);
-            if (nodesData.nodes) {
-              for (let i = 0; i < nodesData.nodes.length; i++) {
-                snapshot.Nodes.push({
-                  value: BigInt(nodesData.nodes[i].value),
-                  prev: BigInt(nodesData.nodes[i].prev),
-                  next: BigInt(nodesData.nodes[i].next),
-                });
-              }
-            }
-          } catch (error: any) {
-            console.error(`Error fetching Nodes and TotalFound for safeId ${safeId}:`, error);
-            snapshot.Nodes = [];
-            snapshot.TotalFound = BigInt(0);
-          }
         }
       }
     }
 
-    // Return the completed snapshot.
-    return snapshot as OrderedDoublyLinkedListSnapshot;
+    return {
+      head,
+      tail,
+      nodes,
+    };
   } catch (error: any) {
-    console.error('Error taking OrderedDoublyLinkedList contract snapshot:', error);
-    throw new Error(`Failed to take OrderedDoublyLinkedList snapshot: ${error.message}`);
+    console.error('Error taking snapshot:', error);
+    throw new Error(`Failed to take snapshot: ${error.message}`);
   }
 }
