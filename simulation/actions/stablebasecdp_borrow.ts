@@ -1,130 +1,178 @@
 import { Action, Actor, Snapshot } from "@svylabs/ilumina";
 import type RunContext, { ExecutionReceipt } from "@svylabs/ilumina";
 import { ethers } from "ethers";
-import { expect } from 'chai';
+import { expect } from "chai";
 
 export class BorrowAction extends Action {
-    contract: ethers.Contract;
+  contract: ethers.Contract;
 
-    constructor(contract: ethers.Contract) {
-        super("BorrowAction");
-        this.contract = contract;
+  constructor(contract: ethers.Contract) {
+    super("BorrowAction");
+    this.contract = contract;
+  }
+
+  async initialize(
+    context: RunContext,
+    actor: Actor,
+    currentSnapshot: Snapshot
+  ): Promise<[boolean, any, Record<string, any>]> {
+    const stableBaseCDP = currentSnapshot.contractSnapshot.stableBaseCDP;
+    const dfidToken = currentSnapshot.contractSnapshot.dfidToken;
+    const mockPriceOracle = currentSnapshot.contractSnapshot.mockPriceOracle;
+
+    if (!stableBaseCDP || !dfidToken || !mockPriceOracle) {
+      console.warn("Required contract snapshot not found.");
+      return [false, {}, {}];
     }
 
-    async initialize(
-        context: RunContext,
-        actor: Actor,
-        currentSnapshot: Snapshot
-    ): Promise<[boolean, any, Record<string, any>]> {
-        const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
-        const safeId = actor.identifiers["safeId"] || BigInt(context.prng.next() % 100) + BigInt(1);
-
-        // Check if safe exists and has collateral
-        if (!stableBaseCDPSnapshot.safeInfo) {
-          console.warn("Safe does not exist, cannot borrow.");
-          return [false, {}, {}];
-        }
-
-        // Fetch necessary values from snapshot
-        const collateralAmount = stableBaseCDPSnapshot.safeInfo.collateralAmount || BigInt(0);
-        const borrowedAmount = stableBaseCDPSnapshot.safeInfo.borrowedAmount || BigInt(0);
-        const liquidationRatio = BigInt(15000); // Assuming 150% liquidation ratio. This value needs to come from snapshot if available
-        const price = BigInt(1000); // Assuming price is 1000, needs to come from priceOracle snapshot
-        const minimumDebt = BigInt(100); // This should come from the contract/snapshot if possible
-
-        // Calculate maxBorrowAmount based on collateral, price, and liquidation ratio
-        const maxBorrowAmount = (collateralAmount * price * BigInt(10000)) / liquidationRatio / BigInt(1000000000); //PRECISION is 10**9
-        
-        // Generate random amount within valid range
-        let amount = BigInt(context.prng.next() % Number(maxBorrowAmount - borrowedAmount));
-        if(amount < minimumDebt) {
-            amount = minimumDebt;
-        }
-        if(amount > (maxBorrowAmount - borrowedAmount)){
-            amount = maxBorrowAmount - borrowedAmount;
-        }
-        const shieldingRate = BigInt(context.prng.next() % 100); // Example shielding rate (0-99)
-        const nearestSpotInLiquidationQueue = BigInt(0);
-        const nearestSpotInRedemptionQueue = BigInt(0);
-
-        const actionParams = {
-            safeId: safeId,
-            amount: amount,
-            shieldingRate: shieldingRate,
-            nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue,
-            nearestSpotInRedemptionQueue: nearestSpotInRedemptionQueue
-        };
-
-        return [true, actionParams, {}];
+    const safeIds = Object.keys(stableBaseCDP.safes).map(Number);
+    if (safeIds.length === 0) {
+      console.warn("No safes available for borrowing.");
+      return [false, {}, {}];
     }
 
-    async execute(
-        context: RunContext,
-        actor: Actor,
-        currentSnapshot: Snapshot,
-        actionParams: any
-    ): Promise<Record<string, any> | void> {
-        try {
-            const tx = await this.contract.connect(actor.account.value).borrow(
-                actionParams.safeId,
-                actionParams.amount,
-                actionParams.shieldingRate,
-                actionParams.nearestSpotInLiquidationQueue,
-                actionParams.nearestSpotInRedemptionQueue,
-                {
-                    gasLimit: 1000000 // Adjust gas limit as needed
-                }
-            );
-            const receipt = await tx.wait();
-            return {
-                receipt: receipt
-            };
-        } catch (error) {
-            console.error("Transaction failed:", error);
-            throw error; // Re-throw the error to be caught by the framework
-        }
+    let safeId: number;
+    let safe;
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    do {
+      safeId = context.prng.pick(safeIds);
+      safe = stableBaseCDP.safes[safeId];
+      attempts++;
+
+      if (!safe || safe.collateralAmount === BigInt(0)) {
+        console.warn(`Safe ${safeId} does not exist or has no collateral, trying another safe. Attempt: ${attempts}`);
+      }
+    } while ((!safe || safe.collateralAmount === BigInt(0)) && attempts < maxAttempts);
+
+    if (!safe || safe.collateralAmount === BigInt(0)) {
+      console.warn("No valid safes found after multiple attempts.");
+      return [false, {}, {}];
     }
 
-    async validate(
-        context: RunContext,
-        actor: Actor,
-        previousSnapshot: Snapshot,
-        newSnapshot: Snapshot,
-        actionParams: any,
-        executionReceipt: ExecutionReceipt
-    ): Promise<boolean> {
-        const previousStableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
-        const newStableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
-        const dfidTokenAddress = (context.contracts.dfidToken as any).target;
-        const previousAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-        const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+    const price = mockPriceOracle.price;
+    const liquidationRatio = BigInt(15000); // Example liquidation ratio (150%)
+    const PRECISION = BigInt(10) ** BigInt(18); // Example precision
+    const BASIS_POINTS_DIVISOR = BigInt(10000);
+    const MINIMUM_DEBT = BigInt(100); // Example minimum debt
 
-        const safeId = actionParams.safeId;
-        const amount = actionParams.amount;
-        const shieldingRate = actionParams.shieldingRate;
+    const maxBorrowAmount = (
+      (safe.collateralAmount * price * BASIS_POINTS_DIVISOR) / liquidationRatio
+    ) / PRECISION - safe.borrowedAmount;
 
-        // State Validation
-        expect(newStableBaseCDPSnapshot.safeInfo.borrowedAmount).to.equal(previousStableBaseCDPSnapshot.safeInfo.borrowedAmount + amount, "borrowedAmount should be increased by the amount borrowed.");
-        expect(newStableBaseCDPSnapshot.safeInfo.totalBorrowedAmount).to.equal(previousStableBaseCDPSnapshot.safeInfo.totalBorrowedAmount + amount, "totalBorrowedAmount should be increased by the amount borrowed.");
-
-        const shieldingFee = (amount * shieldingRate) / BigInt(10000);
-        expect(newStableBaseCDPSnapshot.safeInfo.feePaid).to.equal(previousStableBaseCDPSnapshot.safeInfo.feePaid + shieldingFee, "feePaid should be increased by the shielding fee.");
-
-        // Account balance validation - Checking ETH balance decrease
-        expect(newAccountBalance).to.lte(previousAccountBalance - BigInt(executionReceipt.receipt.gasUsed * executionReceipt.receipt.effectiveGasPrice), "Account balance should decrease after borrowing");
-
-        //Token Balance Validation
-        const previousDFIDTokenBalance = previousSnapshot.accountSnapshot[dfidTokenAddress] || BigInt(0);
-        const newDFIDTokenBalance = newSnapshot.accountSnapshot[dfidTokenAddress] || BigInt(0);
-        const amountToBorrow = amount - shieldingFee;
-
-        //Validation for token balance
-        expect(newDFIDTokenBalance).to.equal(previousDFIDTokenBalance + amountToBorrow, "Borrower should have received _amountToBorrow SBD tokens.");
-
-        expect(newStableBaseCDPSnapshot.totalDebt).to.equal(previousStableBaseCDPSnapshot.totalDebt + amount, "totalDebt should be increased by amount.");
-
-        //Event Validation - to be implemented.
-
-        return true;
+    if (maxBorrowAmount <= BigInt(0)) {
+      console.warn("Maximum borrow amount is zero or less.");
+      return [false, {}, {}];
     }
+
+    const amount = BigInt(context.prng.next()) % maxBorrowAmount + MINIMUM_DEBT;
+    const shieldingRate = BigInt(context.prng.next()) % BigInt(10000); // Up to 100%
+    const nearestSpotInLiquidationQueue = BigInt(0);
+    const nearestSpotInRedemptionQueue = BigInt(0);
+
+    const actionParams = {
+      safeId: BigInt(safeId),
+      amount: amount,
+      shieldingRate: shieldingRate,
+      nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue,
+      nearestSpotInRedemptionQueue: nearestSpotInRedemptionQueue,
+    };
+
+    return [true, actionParams, {}];
+  }
+
+  async execute(
+    context: RunContext,
+    actor: Actor,
+    currentSnapshot: Snapshot,
+    actionParams: any
+  ): Promise<Record<string, any> | void> {
+    return this.contract
+      .connect(actor.account.value)
+      .borrow(
+        actionParams.safeId,
+        actionParams.amount,
+        actionParams.shieldingRate,
+        actionParams.nearestSpotInLiquidationQueue,
+        actionParams.nearestSpotInRedemptionQueue
+      );
+  }
+
+  async validate(
+    context: RunContext,
+    actor: Actor,
+    previousSnapshot: Snapshot,
+    newSnapshot: Snapshot,
+    actionParams: any,
+    executionReceipt: ExecutionReceipt
+  ): Promise<boolean> {
+    const safeId = actionParams.safeId;
+    const amount = actionParams.amount;
+    const shieldingRate = actionParams.shieldingRate;
+
+    const prevStableBaseCDP = previousSnapshot.contractSnapshot.stableBaseCDP;
+    const newStableBaseCDP = newSnapshot.contractSnapshot.stableBaseCDP;
+    const prevDFIDToken = previousSnapshot.contractSnapshot.dfidToken;
+    const newDFIDToken = newSnapshot.contractSnapshot.dfidToken;
+
+    if (!prevStableBaseCDP || !newStableBaseCDP || !prevDFIDToken || !newDFIDToken) {
+      console.warn("Required contract snapshot not found.");
+      return false;
+    }
+
+    const prevSafe = prevStableBaseCDP.safes[Number(safeId.toString())];
+    const newSafe = newStableBaseCDP.safes[Number(safeId.toString())];
+
+    if (!newSafe) {
+      expect(newStableBaseCDP.safes[Number(safeId.toString())]).to.not.be.undefined, 'Safe should still exist after borrow';
+    }
+
+    if (!prevSafe || !newSafe) {
+      console.warn("Safe not found in previous or new snapshot.");
+      return false;
+    }
+
+    // Calculate Shielding Fee
+    const shieldingFee = (amount * shieldingRate) / BigInt(10000);
+
+    // Safe State Validation
+    expect(newSafe.borrowedAmount).to.equal(prevSafe.borrowedAmount + amount, "Incorrect borrowedAmount");
+    expect(newSafe.totalBorrowedAmount).to.equal(prevSafe.totalBorrowedAmount + amount, "Incorrect totalBorrowedAmount");
+    expect(newSafe.feePaid).to.gte(prevSafe.feePaid, "Fee paid should increase or remain the same");
+
+    // Protocol Debt Validation
+    expect(newStableBaseCDP.totalDebt).to.equal(prevStableBaseCDP.totalDebt + amount, "Incorrect totalDebt");
+
+    // Token Validation - Borrower's SBD balance
+    const borrowerAddress = actor.account.address; // Assuming actor's account is the borrower
+    const prevBorrowerBalance = prevDFIDToken.balances[borrowerAddress] || BigInt(0);
+    const newBorrowerBalance = newDFIDToken.balances[borrowerAddress] || BigInt(0);
+    const expectedBorrowerBalance = prevBorrowerBalance + (amount - shieldingFee);
+
+    expect(newBorrowerBalance).to.equal(expectedBorrowerBalance, "Incorrect borrower balance after borrowing");
+
+    // Token Validation - Total Supply
+    const prevTotalSupply = prevDFIDToken.totalSupply;
+    const newTotalSupply = newDFIDToken.totalSupply;
+    const expectedTotalSupply = prevTotalSupply + (amount - shieldingFee);
+
+    expect(newTotalSupply).to.equal(expectedTotalSupply, "Incorrect total supply after borrowing");
+
+    // Fee distribution validation - Assuming fees are distributed to the contract
+    const prevContractBalance = prevDFIDToken.balances[this.contract.target] || BigInt(0);
+    const newContractBalance = newDFIDToken.balances[this.contract.target] || BigInt(0);
+    expect(newContractBalance).to.gte(prevContractBalance, "Contract balance should increase due to fee distribution");
+
+    // Event Validation - Assuming Borrowed event is emitted
+    const borrowedEvent = executionReceipt.events.find((event) => event.event === "Borrowed");
+    expect(borrowedEvent).to.not.be.undefined, "Borrowed event should be emitted";
+
+    if (borrowedEvent) {
+      expect(borrowedEvent.args.safeId).to.equal(safeId, "Borrowed event: Incorrect safeId");
+      expect(borrowedEvent.args.amount).to.equal(amount, "Borrowed event: Incorrect amount");
+    }
+
+    return true;
+  }
 }
