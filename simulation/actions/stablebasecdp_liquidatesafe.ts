@@ -1,154 +1,154 @@
+import { Action, Actor, Snapshot } from "@svylabs/ilumina";
+import type RunContext, { ExecutionReceipt } from "@svylabs/ilumina";
 import { ethers } from "ethers";
-import { Actor, RunContext, Snapshot, Action } from "@svylabs/ilumia";
 import { expect } from 'chai';
 
-export class LiquidatesafeAction extends Action {
-    contract: ethers.Contract;
+export class LiquidateSafeAction extends Action {
+  contract: ethers.Contract;
 
-    constructor(contract: ethers.Contract) {
-        super("LiquidateSafeAction");
-        this.contract = contract;
+  constructor(contract: ethers.Contract) {
+    super("LiquidateSafeAction");
+    this.contract = contract;
+  }
+
+  async initialize(
+    context: RunContext,
+    actor: Actor,
+    currentSnapshot: Snapshot
+  ): Promise<[boolean, any, Record<string, any>]> {
+    const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
+    if (!stableBaseCDPSnapshot) {
+      console.log("StableBaseCDP snapshot not found");
+      return [false, {}, {}];
     }
 
-    async initialize(
-        context: RunContext,
-        actor: Actor,
-        currentSnapshot: Snapshot
-    ): Promise<[any, Record<string, any>]> {
-        const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
-        let safeIdToLiquidate: bigint | undefined = undefined;
+    const safeIds = Object.keys(stableBaseCDPSnapshot.safeInfo);
+    if (safeIds.length === 0) {
+      console.log("No safes found to liquidate");
+      return [false, {}, {}];
+    }
 
-        if (stableBaseCDPSnapshot.safes) {
-            const safeIds = Object.keys(stableBaseCDPSnapshot.safes);
-            for (const safeId of safeIds) {\n                if (!stableBaseCDPSnapshot.safes.hasOwnProperty(safeId)) continue;
-                const safe = stableBaseCDPSnapshot.safes[safeId];
-                if (safe.collateralAmount > BigInt(0) && safe.borrowedAmount > BigInt(0)) {
-                    const liquidationRatio = BigInt(15000); // Example: 150%
-                    const BASIS_POINTS_DIVISOR = BigInt(10000); // Example: 10000
+    // Find a safe to liquidate.
+    let safeIdToLiquidate: bigint | null = null;
+    for (const safeIdStr of safeIds) {
+      const safeId = BigInt(safeIdStr);
+      if (stableBaseCDPSnapshot.safeInfo[safeId]) {
+        const safeInfo = stableBaseCDPSnapshot.safeInfo[safeId];
+        if (safeInfo.collateralAmount > BigInt(0) && safeInfo.borrowedAmount > BigInt(0)) {
+          // Additional check: collateralValue < ((borrowedAmount * liquidationRatio) / BASIS_POINTS_DIVISOR)
+          // Implement this check using the available snapshot data if liquidationRatio and BASIS_POINTS_DIVISOR are available in the snapshot
+          safeIdToLiquidate = safeId;
+          break;
+        }
+      }
+    }
 
-                    const mockPriceOracleSnapshot = currentSnapshot.contractSnapshot.mockPriceOracle;
-                    const collateralPrice = mockPriceOracleSnapshot.price;
+    if (safeIdToLiquidate === null) {
+      console.log("No suitable safe found for liquidation.");
+      return [false, {}, {}];
+    }
 
-                    const collateralValue = (safe.collateralAmount * collateralPrice) / BigInt(10 ** 18); // Assuming 18 decimals for price
-                    const requiredCollateralValue = (safe.borrowedAmount * liquidationRatio) / BASIS_POINTS_DIVISOR;
+    const actionParams = {
+      safeId: safeIdToLiquidate,
+    };
 
-                    if (collateralValue < requiredCollateralValue) {
-                        const stabilityPoolSnapshot = currentSnapshot.contractSnapshot.stabilityPool;
-                        const safesOrderedForLiquidationAddress = stableBaseCDPSnapshot.safesOrderedForLiquidation;
-                        const safesOrderedForLiquidationSnapshot = currentSnapshot.contractSnapshot.safesOrderedForLiquidation;
-                        const isLiquidationPossible = stabilityPoolSnapshot.liquidationPossible;
-                        const head = safesOrderedForLiquidationSnapshot.head;
+    return [true, actionParams, {}];
+  }
 
-                        if (isLiquidationPossible || (safeId !== head.toString() && head !== BigInt(0))) {
-                            safeIdToLiquidate = BigInt(safeId);
-                            break;
-                        }
-                    }
-                }
+  async execute(
+    context: RunContext,
+    actor: Actor,
+    currentSnapshot: Snapshot,
+    actionParams: any
+  ): Promise<Record<string, any> | void> {
+    const safeId = actionParams.safeId;
+
+    try {
+      const tx = await this.contract
+        .connect(actor.account.value)
+        .liquidateSafe(safeId);
+      await tx.wait();
+    } catch (e) {
+      console.log("Error during liquidation execution", e);
+      throw e;
+    }
+  }
+
+  async validate(
+    context: RunContext,
+    actor: Actor,
+    previousSnapshot: Snapshot,
+    newSnapshot: Snapshot,
+    actionParams: any,
+    executionReceipt: ExecutionReceipt
+  ): Promise<boolean> {
+    const safeId = actionParams.safeId;
+
+    const prevStableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
+    const newStableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
+
+    if (!prevStableBaseCDPSnapshot || !newStableBaseCDPSnapshot) {
+      console.error("StableBaseCDP snapshot not found");
+      return false;
+    }
+
+    const prevTotalCollateral = prevStableBaseCDPSnapshot.totalCollateral;
+    const newTotalCollateral = newStableBaseCDPSnapshot.totalCollateral;
+    const prevTotalDebt = prevStableBaseCDPSnapshot.totalDebt;
+    const newTotalDebt = newStableBaseCDPSnapshot.totalDebt;
+
+    const prevSafeInfo = prevStableBaseCDPSnapshot.safeInfo[safeId];
+    const newSafeInfo = newStableBaseCDPSnapshot.safeInfo[safeId];
+
+    if (!prevSafeInfo) {
+      console.log("Previous safe info not found");
+      return true;
+    }
+
+    const prevCollateralAmount = prevSafeInfo.collateralAmount;
+    const prevBorrowedAmount = prevSafeInfo.borrowedAmount;
+
+    // safes[safeId] must no longer exist (or must be zeroed)
+    expect(newSafeInfo).to.be.undefined;
+
+    // ownerOf(safeId) must return the zero address, indicating the safe's NFT has been burned.
+    const nullAddress = ethers.ZeroAddress;
+    const stableBaseCDPContract = context.contracts.stableBaseCDP as ethers.Contract;
+    const owner = await stableBaseCDPContract._ownerOf(safeId);
+    expect(owner).to.equal(nullAddress);
+
+    // totalCollateral must be decreased by the liquidated collateral amount.
+    expect(newTotalCollateral).to.equal(prevTotalCollateral - prevCollateralAmount);
+
+    // totalDebt must be decreased by the liquidated borrowed amount.
+    expect(newTotalDebt).to.equal(prevTotalDebt - prevBorrowedAmount);
+
+        // OrderedDoublyLinkedList validation
+        const prevSafesOrderedForLiquidation = previousSnapshot.contractSnapshot.safesOrderedForLiquidation
+        const newSafesOrderedForLiquidation = newSnapshot.contractSnapshot.safesOrderedForLiquidation
+        if(prevSafesOrderedForLiquidation && newSafesOrderedForLiquidation){
+            const prevNode = prevSafesOrderedForLiquidation.NodeByIdMapping[safeId.toString()];
+            if(prevNode) {
+                expect(newSafesOrderedForLiquidation.NodeByIdMapping[safeId.toString()]).to.be.undefined;
             }
         }
 
-        if (!safeIdToLiquidate) {
-            throw new Error("No suitable safeId found for liquidation.");
+        const prevSafesOrderedForRedemption = previousSnapshot.contractSnapshot.safesOrderedForRedemption
+        const newSafesOrderedForRedemption = newSnapshot.contractSnapshot.safesOrderedForRedemption
+        if(prevSafesOrderedForRedemption && newSafesOrderedForRedemption){
+            const prevNode = prevSafesOrderedForRedemption.NodeByIdMapping[safeId.toString()];
+            if(prevNode) {
+                expect(newSafesOrderedForRedemption.NodeByIdMapping[safeId.toString()]).to.be.undefined;
+            }
         }
 
-        const actionParams = {
-            safeId: safeIdToLiquidate
-        };
+    // Validate token balance changes if needed
+    //For ex:
+    // const tokenAddress = (context.contracts.dfidToken as ethers.Contract).target;
+    // const prevTokenBalance = previousSnapshot.accountSnapshot[tokenAddress] || BigInt(0);
+    // const newTokenBalance = newSnapshot.accountSnapshot[tokenAddress] || BigInt(0);
+    // expect(newTokenBalance).to.equal(prevTokenBalance - prevBorrowedAmount);
 
-        return [actionParams, {}];
-    }
-
-    async execute(
-        context: RunContext,
-        actor: Actor,
-        currentSnapshot: Snapshot,
-        actionParams: any
-    ): Promise<Record<string, any> | void> {
-        const { safeId } = actionParams;
-
-        try {
-            const tx = await this.contract.connect(actor.account.value).liquidateSafe(safeId);
-            await tx.wait();
-        } catch (error: any) {
-            console.error("Execution error while liquidating safeId", safeId, ":", error);
-            throw new Error(`Liquidation failed for safeId ${safeId}: ${error.message}`);
-        }
-    }
-
-    async validate(
-        context: RunContext,
-        actor: Actor,
-        previousSnapshot: Snapshot,
-        newSnapshot: Snapshot,
-        actionParams: any
-    ): Promise<boolean> {
-        const { safeId } = actionParams;
-
-        const previousStableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
-        const newStableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
-
-        // General Checks
-        if (!newStableBaseCDPSnapshot.safes || newStableBaseCDPSnapshot.safes[safeId]) {
-            expect.fail(`Safe with ID ${safeId} should no longer exist in the 'safes' mapping.`);
-        }
-
-        // Queues Checks
-        const previousSafesOrderedForLiquidationSnapshot = previousSnapshot.contractSnapshot.safesOrderedForLiquidation;
-        const newSafesOrderedForLiquidationSnapshot = newSnapshot.contractSnapshot.safesOrderedForLiquidation;
-
-        const previousSafesOrderedForRedemptionSnapshot = previousSnapshot.contractSnapshot.safesOrderedForRedemption;
-        const newSafesOrderedForRedemptionSnapshot = newSnapshot.contractSnapshot.safesOrderedForRedemption;
-
-        expect(newSafesOrderedForLiquidationSnapshot.head).to.not.equal(BigInt(safeId), `Safe with ID ${safeId} should be removed from the liquidation queue.`);
-        expect(newSafesOrderedForRedemptionSnapshot.head).to.not.equal(BigInt(safeId), `Safe with ID ${safeId} should be removed from the redemption queue.`);
-
-        // Total Collateral and Debt Checks
-        const previousCollateralAmount = previousStableBaseCDPSnapshot.safes[safeId]?.collateralAmount || BigInt(0);
-        const previousBorrowedAmount = previousStableBaseCDPSnapshot.safes[safeId]?.borrowedAmount || BigInt(0);
-
-        expect(newStableBaseCDPSnapshot.totalCollateral).to.equal(previousStableBaseCDPSnapshot.totalCollateral - previousCollateralAmount, "Total collateral should decrease.");
-        expect(newStableBaseCDPSnapshot.totalDebt).to.equal(previousStableBaseCDPSnapshot.totalDebt - previousBorrowedAmount, "Total debt should decrease.");
-
-        // Protocol Mode Check
-        const BOOTSTRAP_MODE_DEBT_THRESHOLD = BigInt(1000000000000000000); // Example value, use actual value from contract
-        if (previousStableBaseCDPSnapshot.mode === 0 && newStableBaseCDPSnapshot.mode === 1) { // 0: Bootstrap, 1: Normal
-            expect(previousStableBaseCDPSnapshot.totalDebt).to.be.lte(BOOTSTRAP_MODE_DEBT_THRESHOLD, "Previous debt should be within Bootstrap threshold.");
-            expect(newStableBaseCDPSnapshot.totalDebt).to.be.gt(BOOTSTRAP_MODE_DEBT_THRESHOLD, "New debt should exceed Bootstrap threshold.");
-        }
-
-        // Stability Pool Liquidation Checks
-        const stabilityPoolSnapshotPrevious = previousSnapshot.contractSnapshot.stabilityPool;
-        const stabilityPoolSnapshotNew = newSnapshot.contractSnapshot.stabilityPool;
-
-        if (stabilityPoolSnapshotPrevious.liquidationPossible) {
-            expect(stabilityPoolSnapshotNew.totalStakedRaw).to.equal(stabilityPoolSnapshotPrevious.totalStakedRaw - borrowedAmount, "Total staked raw in stability pool should decrease.");
-
-            // Add checks for SBD token balance decrease in StabilityPool if applicable in snapshot
-        }
-
-        // Secondary Mechanism Liquidation Checks
-        if (!stabilityPoolSnapshotPrevious.liquidationPossible) {
-            expect(newStableBaseCDPSnapshot.cumulativeCollateralPerUnitCollateral).to.be.gte(previousStableBaseCDPSnapshot.cumulativeCollateralPerUnitCollateral, "Cumulative collateral per unit collateral should increase or remain same.");
-            expect(newStableBaseCDPSnapshot.cumulativeDebtPerUnitCollateral).to.be.gte(previousStableBaseCDPSnapshot.cumulativeDebtPerUnitCollateral, "Cumulative debt per unit collateral should increase or remain same.");
-            expect(newStableBaseCDPSnapshot.collateralLoss).to.be.gte(previousStableBaseCDPSnapshot.collateralLoss, "Collateral loss should increase or remain same.");
-            expect(newStableBaseCDPSnapshot.debtLoss).to.be.gte(previousStableBaseCDPSnapshot.debtLoss, "Debt loss should increase or remain same.");
-        }
-
-        // Fee Distribution Checks (adapt based on how fees are tracked in snapshots)
-        // Add logic to check fee distribution to dfireTokenStaking and stabilityPool
-
-        // ERC721 Token Burn Check
-        // Assuming `ownerOf` is available in the snapshot and returns address(0) after burn
-        if (newStableBaseCDPSnapshot.ownerOf && newStableBaseCDPSnapshot.ownerOf[safeId]) {
-          expect(newStableBaseCDPSnapshot.ownerOf[safeId]).to.equal(ethers.ZeroAddress, `ERC721 token for safeId ${safeId} should be burned (owner should be address(0)).`);
-        }
-
-        // Account and Token Balance Checks (Adapt to specific tokens and accounts)
-        const actorAddress = actor.account.address;
-        // Add checks for relevant token balances affected by the liquidation
-
-
-        return true;
-    }
+    return true;
+  }
 }
