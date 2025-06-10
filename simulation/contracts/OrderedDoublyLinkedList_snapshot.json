@@ -1,21 +1,27 @@
 {
   "attributes": [
     {
+      "name": "Node",
+      "type": "tuple",
+      "contract_function": "get",
+      "parameters": [
+        {
+          "name": "id",
+          "type": "uint256",
+          "reference": "_safeId"
+        }
+      ]
+    },
+    {
       "name": "Head",
       "type": "uint256",
-      "contract_function": "head",
+      "contract_function": "getHead",
       "parameters": []
     },
     {
-      "name": "Tail",
-      "type": "uint256",
-      "contract_function": "tail",
-      "parameters": []
-    },
-    {
-      "name": "NodeValue",
+      "name": "NodeById",
       "type": "tuple",
-      "contract_function": "nodes",
+      "contract_function": "getNode",
       "parameters": [
         {
           "name": "id",
@@ -26,7 +32,7 @@
     },
     {
       "name": "Nodes",
-      "type": "tuple[50],uint256",
+      "type": "tuple[50]",
       "contract_function": "getNodes",
       "parameters": [
         {
@@ -42,26 +48,55 @@
       ]
     },
     {
-      "name": "ListHead",
+      "name": "TotalFound",
       "type": "uint256",
-      "contract_function": "getHead",
-      "parameters": []
+      "contract_function": "getNodes",
+      "parameters": [
+        {
+          "name": "beginAt",
+          "type": "uint256",
+          "reference": "_safeId"
+        },
+        {
+          "name": "total",
+          "type": "uint256",
+          "reference": "_safeId"
+        }
+      ]
     },
     {
-      "name": "ListTail",
+      "name": "Tail",
       "type": "uint256",
       "contract_function": "getTail",
       "parameters": []
     },
     {
-      "name": "Owner",
-      "type": "address",
-      "contract_function": "owner",
+      "name": "HeadValue",
+      "type": "uint256",
+      "contract_function": "head",
+      "parameters": []
+    },
+    {
+      "name": "NodeByIdMapping",
+      "type": "tuple",
+      "contract_function": "nodes",
+      "parameters": [
+        {
+          "name": "id",
+          "type": "uint256",
+          "reference": "_safeId"
+        }
+      ]
+    },
+    {
+      "name": "TailValue",
+      "type": "uint256",
+      "contract_function": "tail",
       "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface OrderedDoublyLinkedListSnapshot {\n  head: bigint;\n  tail: bigint;\n  nodeValue: {\n    value: bigint;\n    prev: bigint;\n    next: bigint;\n  };\n  nodes: {\n    value: bigint;\n    prev: bigint;\n    next: bigint;\n  }[];\n  totalFound: bigint;\n  listHead: bigint;\n  listTail: bigint;\n  owner: string;\n}",
+    "contract_snapshot_interface_code": "interface Node { value: bigint; prev: bigint; next: bigint; }\n\ninterface OrderedDoublyLinkedListSnapshot {\n  Head: bigint;\n  Tail: bigint;\n  HeadValue: bigint;\n  TailValue: bigint;\n  NodeByIdMapping: { [key: string]: Node };\n  Node: Node;\n  NodeById: Node;\n  Nodes: Node[];\n  TotalFound: bigint;\n}",
     "interface_name": "OrderedDoublyLinkedListSnapshot"
   }
 }
