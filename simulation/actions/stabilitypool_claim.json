@@ -11,84 +11,197 @@
     "contract_name": "StabilityPool",
     "function_name": "claim",
     "pre_execution_parameter_generation_rules": [
-      "The msg.sender must have a stake greater than 0 in the StabilityPool to claim rewards.",
-      "The frontend address should be a valid address and can be the zero address if no fee is desired.",
-      "The fee should be a value between 0 and BASIS_POINTS_DIVISOR (inclusive)."
+      "No parameters are needed for the basic claim function, as it uses msg.sender to identify the user.",
+      "For the overloaded claim function with frontend and fee, determine a valid address for 'frontend' (this could be a zero address if no fee is desired).",
+      "For the overloaded claim function, set 'fee' to a reasonable value between 0 and BASIS_POINTS_DIVISOR (inclusive) representing the percentage of rewards to be given as a fee to the frontend. Check contract's BASIS_POINTS_DIVISOR."
     ],
     "on_execution_state_updates_made": [
       {
-        "category": "User Info",
+        "category": "Reward Snapshots",
         "state_update_descriptions": [
-          "UserInfo for msg.sender is updated to reflect the latest reward and collateral snapshots.",
-          "User's stake might be updated based on stakeScalingFactor and stakeResetSnapshots."
+          "The user's rewardSnapshot is updated to the current totalRewardPerToken."
         ]
       },
       {
-        "category": "Reward and Collateral Distribution",
+        "category": "Reward Snapshots",
         "state_update_descriptions": [
-          "Staking token (DFIDToken) is transferred to the user (msg.sender) and the frontend if a fee is specified.",
-          "Collateral (ETH) is transferred to the user and the frontend if a fee is specified.",
-          "SBR token (DFIREToken) is minted and transferred to the user and the frontend if a fee is specified."
+          "The user's collateralSnapshot is updated to the current totalCollateralPerToken."
         ]
       },
       {
-        "category": "SBR Rewards",
+        "category": "Reward Snapshots",
         "state_update_descriptions": [
-          "totalSbrRewardPerToken might be updated if sbrRewardDistributionStatus is not ENDED.",
-          "sbrRewardSnapshots[msg.sender].rewardSnapshot is updated to totalSbrRewardPerToken.",
-          "sbrRewardSnapshots[msg.sender].status may be updated to CLAIMED if sbrRewardDistributionStatus is ENDED."
+          "If the SBR reward distribution is not ended, the user's sbrRewardSnapshots[msg.sender].rewardSnapshot is updated to the current totalSbrRewardPerToken."
         ]
       },
       {
-        "category": "Contract State",
+        "category": "Reward Snapshots",
         "state_update_descriptions": [
-          "totalRewardPerToken and totalCollateralPerToken are read to calculate pending rewards and collateral.",
-          "totalStakedRaw, stakeScalingFactor, stakeResetCount, stakeResetSnapshots, sbrRewardDistributionStatus, lastSBRRewardDistributedTime, sbrDistributionRate, sbrRewardLoss may be updated (specifically in _addSBRRewards).",
-          "totalRewardPerToken, totalCollateralPerToken, and totalSbrRewardPerToken can also be updated."
+          "If the SBR reward distribution is ended, the sbrRewardSnapshots[msg.sender].status is updated to CLAIMED."
         ]
       },
       {
-        "category": "Events",
+        "category": "User Stake",
         "state_update_descriptions": [
-          "RewardClaimed event is emitted with the user's address, reward, rewardFee, collateral, and collateralFee.",
-          "DFireRewardClaimed event is emitted with the user's address, sbrReward, and sbrRewardFee, if sbrReward > 0.",
-          "SBRRewardsAdded event might be emitted if the SBR reward distribution is active."
+          "User's stake is updated based on the current stakeScalingFactor if stakeScalingFactor is greater than minimumScalingFactor."
+        ]
+      },
+      {
+        "category": "User Stake",
+        "state_update_descriptions": [
+          "User's cumulativeProductScalingFactor is updated to the current stakeScalingFactor."
+        ]
+      },
+      {
+        "category": "User Stake",
+        "state_update_descriptions": [
+          "User's stakeResetCount is updated to the current stakeResetCount."
+        ]
+      },
+      {
+        "category": "Token Transfers",
+        "state_update_descriptions": [
+          "stakingToken (reward token) is transferred to the user."
+        ]
+      },
+      {
+        "category": "Token Transfers",
+        "state_update_descriptions": [
+          "stakingToken (reward token) is transferred to the frontend if fee > 0."
+        ]
+      },
+      {
+        "category": "Token Transfers",
+        "state_update_descriptions": [
+          "Native token (collateral) is transferred to the user."
+        ]
+      },
+      {
+        "category": "Token Transfers",
+        "state_update_descriptions": [
+          "Native token (collateral) is transferred to the frontend if fee > 0."
+        ]
+      },
+      {
+        "category": "Token Transfers",
+        "state_update_descriptions": [
+          "sbrToken is minted to the user."
+        ]
+      },
+      {
+        "category": "Token Transfers",
+        "state_update_descriptions": [
+          "sbrToken is minted to the frontend if fee > 0."
+        ]
+      },
+      {
+        "category": "SBR Reward Distribution",
+        "state_update_descriptions": [
+          "lastSBRRewardDistributedTime may be updated if SBR rewards distribution is active."
+        ]
+      },
+      {
+        "category": "SBR Reward Distribution",
+        "state_update_descriptions": [
+          "sbrRewardDistributionEndTime may be updated if SBR reward distribution has not started."
+        ]
+      },
+      {
+        "category": "SBR Reward Distribution",
+        "state_update_descriptions": [
+          "sbrRewardDistributionStatus may be updated to STARTED or ENDED depending on the current status and elapsed time."
+        ]
+      },
+      {
+        "category": "SBR Reward Distribution",
+        "state_update_descriptions": [
+          "totalSbrRewardPerToken may be updated if there are SBR rewards to distribute and totalStakedRaw > 0."
+        ]
+      },
+      {
+        "category": "SBR Reward Distribution",
+        "state_update_descriptions": [
+          "sbrRewardLoss may be updated if there are SBR rewards to distribute and totalStakedRaw > 0."
         ]
       }
     ],
     "post_execution_contract_state_validation_rules": [
       {
-        "category": "User Info",
+        "category": "Reward Snapshots",
         "rule_descriptions": [
-          "user.rewardSnapshot should be equal to totalRewardPerToken after claim",
-          "user.collateralSnapshot should be equal to totalCollateralPerToken after claim",
-          "user.cumulativeProductScalingFactor should be equal to stakeScalingFactor after claim",
-          "user.stakeResetCount should be equal to stakeResetCount after claim",
-          "user.stake should be updated based on the effective stake calculation"
+          "The user's rewardSnapshot should be equal to the totalRewardPerToken after the claim."
         ]
       },
       {
-        "category": "Reward Balances",
+        "category": "Reward Snapshots",
         "rule_descriptions": [
-          "The user's DFIDToken balance should increase by (pendingReward - rewardFee)",
-          "If rewardFee > 0, the frontend's DFIDToken balance should increase by rewardFee",
-          "If pendingCollateral > 0, the user's ETH balance should increase by (pendingCollateral - collateralFee)",
-          "If collateralFee > 0, the frontend's ETH balance should increase by collateralFee",
-          "If pendingSbrRewards > 0, the user's DFIREToken balance should increase by (pendingSbrRewards - sbrFee)",
-          "If sbrFee > 0, the frontend's DFIREToken balance should increase by sbrFee"
+          "The user's collateralSnapshot should be equal to the totalCollateralPerToken after the claim."
         ]
       },
       {
-        "category": "SBR Rewards",
+        "category": "Reward Snapshots",
         "rule_descriptions": [
-          "If sbrRewardDistributionStatus is not ENDED, sbrRewardSnapshots[msg.sender].rewardSnapshot should be equal to totalSbrRewardPerToken.",
-          "If sbrRewardDistributionStatus is ENDED and sbrRewardSnapshots[msg.sender].status is not CLAIMED, sbrRewardSnapshots[msg.sender].status should be CLAIMED."
+          "If SBR reward distribution is not ended, then the sbrRewardSnapshots[msg.sender].rewardSnapshot should be equal to the totalSbrRewardPerToken."
         ]
       },
       {
-        "category": "Contract State",
+        "category": "Reward Snapshots",
         "rule_descriptions": [
-          "totalRewardPerToken, totalCollateralPerToken, totalSbrRewardPerToken, stakeScalingFactor, and stakeResetCount may be updated during claim execution, specifically within the `_addSBRRewards` function if the SBR reward distribution is active, and these updates should be reflected accordingly."
+          "If SBR reward distribution is ended, then the sbrRewardSnapshots[msg.sender].status should be equal to CLAIMED."
+        ]
+      },
+      {
+        "category": "User Stake",
+        "rule_descriptions": [
+          "The user's stake should be updated based on the stakeScalingFactor."
+        ]
+      },
+      {
+        "category": "User Stake",
+        "rule_descriptions": [
+          "The user's cumulativeProductScalingFactor should be equal to the current stakeScalingFactor."
+        ]
+      },
+      {
+        "category": "User Stake",
+        "rule_descriptions": [
+          "The user's stakeResetCount should be equal to the current stakeResetCount."
+        ]
+      },
+      {
+        "category": "Token Balances",
+        "rule_descriptions": [
+          "The user's stakingToken (reward token) balance should increase by the pendingReward amount, minus any fee."
+        ]
+      },
+      {
+        "category": "Token Balances",
+        "rule_descriptions": [
+          "The frontend, if specified and fee is greater than 0, should have its stakingToken (reward token) balance increase by the rewardFee amount."
+        ]
+      },
+      {
+        "category": "Token Balances",
+        "rule_descriptions": [
+          "The user's native token (collateral) balance should increase by the pendingCollateral amount, minus any fee, if there is pending collateral."
+        ]
+      },
+      {
+        "category": "Token Balances",
+        "rule_descriptions": [
+          "The frontend, if specified and fee is greater than 0, should have its native token (collateral) balance increase by the collateralFee amount, if there is pending collateral."
+        ]
+      },
+      {
+        "category": "Token Balances",
+        "rule_descriptions": [
+          "The user's sbrToken balance should increase by the pendingSbrRewards amount, minus any fee, if there is pending sbr rewards."
+        ]
+      },
+      {
+        "category": "Token Balances",
+        "rule_descriptions": [
+          "The frontend, if specified and fee is greater than 0, should have its sbrToken balance increase by the sbrFee amount, if there is pending sbr rewards."
         ]
       }
     ]
@@ -104,363 +217,169 @@
         "contract_name": "StabilityPool",
         "state_updated": [
           {
-            "state_variable_name": "lastSBRRewardDistributedTime",
-            "type": "write",
-            "what_does_it_track": "The last time SBR rewards were distributed.",
-            "why_is_is_important": "To update the total SBR rewards based on the time elapsed since the last distribution.",
-            "when_is_it_updated": "At the beginning of the _claim function, before calculating and transferring rewards, if SBR rewards distribution is not ended",
-            "how_to_validate_state_update": "Check if the sbrRewardDistributionStatus is not ENDED. Then, ensure that lastSBRRewardDistributedTime is updated to the current block timestamp and totalSbrRewardPerToken is increased based on the time elapsed and the distribution rate. Also verifies SBRrewardLoss.",
+            "state_variable_name": "users[msg.sender]",
+            "type": "mapping",
+            "what_does_it_track": "Tracks user's stake, reward snapshot, collateral snapshot, cumulative product scaling factor and stake reset count.",
+            "why_is_is_important": "Tracks user specific info (stake, rewards, etc.).",
+            "when_is_it_updated": "When a user calls the `claim` function to claim rewards, collateral and SBR rewards.",
+            "how_to_validate_state_update": "Check the user's stake, rewardSnapshot, collateralSnapshot, cumulativeProductScalingFactor, and stakeResetCount after the claim.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the last distribution timestamp to the current block timestamp.",
+            "summary_of_update": "Updates the user's rewardSnapshot, collateralSnapshot, cumulativeProductScalingFactor and stakeResetCount based on current global values. Also potentially reduces the user's stake based on the current scaling factor.",
             "conditions": [
-              "sbrRewardDistributionStatus != SBRRewardDistribution.ENDED"
+              "User stake is greater than zero."
+            ]
+          },
+          {
+            "state_variable_name": "totalRewardPerToken",
+            "type": "uint256",
+            "what_does_it_track": "Cumulative rewards per token.",
+            "why_is_is_important": "It is the cumulative rewards per token and is used to calculate user-specific rewards.",
+            "when_is_it_updated": "When new SBR rewards are added, based on time elapsed and distribution rate, during claim. This occurs in the `_addSBRRewards` function.",
+            "how_to_validate_state_update": "Compare the value of totalRewardPerToken before and after the execution of _addSBRRewards, if the conditions are met it should be higher. This value is only updated in the _addSBRRewards function which is called at the beginning of the _claim function if sbrRewardDistributionStatus != SBRRewardDistribution.ENDED",
+            "has_conditional_updates": true,
+            "summary_of_update": "This value is updated within the _addSBRRewards function if the sbrRewardDistributionStatus is STARTED. This is used to track rewards.",
+            "conditions": [
+              "sbrRewardDistributionStatus == SBRRewardDistribution.STARTED",
+              "block.timestamp > sbrRewardDistributionEndTime",
+              "totalStakedRaw > 0"
+            ]
+          },
+          {
+            "state_variable_name": "totalCollateralPerToken",
+            "type": "uint256",
+            "what_does_it_track": "Cumulative collateral per token.",
+            "why_is_is_important": "Cumulative collateral per token, used to calculate user-specific collateral.",
+            "when_is_it_updated": "When new SBR rewards are added, based on time elapsed and distribution rate, during claim. This occurs in the `_addSBRRewards` function.",
+            "how_to_validate_state_update": "Compare the value of totalCollateralPerToken before and after the execution of _addSBRRewards, if the conditions are met it should be higher. This value is only updated in the _addSBRRewards function which is called at the beginning of the _claim function if sbrRewardDistributionStatus != SBRRewardDistribution.ENDED",
+            "has_conditional_updates": true,
+            "summary_of_update": "This value is updated within the _addSBRRewards function if the sbrRewardDistributionStatus is STARTED. This is used to track collateral.",
+            "conditions": [
+              "sbrRewardDistributionStatus == SBRRewardDistribution.STARTED",
+              "block.timestamp > sbrRewardDistributionEndTime",
+              "totalStakedRaw > 0"
             ]
           },
           {
             "state_variable_name": "totalSbrRewardPerToken",
-            "type": "write",
-            "what_does_it_track": "The cumulative SBR reward per token.",
-            "why_is_is_important": "To track the total SBR rewards per token for all users.",
-            "when_is_it_updated": "At the beginning of the _claim function, if SBR rewards distribution is not ended.",
-            "how_to_validate_state_update": "Check if sbrRewardDistributionStatus is not ENDED. Then, confirm totalSbrRewardPerToken is increased proportionally to the time elapsed and distribution rate. The update also takes into account any SBR reward loss.",
+            "type": "uint256",
+            "what_does_it_track": "Cumulative SBR reward per token.",
+            "why_is_is_important": "Cumulative SBR reward per token, used to calculate user-specific SBR rewards.",
+            "when_is_it_updated": "When new SBR rewards are added, based on time elapsed and distribution rate, during claim. This occurs in the `_addSBRRewards` function.",
+            "how_to_validate_state_update": "Compare the value of totalSbrRewardPerToken before and after the execution of _addSBRRewards, if the conditions are met it should be higher. This value is only updated in the _addSBRRewards function which is called at the beginning of the _claim function if sbrRewardDistributionStatus != SBRRewardDistribution.ENDED",
             "has_conditional_updates": true,
-            "summary_of_update": "Increases the total SBR reward per token based on the distribution rate and time elapsed.",
+            "summary_of_update": "This value is updated within the _addSBRRewards function if the sbrRewardDistributionStatus is STARTED. Tracks SBR rewards.",
             "conditions": [
-              "sbrRewardDistributionStatus != SBRRewardDistribution.ENDED"
+              "sbrRewardDistributionStatus == SBRRewardDistribution.STARTED",
+              "block.timestamp > sbrRewardDistributionEndTime",
+              "totalStakedRaw > 0"
             ]
           },
           {
             "state_variable_name": "sbrRewardLoss",
-            "type": "write",
-            "what_does_it_track": "The amount of SBR rewards lost due to rounding errors.",
-            "why_is_is_important": "To account for any rounding errors in SBR reward distribution.",
-            "when_is_it_updated": "At the beginning of the _claim function, if SBR rewards distribution is not ended, if rewards are not distributed perfectly.",
-            "how_to_validate_state_update": "Check if sbrRewardDistributionStatus is not ENDED. Then, confirm sbrRewardLoss is updated to reflect the difference between the calculated SBR reward and the distributed SBR reward.",
+            "type": "uint256",
+            "what_does_it_track": "Tracks the amount of undistributed SBR rewards due to precision loss.",
+            "why_is_is_important": "Accumulates dust from SBR reward distribution to ensure no rewards are lost due to precision issues.",
+            "when_is_it_updated": "When new SBR rewards are added and there is a difference between the calculated reward and the distributed reward. Occurs within `_addSBRRewards`.",
+            "how_to_validate_state_update": "Verify that sbrRewardLoss is updated correctly by checking its value before and after the _addSBRRewards function call. The new value should reflect the difference between the calculated reward and the distributed reward.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the amount of SBR rewards lost due to rounding errors.",
+            "summary_of_update": "Accumulates dust from SBR reward distribution.",
             "conditions": [
-              "sbrRewardDistributionStatus != SBRRewardDistribution.ENDED"
+              "sbrRewardDistributionStatus == SBRRewardDistribution.STARTED",
+              "totalStakedRaw > 0"
             ]
           },
           {
             "state_variable_name": "lastSBRRewardDistributedTime",
-            "type": "write",
-            "what_does_it_track": "The last time SBR rewards were distributed.",
-            "why_is_is_important": "To initialize the SBR reward distribution parameters.",
-            "when_is_it_updated": "If SBR reward distribution hasn't started.",
-            "how_to_validate_state_update": "Check if sbrRewardDistributionStatus is NOT_STARTED. Then, verify that lastSBRRewardDistributedTime is set to the current block timestamp, sbrRewardDistributionEndTime is set to the current timestamp + 365 days, and sbrRewardDistributionStatus is set to STARTED.",
+            "type": "uint256",
+            "what_does_it_track": "Timestamp of the last SBR reward distribution.",
+            "why_is_is_important": "Used to calculate time elapsed for SBR reward distribution.",
+            "when_is_it_updated": "When the `_addSBRRewards` function is called during the claim process.",
+            "how_to_validate_state_update": "Check the value before and after the execution of the _addSBRRewards function to see that it has been updated to `block.timestamp`.",
             "has_conditional_updates": true,
-            "summary_of_update": "Initializes the last distribution timestamp to the current block timestamp.",
+            "summary_of_update": "Keeps track of the last time sbr rewards were distributed.",
             "conditions": [
+              "sbrRewardDistributionStatus == SBRRewardDistribution.STARTED",
               "sbrRewardDistributionStatus == SBRRewardDistribution.NOT_STARTED"
             ]
           },
           {
             "state_variable_name": "sbrRewardDistributionEndTime",
-            "type": "write",
-            "what_does_it_track": "The time when SBR reward distribution ends.",
-            "why_is_is_important": "To initialize the SBR reward distribution parameters.",
-            "when_is_it_updated": "If SBR reward distribution hasn't started.",
-            "how_to_validate_state_update": "Check if sbrRewardDistributionStatus is NOT_STARTED. Then, verify that lastSBRRewardDistributedTime is set to the current block timestamp, sbrRewardDistributionEndTime is set to the current timestamp + 365 days, and sbrRewardDistributionStatus is set to STARTED.",
+            "type": "uint256",
+            "what_does_it_track": "Timestamp of the SBR reward distribution end time.",
+            "why_is_is_important": "Used to determine the end of SBR reward distribution.",
+            "when_is_it_updated": "When the sbr reward distribution has not yet started. Occurs within `_addSBRRewards`.",
+            "how_to_validate_state_update": "Check the value before and after the execution of _addSBRRewards to see that it has been updated to `block.timestamp + 365 days`.",
             "has_conditional_updates": true,
-            "summary_of_update": "Sets the end time for SBR reward distribution to 365 days from the current timestamp.",
+            "summary_of_update": "Keeps track of the end time of the sbr reward distribution.",
             "conditions": [
               "sbrRewardDistributionStatus == SBRRewardDistribution.NOT_STARTED"
             ]
           },
           {
             "state_variable_name": "sbrRewardDistributionStatus",
-            "type": "write",
-            "what_does_it_track": "The status of the SBR reward distribution.",
-            "why_is_is_important": "To initialize the SBR reward distribution parameters.",
-            "when_is_it_updated": "If SBR reward distribution hasn't started.",
-            "how_to_validate_state_update": "Check if sbrRewardDistributionStatus is NOT_STARTED. Then, verify that lastSBRRewardDistributedTime is set to the current block timestamp, sbrRewardDistributionEndTime is set to the current timestamp + 365 days, and sbrRewardDistributionStatus is set to STARTED.",
+            "type": "enum",
+            "what_does_it_track": "Status of the SBR reward distribution.",
+            "why_is_is_important": "Tracks whether SBR reward distribution is NOT_STARTED, STARTED, or ENDED.",
+            "when_is_it_updated": "When the claim function is called and the SBR distribution status changes. Occurs within `_addSBRRewards`.",
+            "how_to_validate_state_update": "Check the value before and after the execution of _addSBRRewards to see that it has been updated to the correct enum value based on the conditions.",
             "has_conditional_updates": true,
-            "summary_of_update": "Sets the status of SBR reward distribution to STARTED.",
+            "summary_of_update": "Keeps track of the status of the sbr reward distribution.",
             "conditions": [
-              "sbrRewardDistributionStatus == SBRRewardDistribution.NOT_STARTED"
+              "sbrRewardDistributionStatus == SBRRewardDistribution.NOT_STARTED",
+              "sbrRewardDistributionStatus == SBRRewardDistribution.STARTED",
+              "block.timestamp > sbrRewardDistributionEndTime"
             ]
           },
           {
-            "state_variable_name": "sbrRewardDistributionStatus",
-            "type": "write",
-            "what_does_it_track": "The status of the SBR reward distribution.",
-            "why_is_is_important": "To finalize the SBR reward distribution.",
-            "when_is_it_updated": "If the current timestamp is after the SBR reward distribution end time.",
-            "how_to_validate_state_update": "Check if the current block timestamp is greater than sbrRewardDistributionEndTime and sbrRewardDistributionStatus is STARTED. Then, confirm that sbrRewardDistributionStatus is set to ENDED.",
+            "state_variable_name": "sbrRewardSnapshots[msg.sender].rewardSnapshot",
+            "type": "mapping",
+            "what_does_it_track": "Tracks the user's SBR reward snapshot.",
+            "why_is_is_important": "Used to calculate pending SBR rewards for the user.",
+            "when_is_it_updated": "When a user claims rewards.",
+            "how_to_validate_state_update": "Verify that the rewardSnapshot is updated to the current totalSbrRewardPerToken.",
             "has_conditional_updates": true,
-            "summary_of_update": "Sets the status of SBR reward distribution to ENDED.",
+            "summary_of_update": "Updates the user's SBR reward snapshot to the current totalSbrRewardPerToken.",
             "conditions": [
-              "block.timestamp > sbrRewardDistributionEndTime",
-              "sbrRewardDistributionStatus == SBRRewardDistribution.STARTED"
-            ]
-          },
-          {
-            "state_variable_name": "totalRewardPerToken",
-            "type": "read",
-            "what_does_it_track": "Total rewards per token.",
-            "why_is_is_important": "To calculate the pending rewards and collateral for the user.",
-            "when_is_it_updated": "Always, to take a snapshot of reward tokens, collateral and SBR reward tokens to the user's struct, if user has stake.",
-            "how_to_validate_state_update": "Call userPendingRewardAndCollateral to calculate pending rewards. Compare this value with the stored reward, collateral and SBR rewards.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Used in calculation of user rewards.",
-            "conditions": [
-              "user.cumulativeProductScalingFactor != 0"
-            ]
-          },
-          {
-            "state_variable_name": "totalCollateralPerToken",
-            "type": "read",
-            "what_does_it_track": "Total collateral per token.",
-            "why_is_is_important": "To calculate the pending rewards and collateral for the user.",
-            "when_is_it_updated": "Always, to take a snapshot of reward tokens, collateral and SBR reward tokens to the user's struct, if user has stake.",
-            "how_to_validate_state_update": "Call userPendingRewardAndCollateral to calculate pending collateral. Compare this value with the stored reward, collateral and SBR rewards.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Used in calculation of user collateral.",
-            "conditions": [
-              "user.cumulativeProductScalingFactor != 0"
-            ]
-          },
-          {
-            "state_variable_name": "totalSbrRewardPerToken",
-            "type": "read",
-            "what_does_it_track": "Total SBR rewards per token.",
-            "why_is_is_important": "To calculate the pending SBR rewards for the user.",
-            "when_is_it_updated": "To take a snapshot of SBR rewards if the rewards distribution is active.",
-            "how_to_validate_state_update": "Call userPendingRewardAndCollateral to calculate pending SBR rewards. Compare this value with the snapshot SBR rewards.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Used in calculation of user SBR rewards.",
-            "conditions": [
-              "user.cumulativeProductScalingFactor != 0",
               "sbrRewardDistributionStatus != SBRRewardDistribution.ENDED"
             ]
           },
           {
-            "state_variable_name": "rewardSnapshot",
-            "type": "write",
-            "what_does_it_track": "The user's reward snapshot.",
-            "why_is_is_important": "To take a snapshot of totalRewardPerToken so that user is paid out only for the current rewards.",
-            "when_is_it_updated": "After rewards are calculated.",
-            "how_to_validate_state_update": "Get UserInfo struct from users mapping using msg.sender. Verify user.rewardSnapshot is now equal to totalRewardPerToken",
+            "state_variable_name": "sbrRewardSnapshots[msg.sender].status",
+            "type": "mapping",
+            "what_does_it_track": "Tracks the user's SBR reward status.",
+            "why_is_is_important": "Tracks whether the user has claimed their SBR rewards.",
+            "when_is_it_updated": "When a user claims rewards and SBR distribution is ended.",
+            "how_to_validate_state_update": "Verify that the status is updated to CLAIMED.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the user's reward snapshot to the current total reward per token.",
+            "summary_of_update": "Updates the user's SBR reward status to CLAIMED.",
             "conditions": [
-              "user.cumulativeProductScalingFactor != 0"
-            ]
-          },
-          {
-            "state_variable_name": "collateralSnapshot",
-            "type": "write",
-            "what_does_it_track": "The user's collateral snapshot.",
-            "why_is_is_important": "To take a snapshot of totalCollateralPerToken so that user is paid out only for the current collateral.",
-            "when_is_it_updated": "After collateral is calculated.",
-            "how_to_validate_state_update": "Get UserInfo struct from users mapping using msg.sender. Verify user.collateralSnapshot is now equal to totalCollateralPerToken",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates the user's collateral snapshot to the current total collateral per token.",
-            "conditions": [
-              "user.cumulativeProductScalingFactor != 0"
-            ]
-          },
-          {
-            "state_variable_name": "rewardSnapshot",
-            "type": "write",
-            "what_does_it_track": "The user's SBR reward snapshot.",
-            "why_is_is_important": "To take a snapshot of totalSbrRewardPerToken so that user is paid out only for the current SBR rewards.",
-            "when_is_it_updated": "After SBR rewards are calculated, before the SBR distribution is ended.",
-            "how_to_validate_state_update": "Verify sbrRewardSnapshots[msg.sender].rewardSnapshot is now equal to totalSbrRewardPerToken",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates the user's SBR reward snapshot to the current total SBR reward per token.",
-            "conditions": [
-              "user.cumulativeProductScalingFactor != 0",
-              "sbrRewardDistributionStatus != SBRRewardDistribution.ENDED"
-            ]
-          },
-          {
-            "state_variable_name": "status",
-            "type": "write",
-            "what_does_it_track": "The user's SBR reward claim status.",
-            "why_is_is_important": "To keep track of SBR reward claim status.",
-            "when_is_it_updated": "After SBR rewards are calculated, after the SBR distribution is ended, if user has not claimed SBR tokens yet.",
-            "how_to_validate_state_update": "Verify sbrRewardSnapshots[msg.sender].status is now equal to SBRRewardDistribution.CLAIMED",
-            "has_conditional_updates": true,
-            "summary_of_update": "If SBR reward distribution is ended, updates the status to CLAIMED",
-            "conditions": [
-              "user.cumulativeProductScalingFactor != 0",
               "sbrRewardDistributionStatus == SBRRewardDistribution.ENDED",
               "sbrRewardSnapshots[msg.sender].status != SBRRewardDistribution.CLAIMED"
             ]
           },
           {
-            "state_variable_name": "stakingToken",
-            "type": "external_call",
-            "what_does_it_track": "The staking token contract.",
-            "why_is_is_important": "To transfer the pending rewards to the user.",
-            "when_is_it_updated": "If there are pending rewards to be claimed by the user.",
-            "how_to_validate_state_update": "Check stakingToken.transfer is called with msg.sender and pendingReward - rewardFee and also confirms successful transfer.",
+            "state_variable_name": "stakingToken balance",
+            "type": "ERC20 Token",
+            "what_does_it_track": "The balance of staking tokens held by the StabilityPool contract.",
+            "why_is_is_important": "Tracks the amount of staking tokens available for distribution as rewards.",
+            "when_is_it_updated": "When `pendingReward` is greater than zero and after fees are calculated.",
+            "how_to_validate_state_update": "Check the stakingToken balance of StabilityPool before and after the `claim` execution. The balance should decrease by `pendingReward - rewardFee` if the user is claiming and `rewardFee` if a frontend is specified and fees are taken.",
             "has_conditional_updates": true,
-            "summary_of_update": "Transfers pending rewards to the user, deducting any fees.",
+            "summary_of_update": "Transfers reward tokens to the user (msg.sender) and potentially a frontend address.  Reduces the stakingToken balance of StabilityPool.",
             "conditions": [
-              "user.cumulativeProductScalingFactor != 0",
               "pendingReward != 0"
             ]
           },
           {
-            "state_variable_name": "stakingToken",
-            "type": "external_call",
-            "what_does_it_track": "The staking token contract.",
-            "why_is_is_important": "To transfer the reward fee to the frontend.",
-            "when_is_it_updated": "If there are pending rewards and a reward fee to be transferred to the frontend.",
-            "how_to_validate_state_update": "Check stakingToken.transfer is called with frontend and rewardFee and also confirms successful transfer.",
+            "state_variable_name": "sbrToken total supply",
+            "type": "ERC20 Token",
+            "what_does_it_track": "The total supply of sbrToken.",
+            "why_is_is_important": "Tracks the total amount of SBR tokens in circulation.",
+            "when_is_it_updated": "When `pendingSbrRewards` is greater than zero, and after fees are calculated.",
+            "how_to_validate_state_update": "Check the total supply of sbrToken before and after the `claim` execution. The total supply should increase by `pendingSbrRewards - sbrFee` for the user and `sbrFee` if a frontend is specified and fees are taken.",
             "has_conditional_updates": true,
-            "summary_of_update": "Transfers reward fee to the frontend.",
+            "summary_of_update": "Mints SBR tokens to the user (msg.sender) and potentially a frontend address. Increases the sbrToken total supply.",
             "conditions": [
-              "user.cumulativeProductScalingFactor != 0",
-              "pendingReward != 0",
-              "rewardFee > 0"
-            ]
-          },
-          {
-            "state_variable_name": "collateral",
-            "type": "transfer",
-            "what_does_it_track": "The pending collateral.",
-            "why_is_is_important": "To transfer the pending collateral to the user.",
-            "when_is_it_updated": "If there is pending collateral to be claimed by the user.",
-            "how_to_validate_state_update": "Check msg.sender.call{value: pendingCollateral - collateralFee} is called and confirms successful transfer.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Transfers pending collateral to the user, deducting any fees.",
-            "conditions": [
-              "user.cumulativeProductScalingFactor != 0",
-              "pendingCollateral != 0"
-            ]
-          },
-          {
-            "state_variable_name": "collateralFee",
-            "type": "transfer",
-            "what_does_it_track": "The collateral fee.",
-            "why_is_is_important": "To transfer the collateral fee to the frontend.",
-            "when_is_it_updated": "If there is pending collateral and a collateral fee to be transferred to the frontend.",
-            "how_to_validate_state_update": "Check frontend.call{value: collateralFee} is called and confirms successful transfer.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Transfers collateral fee to the frontend.",
-            "conditions": [
-              "user.cumulativeProductScalingFactor != 0",
-              "pendingCollateral != 0",
-              "collateralFee > 0"
-            ]
-          },
-          {
-            "state_variable_name": "sbrToken",
-            "type": "external_call",
-            "what_does_it_track": "The SBR token contract.",
-            "why_is_is_important": "To mint and transfer the pending SBR rewards to the user.",
-            "when_is_it_updated": "If there are pending SBR rewards to be claimed by the user.",
-            "how_to_validate_state_update": "Check sbrToken.mint is called with msg.sender and pendingSbrRewards - sbrFee and also confirms successful minting.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Mints pending SBR rewards to the user, deducting any fees.",
-            "conditions": [
-              "user.cumulativeProductScalingFactor != 0",
-              "pendingSbrRewards != 0"
-            ]
-          },
-          {
-            "state_variable_name": "sbrToken",
-            "type": "external_call",
-            "what_does_it_track": "The SBR token contract.",
-            "why_is_is_important": "To transfer the SBR fee to the frontend.",
-            "when_is_it_updated": "If there are pending SBR rewards and a fee to be transferred to the frontend.",
-            "how_to_validate_state_update": "Check sbrToken.mint is called with frontend and sbrFee and also confirms successful minting.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Mints SBR fee to the frontend.",
-            "conditions": [
-              "user.cumulativeProductScalingFactor != 0",
-              "pendingSbrRewards != 0",
-              "sbrFee > 0"
-            ]
-          },
-          {
-            "state_variable_name": "stake",
-            "type": "write",
-            "what_does_it_track": "The user's stake.",
-            "why_is_is_important": "To update the user's stake.",
-            "when_is_it_updated": "After rewards are claimed.",
-            "how_to_validate_state_update": "Check that user.stake is updated by calling _getUserEffectiveStake",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates the user's stake to the current effective stake.",
-            "conditions": [
-              "user.cumulativeProductScalingFactor != 0"
-            ]
-          },
-          {
-            "state_variable_name": "cumulativeProductScalingFactor",
-            "type": "write",
-            "what_does_it_track": "The user's cumulative product scaling factor.",
-            "why_is_is_important": "To update user's scaling factor and reset count.",
-            "when_is_it_updated": "Always, after updating stake.",
-            "how_to_validate_state_update": "Get UserInfo struct from users mapping using msg.sender. Verify user.cumulativeProductScalingFactor is now equal to stakeScalingFactor and user.stakeResetCount is equal to stakeResetCount.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Updates the user's cumulative product scaling factor to the current stake scaling factor.",
-            "conditions": []
-          },
-          {
-            "state_variable_name": "stakeResetCount",
-            "type": "write",
-            "what_does_it_track": "The user's stake reset count.",
-            "why_is_is_important": "To update user's stake reset count.",
-            "when_is_it_updated": "Always, after updating stake.",
-            "how_to_validate_state_update": "Get UserInfo struct from users mapping using msg.sender. Verify user.cumulativeProductScalingFactor is now equal to stakeScalingFactor and user.stakeResetCount is equal to stakeResetCount.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Updates the user's stake reset count to the current stake reset count.",
-            "conditions": []
-          }
-        ]
-      },
-      {
-        "contract_name": "DFIDToken",
-        "state_updated": [
-          {
-            "state_variable_name": "_balances",
-            "type": "transfer",
-            "what_does_it_track": "The balance of the user.",
-            "why_is_is_important": "To transfer the pending rewards to the user.",
-            "when_is_it_updated": "When there are pending rewards to be claimed by the user.",
-            "how_to_validate_state_update": "Check that the transfer function is called with the correct parameters.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Transfers the pending rewards to the user.",
-            "conditions": [
-              "user.cumulativeProductScalingFactor != 0",
-              "pendingReward != 0"
-            ]
-          }
-        ]
-      },
-      {
-        "contract_name": "DFIREToken",
-        "state_updated": [
-          {
-            "state_variable_name": "_balances",
-            "type": "mint",
-            "what_does_it_track": "The balance of the user.",
-            "why_is_is_important": "To mint the SBR rewards to the user.",
-            "when_is_it_updated": "When there are pending SBR rewards to be claimed by the user.",
-            "how_to_validate_state_update": "Check that the _mint function is called with the correct parameters.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Mints the SBR rewards to the user.",
-            "conditions": [
-              "user.cumulativeProductScalingFactor != 0",
-              "pendingSbrRewards != 0"
-            ]
-          },
-          {
-            "state_variable_name": "_totalSupply",
-            "type": "write",
-            "what_does_it_track": "The total supply of the SBR token.",
-            "why_is_is_important": "To update the total supply of the SBR token.",
-            "when_is_it_updated": "When there are pending SBR rewards to be claimed by the user.",
-            "how_to_validate_state_update": "Check that the _totalSupply is updated correctly.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Increases the total supply of the SBR token.",
-            "conditions": [
-              "user.cumulativeProductScalingFactor != 0",
               "pendingSbrRewards != 0"
             ]
           }
@@ -477,39 +396,15 @@
           "references": [
             {
               "state_variable_name": "stakingToken",
-              "contract_name": "DFIDToken"
+              "contract_name": "dfidToken"
             },
             {
               "state_variable_name": "sbrToken",
-              "contract_name": "DFIREToken"
+              "contract_name": "dfireToken"
             },
             {
               "state_variable_name": "stableBaseCDP",
-              "contract_name": "StableBaseCDP"
-            }
-          ]
-        }
-      },
-      {
-        "contract_name": "DFIDToken",
-        "code_snippet": "function transfer(address to, uint256 value) external returns (bool);",
-        "references": {
-          "references": [
-            {
-              "state_variable_name": "_stableBaseCDP",
               "contract_name": "stableBaseCDP"
-            }
-          ]
-        }
-      },
-      {
-        "contract_name": "DFIREToken",
-        "code_snippet": "function mint(\n        address to,\n        uint256 amount\n    ) external onlyOwner returns (bool) {\n        _mint(to, amount);\n        return true;\n    }\nfunction _mint(address account, uint256 value) internal {\n        if (account == address(0)) {\n            revert ERC20InvalidReceiver(address(0));\n        }\n        _update(address(0), account, value);\n    }\nfunction _update(address from, address to, uint256 value) internal virtual {\n        if (from == address(0)) {\n            // Overflow check required: The rest of the code assumes that totalSupply never overflows\n            _totalSupply += value;\n        } else {\n            uint256 fromBalance = _balances[from];\n            if (fromBalance < value) {\n                revert ERC20InsufficientBalance(from, fromBalance, value);\n            }\n            unchecked {\n                // Overflow not possible: value <= fromBalance <= totalSupply.\n                _balances[from] = fromBalance - value;\n            }\n        }\n\n        if (to == address(0)) {\n            unchecked {\n                // Overflow not possible: value <= totalSupply or value <= fromBalance <= totalSupply.\n                _totalSupply -= value;\n            }\n        } else {\n            unchecked {\n                // Overflow not possible: balance + value is at most totalSupply, which we know fits into a uint256.\n                _balances[to] += value;\n            }\n        }\n\n        emit Transfer(from, to, value);\n    }",
-        "references": {
-          "references": [
-            {
-              "state_variable_name": "_stabilityPool",
-              "contract_name": "StabilityPool"
             }
           ]
         }
