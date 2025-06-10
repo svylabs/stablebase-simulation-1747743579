@@ -1,7 +1,37 @@
 {
   "attributes": [
     {
-      "name": "allowanceAmount",
+      "name": "name",
+      "type": "string",
+      "contract_function": "name",
+      "parameters": []
+    },
+    {
+      "name": "symbol",
+      "type": "string",
+      "contract_function": "symbol",
+      "parameters": []
+    },
+    {
+      "name": "decimals",
+      "type": "uint8",
+      "contract_function": "decimals",
+      "parameters": []
+    },
+    {
+      "name": "totalSupply",
+      "type": "uint256",
+      "contract_function": "totalSupply",
+      "parameters": []
+    },
+    {
+      "name": "totalBurned",
+      "type": "uint256",
+      "contract_function": "totalBurned",
+      "parameters": []
+    },
+    {
+      "name": "allowances",
       "type": "uint256",
       "contract_function": "allowance",
       "parameters": [
@@ -13,12 +43,12 @@
         {
           "name": "spender",
           "type": "address",
-          "reference": "spender"
+          "reference": "accountAddress"
         }
       ]
     },
     {
-      "name": "balance",
+      "name": "balances",
       "type": "uint256",
       "contract_function": "balanceOf",
       "parameters": [
@@ -30,44 +60,14 @@
       ]
     },
     {
-      "name": "decimals",
-      "type": "uint8",
-      "contract_function": "decimals",
-      "parameters": []
-    },
-    {
-      "name": "tokenName",
-      "type": "string",
-      "contract_function": "name",
-      "parameters": []
-    },
-    {
-      "name": "contractOwner",
+      "name": "owner",
       "type": "address",
       "contract_function": "owner",
-      "parameters": []
-    },
-    {
-      "name": "symbol",
-      "type": "string",
-      "contract_function": "symbol",
-      "parameters": []
-    },
-    {
-      "name": "totalBurnedAmount",
-      "type": "uint256",
-      "contract_function": "totalBurned",
-      "parameters": []
-    },
-    {
-      "name": "totalSupplyAmount",
-      "type": "uint256",
-      "contract_function": "totalSupply",
       "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface IDFIDTokenSnapshot {\n  allowanceAmount: bigint;\n  balance: bigint;\n  decimals: number;\n  tokenName: string;\n  contractOwner: string;\n  symbol: string;\n  totalBurnedAmount: bigint;\n  totalSupplyAmount: bigint;\n}\n",
-    "interface_name": "IDFIDTokenSnapshot"
+    "contract_snapshot_interface_code": "interface DFIDTokenState {\n  name: string;\n  symbol: string;\n  decimals: number;\n  totalSupply: bigint;\n  totalBurned: bigint;\n  allowances: { [accountAddress: string]: { [accountAddress: string]: bigint } };\n  balances: { [accountAddress: string]: bigint };\n  owner: string;\n}",
+    "interface_name": "DFIDTokenState"
   }
 }
