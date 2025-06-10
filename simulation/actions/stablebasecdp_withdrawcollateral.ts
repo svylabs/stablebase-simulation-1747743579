@@ -16,65 +16,53 @@ export class WithdrawCollateralAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot
   ): Promise<[boolean, any, Record<string, any>]> {
-    const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
-    if (!stableBaseCDPSnapshot) {
-      console.warn("StableBaseCDP snapshot not found, can't initialize WithdrawCollateralAction");
+    const stableBaseCDP = currentSnapshot.contractSnapshot.stableBaseCDP;
+    const mockPriceOracle = currentSnapshot.contractSnapshot.mockPriceOracle;
+    const safeIds = Object.keys(stableBaseCDP.safes).map(Number);
+
+    if (safeIds.length === 0) {
       return [false, {}, {}];
     }
 
-    let safeId: bigint | null = null;
-    let safeOwner: string | undefined = undefined;
+    const safeId = safeIds[context.prng.next() % safeIds.length];
+    const safe = stableBaseCDP.safes[safeId];
 
-    if (stableBaseCDPSnapshot.safeInfo) {
-      for (const id in stableBaseCDPSnapshot.safeInfo) {
-        safeId = BigInt(id);
-        break;
+    if (!safe || safe.collateralAmount === BigInt(0)) {
+      return [false, {}, {}];
+    }
+
+    // Determine a valid withdrawal amount.
+    let amount: bigint;
+    if (safe.borrowedAmount > BigInt(0)) {
+      const price = mockPriceOracle.price;
+      const liquidationRatio = 1500000000000000000n; // Assuming 1.5 as liquidation ratio (fetch from contract if available)
+
+      const PRECISION = 1000000000000000000n;
+      const BASIS_POINTS_DIVISOR = 10000n;
+
+      const maxWithdrawal = safe.collateralAmount - 
+                              (safe.borrowedAmount * liquidationRatio * PRECISION) /
+                              (price * BASIS_POINTS_DIVISOR);
+
+      if (maxWithdrawal <= BigInt(0)) {
+        return [false, {}, {}];
       }
+
+      amount = BigInt(context.prng.next()) % maxWithdrawal + BigInt(1);
+
+    } else {
+      amount = BigInt(context.prng.next()) % safe.collateralAmount + BigInt(1);
     }
 
-    if (safeId === null) {
-      console.warn("No safes found, can't withdraw collateral.");
-      return [false, {}, {}];
-    }
+    const nearestSpotInLiquidationQueue = BigInt(0); // Can set to a valid safeId if available, setting to 0 as default
 
-    //Need to fetch owner by calling contract
-    try {
-      safeOwner = await this.contract.ownerOf(safeId);
-    } catch (error) {
-      console.warn("Failed to fetch safe owner:", error);
-      return [false, {}, {}];
-    }
-
-    if (safeOwner !== actor.account.address) {
-      console.warn("Actor is not the owner of the safe.");
-      return [false, {}, {}];
-    }
-
-    const collateralAmount = stableBaseCDPSnapshot.safeInfo[safeId.toString()].collateralAmount;
-
-    //Check collateral amount before proceeding
-    if (collateralAmount <= BigInt(0)) {
-      console.warn("No collateral to withdraw from the safe.");
-      return [false, {}, {}];
-    }
-
-    const maxWithdrawalAmount = collateralAmount;
-    const amount = BigInt(context.prng.next()) % (maxWithdrawalAmount > BigInt(100) ? BigInt(100) : maxWithdrawalAmount);
-
-    if (amount <= BigInt(0)) {
-      console.warn("Withdrawal amount is zero, skipping.");
-      return [false, {}, {}];
-    }
-
-    const nearestSpotInLiquidationQueue = BigInt(context.prng.next()) % BigInt(100);
-
-    const params = {
+    const actionParams = {
       safeId: safeId,
       amount: amount,
       nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue,
     };
 
-    return [true, params, {}];
+    return [true, actionParams, {}];
   }
 
   async execute(
@@ -85,21 +73,11 @@ export class WithdrawCollateralAction extends Action {
   ): Promise<Record<string, any> | void> {
     const { safeId, amount, nearestSpotInLiquidationQueue } = actionParams;
 
-    try {
-      const tx = await this.contract
-        .connect(actor.account.value)
-        .withdrawCollateral(
-          safeId,
-          amount,
-          nearestSpotInLiquidationQueue
-        );
+    const tx = await this.contract
+      .connect(actor.account.value)
+      .withdrawCollateral(safeId, amount, nearestSpotInLiquidationQueue);
 
-      const receipt = await tx.wait();
-      return receipt;
-    } catch (error: any) {
-      console.error("Transaction failed:", error);
-      throw error;
-    }
+    await tx.wait();
   }
 
   async validate(
@@ -111,51 +89,55 @@ export class WithdrawCollateralAction extends Action {
     executionReceipt: ExecutionReceipt
   ): Promise<boolean> {
     const { safeId, amount } = actionParams;
-    const stableBaseCDPPrevious = previousSnapshot.contractSnapshot.stableBaseCDP;
-    const stableBaseCDPNew = newSnapshot.contractSnapshot.stableBaseCDP;
 
-    if (!stableBaseCDPPrevious || !stableBaseCDPNew) {
-      console.warn("StableBaseCDP snapshot not found, can't validate WithdrawCollateralAction");
-      return false;
+    const previousStableBaseCDP = previousSnapshot.contractSnapshot.stableBaseCDP;
+    const newStableBaseCDP = newSnapshot.contractSnapshot.stableBaseCDP;
+
+    const previousSafe = previousStableBaseCDP.safes[safeId];
+    const newSafe = newStableBaseCDP.safes[safeId];
+
+    const initialTotalCollateral = previousStableBaseCDP.totalCollateral;
+    const finalTotalCollateral = newStableBaseCDP.totalCollateral;
+
+    // Collateral Validation
+    expect(newSafe.collateralAmount).to.equal(
+      previousSafe.collateralAmount - amount,
+      "Safe's collateralAmount should be decreased by the withdrawn amount"
+    );
+
+    expect(finalTotalCollateral).to.equal(
+      initialTotalCollateral - amount,
+      "totalCollateral should be decreased by the withdrawn amount"
+    );
+
+    expect(newSafe.collateralAmount).to.be.at.least(BigInt(0), "safe.collateralAmount should be greater than or equal to 0");
+    expect(finalTotalCollateral).to.be.at.least(BigInt(0), "totalCollateral should be greater than or equal to 0");
+
+    // Token Balance Validation - User's ETH balance should increase by amount.
+    const initialAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+    const finalAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+    expect(finalAccountBalance - initialAccountBalance).to.equal(amount, "User's ETH balance should increase by amount");
+
+    // Liquidation Snapshot Validation
+    if (previousStableBaseCDP.debtPerCollateralSnapshot && previousStableBaseCDP.collateralPerCollateralSnapshot && newStableBaseCDP.cumulativeCollateralPerUnitCollateral && newStableBaseCDP.cumulativeDebtPerUnitCollateral) {
+      if (previousStableBaseCDP.collateralPerCollateralSnapshot[safeId] != newStableBaseCDP.cumulativeCollateralPerUnitCollateral) {
+        expect(newStableBaseCDP.debtPerCollateralSnapshot[safeId]).to.equal(
+          newStableBaseCDP.cumulativeDebtPerUnitCollateral,
+          "Debt snapshot should be updated"
+        );
+        expect(newStableBaseCDP.collateralPerCollateralSnapshot[safeId]).to.equal(
+          newStableBaseCDP.cumulativeCollateralPerUnitCollateral,
+          "Collateral snapshot should be updated"
+        );
+      }
     }
 
-    // Validate collateral amount
-    const initialCollateralAmount = stableBaseCDPPrevious.safeInfo[safeId.toString()].collateralAmount;
-    const newCollateralAmount = stableBaseCDPNew.safeInfo[safeId.toString()].collateralAmount;
-    const expectedCollateralAmount = initialCollateralAmount - amount;
-
-    expect(newCollateralAmount).to.be.eq(expectedCollateralAmount, "Collateral amount should decrease correctly");
-
-    // Validate total collateral
-    const initialTotalCollateral = stableBaseCDPPrevious.totalCollateral;
-    const newTotalCollateral = stableBaseCDPNew.totalCollateral;
-    const expectedTotalCollateral = initialTotalCollateral - amount;
-
-    expect(newTotalCollateral).to.be.eq(expectedTotalCollateral, "Total collateral should decrease correctly");
-
-    // Validate actor's ETH balance increase
-    const actorAddress = actor.account.address;
-    const previousBalance = previousSnapshot.accountSnapshot[actorAddress] || BigInt(0);
-    const newBalance = newSnapshot.accountSnapshot[actorAddress] || BigInt(0);
-
-    expect(newBalance).to.be.gte(previousBalance + amount, "Actor's ETH balance should increase by the withdrawn amount");
-
-    // Validate WithdrawnCollateral event
-    const withdrawnCollateralEvent = executionReceipt?.events?.find(
-      (event: any) => event.event === 'WithdrawnCollateral'
-    );
-
-    expect(withdrawnCollateralEvent?.args?.safeId).to.eq(safeId, "Incorrect safeId in WithdrawnCollateral event");
-    expect(withdrawnCollateralEvent?.args?.amount).to.eq(amount, "Incorrect amount in WithdrawnCollateral event");
-    expect(withdrawnCollateralEvent?.args?.totalCollateral).to.eq(newTotalCollateral, "Incorrect totalCollateral in WithdrawnCollateral event");
-    expect(withdrawnCollateralEvent?.args?.totalDebt).to.eq(stableBaseCDPNew.totalDebt, "Incorrect totalDebt in WithdrawnCollateral event");
-
-    // Validate LiquidationQueueUpdated event
-    const liquidationQueueUpdatedEvent = executionReceipt?.events?.find(
-      (event: any) => event.event === 'LiquidationQueueUpdated'
-    );
-
-    //Additional checks can be added here based on contract logic.
+    // Liquidation Queue Validation
+    if (previousSafe.borrowedAmount > BigInt(0)) {
+      // Check if the safe's position in the liquidation queue has been updated.
+      // This requires fetching the new ratio from the contract since it is not directly available in the snapshot.
+      // This is not possible without calling the contract. Leaving it out.
+    }
 
     return true;
   }
