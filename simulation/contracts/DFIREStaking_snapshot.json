@@ -1,22 +1,16 @@
 {
   "attributes": [
     {
-      "name": "rewardSenderActive",
-      "type": "boolean",
-      "contract_function": "rewardSenderActive",
+      "name": "owner",
+      "type": "address",
+      "contract_function": "owner",
       "parameters": []
     },
     {
-      "name": "stakes",
-      "type": "mapping",
-      "contract_function": "stakes",
-      "parameters": [
-        {
-          "name": "user",
-          "type": "address",
-          "reference": "accountAddress"
-        }
-      ]
+      "name": "rewardSenderActive",
+      "type": "bool",
+      "contract_function": "rewardSenderActive",
+      "parameters": []
     },
     {
       "name": "totalCollateralPerToken",
@@ -39,7 +33,7 @@
     {
       "name": "stakeByUser",
       "type": "tuple",
-      "contract_function": "getStake",
+      "contract_function": "stakes",
       "parameters": [
         {
           "name": "user",
@@ -62,7 +56,7 @@
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface DFIREStakingState {\n  rewardSenderActive: boolean;\n  stakes: {\n    [accountAddress: string]: {\n      stake: bigint;\n      rewardSnapshot: bigint;\n      collateralSnapshot: bigint;\n    };\n  };\n  totalCollateralPerToken: bigint;\n  totalRewardPerToken: bigint;\n  totalStake: bigint;\n  stakeByUser: {\n      stake: bigint;\n      rewardSnapshot: bigint;\n      collateralSnapshot: bigint;\n    };\n  userPendingReward: {\n        0: bigint; \n        1: bigint; \n      };\n}",
-    "interface_name": "DFIREStakingState"
+    "contract_snapshot_interface_code": "interface DFIREStakingSnapshot {\n  owner: string;\n  rewardSenderActive: boolean;\n  totalCollateralPerToken: bigint;\n  totalRewardPerToken: bigint;\n  totalStake: bigint;\n  stakeByUser: { [accountAddress: string]: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint } };\n  userPendingReward: { [accountAddress: string]: { reward: bigint; collateralReward: bigint } };\n}\n",
+    "interface_name": "DFIREStakingSnapshot"
   }
 }
