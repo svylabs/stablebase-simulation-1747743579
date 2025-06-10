@@ -2,64 +2,97 @@
 
 import { ethers } from 'ethers';
 import { Actor, Snapshot } from '@svylabs/ilumina';
-import { DFIDTokenSnapshot } from './snapshot_interfaces';
+import { IDFIDTokenSnapshot } from './snapshot_interfaces';
 
 /**
  * Takes a snapshot of DFIDToken state
  * @param contract - ethers.Contract instance
  * @param actors - Array of Actor instances
- * @returns Promise returning the interface DFIDTokenSnapshot
+ * @returns Promise returning the interface IDFIDTokenSnapshot
  */
-export async function takedfidTokenContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<DFIDTokenSnapshot> {
+export async function takedfidTokenContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<IDFIDTokenSnapshot> {
   try {
-    const Name = await contract.name();
-    const Symbol = await contract.symbol();
-    const Decimals = await contract.decimals();
-    const TotalSupply = await contract.totalSupply();
-    const TotalBurned = await contract.totalBurned();
-    const Owner = await contract.owner();
+    let totalBalance: bigint = BigInt(0);
+    let allowances: { [owner: string]: { [spender: string]: bigint } } = {};
 
-    const Balance: { [accountAddress: string]: bigint } = {};
-    const Allowance: { [accountAddress: string]: { [accountAddress: string]: bigint } } = {};
+    if (actors && actors.length > 0) {
+      for (const actor of actors) {
+        const identifiers = actor.getIdentifiers();
 
-    for (const actor of actors) {
-      const accountAddress = actor.accountAddress;
+        if (identifiers && identifiers['accountAddress']) {
+          const accountAddress = identifiers['accountAddress'] as string;
+          try {
+            const balance = await safeContractCall<bigint>(contract, 'balanceOf', [accountAddress], `Failed to get balance for account: ${accountAddress}`);
+            totalBalance += balance;
 
-      try {
-        Balance[accountAddress] = BigInt(await contract.balanceOf(accountAddress));
-      } catch (error: any) {
-        console.error(`Error fetching Balance for account ${accountAddress}:`, error);
-        Balance[accountAddress] = BigInt(0);
-      }
+            if (identifiers['spender']) {
+              const spenderAddresses = Array.isArray(identifiers['spender']) ? identifiers['spender'] : [identifiers['spender']];
+              for (const spender of spenderAddresses) {
+                if (typeof spender === 'string') {
+                  try {
+                    const allowance = await safeContractCall<bigint>(contract, 'allowance', [accountAddress, spender], `Failed to get allowance for owner: ${accountAddress} and spender: ${spender}`);
 
-      Allowance[accountAddress] = {};
+                    if (!allowances[accountAddress]) {
+                      allowances[accountAddress] = {};
+                    }
+                    allowances[accountAddress][spender] = allowance;
 
-      for (const otherActor of actors) {
-        const spenderAddress = otherActor.accountAddress;
-        if (accountAddress !== undefined && spenderAddress !== undefined) {
-            try {
-              Allowance[accountAddress][spenderAddress] = BigInt(await contract.allowance(accountAddress, spenderAddress));
-            } catch (error: any) {
-              console.error(`Error fetching Allowance for owner ${accountAddress} and spender ${spenderAddress}:`, error);
-              Allowance[accountAddress][spenderAddress] = BigInt(0);
+                  } catch (allowanceError: any) {
+                    console.error(`Failed to get allowance for ${accountAddress} -> ${spender}:`, allowanceError);
+                  }
+                } else {
+                  console.warn("Spender is not a string:", spender);
+                }
+              }
             }
+
+          } catch (actorError: any) {
+            console.error(`Failed to process actor ${accountAddress}:`, actorError);
+          }
+
+        } else {
+          console.warn('accountAddress not found in identifiers for actor:', actor);
         }
-        
+      }
+    }
+
+    const decimals: number = await safeContractCall<number>(contract, 'decimals', [], 'Failed to get decimals');
+    const tokenName: string = await safeContractCall<string>(contract, 'name', [], 'Failed to get name');
+    const contractOwner: string = await safeContractCall<string>(contract, 'owner', [], 'Failed to get owner');
+    const symbol: string = await safeContractCall<string>(contract, 'symbol', [], 'Failed to get symbol');
+    const totalBurnedAmount: bigint = await safeContractCall<bigint>(contract, 'totalBurned', [], 'Failed to get totalBurned');
+    const totalSupplyAmount: bigint = await safeContractCall<bigint>(contract, 'totalSupply', [], 'Failed to get totalSupply');
+
+    // Consolidate allowances into a single bigint (example: sum of all allowances)
+    let totalAllowanceAmount: bigint = BigInt(0);
+    for (const owner in allowances) {
+      for (const spender in allowances[owner]) {
+        totalAllowanceAmount += allowances[owner][spender];
       }
     }
 
     return {
-      Name,
-      Symbol,
-      Decimals,
-      TotalSupply: BigInt(TotalSupply),
-      TotalBurned: BigInt(TotalBurned),
-      Owner,
-      Balance,
-      Allowance,
+      allowanceAmount: totalAllowanceAmount, // Return the aggregated allowance
+      balance: totalBalance, // Returning sum of all balances
+      decimals,
+      tokenName,
+      contractOwner,
+      symbol,
+      totalBurnedAmount,
+      totalSupplyAmount,
     };
   } catch (error: any) {
     console.error('Error taking DFIDToken snapshot:', error);
     throw new Error(`Failed to take DFIDToken snapshot: ${error.message}`);
+  }
+}
+
+async function safeContractCall<T>(contract: ethers.Contract, functionName: string, params: any[], errorMessage: string): Promise<T> {
+  try {
+    const result: T = await contract[functionName](...params);
+    return result;
+  } catch (error: any) {
+    console.error(`${errorMessage}:`, error);
+    throw new Error(`${errorMessage}: ${error.message}`);
   }
 }

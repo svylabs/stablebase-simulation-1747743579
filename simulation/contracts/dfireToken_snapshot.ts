@@ -10,54 +10,114 @@ import { DFIRETokenSnapshot } from './snapshot_interfaces';
  * @param actors - Array of Actor instances
  * @returns Promise returning the interface DFIRETokenSnapshot
  */
-export async function takedfireTokenContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<DFIRETokenSnapshot> {
-  try {
-    const Allowance: { [owner: string]: { [spender: string]: bigint } } = {};
-    const Balance: { [account: string]: bigint } = {};
+export async function takedfireTokenContractSnapshot(
+    contract: ethers.Contract,
+    actors: Actor[]
+): Promise<DFIRETokenSnapshot> {
+    try {
+        const allowances: { [accountAddress: string]: { [accountAddress: string]: bigint } } = {};
+        const balances: { [accountAddress: string]: bigint } = {};
 
-    for (const actor of actors) {
-      const ownerAddress = actor.accountAddress;
-      Allowance[ownerAddress] = {};
+        // Fetch allowances and balances for all actors
+        for (const actor of actors) {
+            const accountAddress = actor.accountAddress;
 
-      try {
-        Balance[ownerAddress] = await contract.balanceOf(ownerAddress);
-      } catch (error: any) {
-        console.error(`Error fetching balance for account ${ownerAddress}:`, error);
-        throw new Error(`Failed to fetch balance for account ${ownerAddress}: ${error.message}`);
-      }
+            if (!accountAddress) {
+                console.warn('Actor missing accountAddress, skipping.');
+                continue;
+            }
 
-      for (const actor2 of actors) {
-        const spenderAddress = actor2.accountAddress;
-        try {
-          const allowanceValue: bigint = await contract.allowance(ownerAddress, spenderAddress);
-          Allowance[ownerAddress][spenderAddress] = allowanceValue;
-        } catch (error: any) {
-          console.error(`Error fetching allowance for owner ${ownerAddress} and spender ${spenderAddress}:`, error);
-          // Do not throw, continue with other allowance pairs
-          Allowance[ownerAddress][spenderAddress] = BigInt(-1);
+            allowances[accountAddress] = {};
+            for (const otherActor of actors) {
+                const spenderAddress = otherActor.accountAddress;
+                if (!spenderAddress) {
+                    console.warn('Spender missing accountAddress, skipping.');
+                    continue;
+                }
+
+                try {
+                    const allowance = await contract.allowance(accountAddress, spenderAddress);
+                    allowances[accountAddress][spenderAddress] = BigInt(allowance);
+                } catch (error: any) {
+                    console.error(`Error fetching allowance for ${accountAddress} -> ${spenderAddress}:`, error);
+                    throw error;
+                }
+            }
+
+            try {
+                const balance = await contract.balanceOf(accountAddress);
+                balances[accountAddress] = BigInt(balance);
+            } catch (error: any) {
+                console.error(`Error fetching balance for ${accountAddress}:`, error);
+                throw error;
+            }
         }
-      }
+
+        // Fetch other contract state variables
+        let decimals: number;
+        try {
+            decimals = await contract.decimals();
+        } catch (error: any) {
+            console.error('Error fetching decimals:', error);
+            throw error;
+        }
+
+        let tokenName: string;
+        try {
+            tokenName = await contract.name();
+        } catch (error: any) {
+            console.error('Error fetching name:', error);
+            throw error;
+        }
+
+        let contractOwner: string;
+        try {
+            contractOwner = await contract.owner();
+        } catch (error: any) {
+            console.error('Error fetching owner:', error);
+            throw error;
+        }
+
+        let symbol: string;
+        try {
+            symbol = await contract.symbol();
+        } catch (error: any) {
+            console.error('Error fetching symbol:', error);
+            throw error;
+        }
+
+        let totalBurned: bigint;
+        try {
+            totalBurned = await contract.totalBurned();
+            totalBurned = BigInt(totalBurned);
+        } catch (error: any) {
+            console.error('Error fetching totalBurned:', error);
+            throw error;
+        }
+
+        let totalSupply: bigint;
+        try {
+            totalSupply = await contract.totalSupply();
+            totalSupply = BigInt(totalSupply);
+        } catch (error: any) {
+            console.error('Error fetching totalSupply:', error);
+            throw error;
+        }
+
+        const snapshot: DFIRETokenSnapshot = {
+            allowances,
+            balances,
+            decimals,
+            tokenName,
+            contractOwner,
+            symbol,
+            totalBurned,
+            totalSupply,
+        };
+
+        return snapshot;
+    } catch (error) {
+        console.error('Error taking DFIREToken snapshot:', error);
+        throw error; // Re-throw to indicate snapshot failed
     }
-
-    const Decimals: number = await contract.decimals();
-    const Name: string = await contract.name();
-    const Owner: string = await contract.owner();
-    const Symbol: string = await contract.symbol();
-    const TotalBurned: bigint = await contract.totalBurned();
-    const TotalSupply: bigint = await contract.totalSupply();
-
-    return {
-      Allowance,
-      Balance,
-      Decimals,
-      Name,
-      Owner,
-      Symbol,
-      TotalBurned,
-      TotalSupply,
-    };
-  } catch (error: any) {
-    console.error('Error taking DFIREToken snapshot:', error);
-    throw new Error(`Failed to take DFIREToken snapshot: ${error.message}`);
-  }
 }
