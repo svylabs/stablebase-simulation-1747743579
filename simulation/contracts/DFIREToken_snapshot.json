@@ -1,8 +1,8 @@
 {
   "attributes": [
     {
-      "name": "Allowance",
-      "type": "view",
+      "name": "allowances",
+      "type": "mapping",
       "contract_function": "allowance",
       "parameters": [
         {
@@ -18,8 +18,8 @@
       ]
     },
     {
-      "name": "Balance",
-      "type": "view",
+      "name": "balances",
+      "type": "mapping",
       "contract_function": "balanceOf",
       "parameters": [
         {
@@ -30,44 +30,44 @@
       ]
     },
     {
-      "name": "Decimals",
-      "type": "view",
+      "name": "decimals",
+      "type": "function",
       "contract_function": "decimals",
       "parameters": []
     },
     {
-      "name": "Name",
-      "type": "view",
+      "name": "tokenName",
+      "type": "function",
       "contract_function": "name",
       "parameters": []
     },
     {
-      "name": "Owner",
-      "type": "view",
+      "name": "contractOwner",
+      "type": "function",
       "contract_function": "owner",
       "parameters": []
     },
     {
-      "name": "Symbol",
-      "type": "view",
+      "name": "symbol",
+      "type": "function",
       "contract_function": "symbol",
       "parameters": []
     },
     {
-      "name": "TotalBurned",
-      "type": "view",
+      "name": "totalBurned",
+      "type": "function",
       "contract_function": "totalBurned",
       "parameters": []
     },
     {
-      "name": "TotalSupply",
-      "type": "view",
+      "name": "totalSupply",
+      "type": "function",
       "contract_function": "totalSupply",
       "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface DFIRETokenSnapshot {\n  Allowance: { [owner: string]: { [spender: string]: bigint } };\n  Balance: bigint;\n  Decimals: number;\n  Name: string;\n  Owner: string;\n  Symbol: string;\n  TotalBurned: bigint;\n  TotalSupply: bigint;\n}",
+    "contract_snapshot_interface_code": "interface DFIRETokenSnapshot {\n  allowances: { [accountAddress: string]: { [accountAddress: string]: bigint } };\n  balances: { [accountAddress: string]: bigint };\n  decimals: number;\n  tokenName: string;\n  contractOwner: string;\n  symbol: string;\n  totalBurned: bigint;\n  totalSupply: bigint;\n}",
     "interface_name": "DFIRETokenSnapshot"
   }
 }
