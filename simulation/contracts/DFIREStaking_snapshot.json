@@ -1,6 +1,12 @@
 {
   "attributes": [
     {
+      "name": "PRECISION",
+      "type": "uint256",
+      "contract_function": "PRECISION",
+      "parameters": []
+    },
+    {
       "name": "owner",
       "type": "address",
       "contract_function": "owner",
@@ -11,6 +17,24 @@
       "type": "bool",
       "contract_function": "rewardSenderActive",
       "parameters": []
+    },
+    {
+      "name": "stableBaseContract",
+      "type": "address",
+      "contract_function": "stableBaseContract",
+      "parameters": []
+    },
+    {
+      "name": "Stake",
+      "type": "tuple",
+      "contract_function": "getStake",
+      "parameters": [
+        {
+          "name": "user",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
     },
     {
       "name": "totalCollateralPerToken",
@@ -31,20 +55,8 @@
       "parameters": []
     },
     {
-      "name": "stakeByUser",
-      "type": "tuple",
-      "contract_function": "stakes",
-      "parameters": [
-        {
-          "name": "user",
-          "type": "address",
-          "reference": "accountAddress"
-        }
-      ]
-    },
-    {
       "name": "userPendingReward",
-      "type": "tuple",
+      "type": "uint256",
       "contract_function": "userPendingReward",
       "parameters": [
         {
@@ -56,7 +68,7 @@
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface DFIREStakingSnapshot {\n  owner: string;\n  rewardSenderActive: boolean;\n  totalCollateralPerToken: bigint;\n  totalRewardPerToken: bigint;\n  totalStake: bigint;\n  stakeByUser: { [accountAddress: string]: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint } };\n  userPendingReward: { [accountAddress: string]: { reward: bigint; collateralReward: bigint } };\n}\n",
-    "interface_name": "DFIREStakingSnapshot"
+    "contract_snapshot_interface_code": "interface Stake {\n  stake: bigint;\n  rewardSnapshot: bigint;\n  collateralSnapshot: bigint;\n}\n\ninterface DFIREStakingState {\n  PRECISION: bigint;\n  owner: string;\n  rewardSenderActive: boolean;\n  stableBaseContract: string;\n  getStake(accountAddress: string): Stake;\n  totalCollateralPerToken: bigint;\n  totalRewardPerToken: bigint;\n  totalStake: bigint;\n  userPendingReward(accountAddress: string): [bigint, bigint];\n}",
+    "interface_name": "DFIREStakingState"
   }
 }
