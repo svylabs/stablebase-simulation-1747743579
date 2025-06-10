@@ -1,14 +1,20 @@
 {
   "attributes": [
     {
+      "name": "basisPointsDivisor",
+      "type": "uint256",
+      "contract_function": "BASIS_POINTS_DIVISOR",
+      "parameters": []
+    },
+    {
       "name": "collateralLoss",
-      "type": "view",
+      "type": "uint256",
       "contract_function": "collateralLoss",
       "parameters": []
     },
     {
       "name": "userInfo",
-      "type": "view",
+      "type": "tuple",
       "contract_function": "getUser",
       "parameters": [
         {
@@ -20,7 +26,7 @@
     },
     {
       "name": "liquidationPossible",
-      "type": "view",
+      "type": "bool",
       "contract_function": "isLiquidationPossible",
       "parameters": [
         {
@@ -32,61 +38,61 @@
     },
     {
       "name": "lastSBRRewardDistributedTime",
-      "type": "view",
+      "type": "uint256",
       "contract_function": "lastSBRRewardDistributedTime",
       "parameters": []
     },
     {
       "name": "minimumScalingFactor",
-      "type": "view",
+      "type": "uint256",
       "contract_function": "minimumScalingFactor",
       "parameters": []
     },
     {
       "name": "precision",
-      "type": "view",
+      "type": "uint256",
       "contract_function": "precision",
       "parameters": []
     },
     {
       "name": "rewardLoss",
-      "type": "view",
+      "type": "uint256",
       "contract_function": "rewardLoss",
       "parameters": []
     },
     {
       "name": "rewardSenderActive",
-      "type": "view",
+      "type": "bool",
       "contract_function": "rewardSenderActive",
       "parameters": []
     },
     {
       "name": "sbrDistributionRate",
-      "type": "view",
+      "type": "uint256",
       "contract_function": "sbrDistributionRate",
       "parameters": []
     },
     {
       "name": "sbrRewardDistributionEndTime",
-      "type": "view",
+      "type": "uint256",
       "contract_function": "sbrRewardDistributionEndTime",
       "parameters": []
     },
     {
       "name": "sbrRewardDistributionStatus",
-      "type": "view",
+      "type": "uint8",
       "contract_function": "sbrRewardDistributionStatus",
       "parameters": []
     },
     {
       "name": "sbrRewardLoss",
-      "type": "view",
+      "type": "uint256",
       "contract_function": "sbrRewardLoss",
       "parameters": []
     },
     {
       "name": "sbrRewardSnapshots",
-      "type": "view",
+      "type": "tuple",
       "contract_function": "sbrRewardSnapshots",
       "parameters": [
         {
@@ -98,13 +104,13 @@
     },
     {
       "name": "stakeResetCount",
-      "type": "view",
+      "type": "uint256",
       "contract_function": "stakeResetCount",
       "parameters": []
     },
     {
       "name": "stakeResetSnapshots",
-      "type": "view",
+      "type": "tuple",
       "contract_function": "stakeResetSnapshots",
       "parameters": [
         {
@@ -116,37 +122,49 @@
     },
     {
       "name": "stakeScalingFactor",
-      "type": "view",
+      "type": "uint256",
       "contract_function": "stakeScalingFactor",
       "parameters": []
     },
     {
       "name": "totalCollateralPerToken",
-      "type": "view",
+      "type": "uint256",
       "contract_function": "totalCollateralPerToken",
       "parameters": []
     },
     {
       "name": "totalRewardPerToken",
-      "type": "view",
+      "type": "uint256",
       "contract_function": "totalRewardPerToken",
       "parameters": []
     },
     {
       "name": "totalSbrRewardPerToken",
-      "type": "view",
+      "type": "uint256",
       "contract_function": "totalSbrRewardPerToken",
       "parameters": []
     },
     {
       "name": "totalStakedRaw",
-      "type": "view",
+      "type": "uint256",
       "contract_function": "totalStakedRaw",
       "parameters": []
     },
     {
+      "name": "users",
+      "type": "tuple",
+      "contract_function": "users",
+      "parameters": [
+        {
+          "name": "",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
+    },
+    {
       "name": "userPendingCollateral",
-      "type": "view",
+      "type": "uint256",
       "contract_function": "userPendingCollateral",
       "parameters": [
         {
@@ -158,7 +176,7 @@
     },
     {
       "name": "userPendingReward",
-      "type": "view",
+      "type": "uint256",
       "contract_function": "userPendingReward",
       "parameters": [
         {
@@ -170,7 +188,7 @@
     },
     {
       "name": "userPendingRewardAndCollateral",
-      "type": "view",
+      "type": "tuple",
       "contract_function": "userPendingRewardAndCollateral",
       "parameters": [
         {
@@ -179,22 +197,10 @@
           "reference": "accountAddress"
         }
       ]
-    },
-    {
-      "name": "users",
-      "type": "view",
-      "contract_function": "users",
-      "parameters": [
-        {
-          "name": "",
-          "type": "address",
-          "reference": "accountAddress"
-        }
-      ]
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface StabilityPoolSnapshot {\n  collateralLoss: bigint;\n  userInfo: {\n    stake: bigint;\n    rewardSnapshot: bigint;\n    collateralSnapshot: bigint;\n    cumulativeProductScalingFactor: bigint;\n    stakeResetCount: bigint;\n  };\n  liquidationPossible: boolean;\n  lastSBRRewardDistributedTime: bigint;\n  minimumScalingFactor: bigint;\n  precision: bigint;\n  rewardLoss: bigint;\n  rewardSenderActive: boolean;\n  sbrDistributionRate: bigint;\n  sbrRewardDistributionEndTime: bigint;\n  sbrRewardDistributionStatus: number;\n  sbrRewardLoss: bigint;\n  sbrRewardSnapshots: {\n    rewardSnapshot: bigint;\n    status: number;\n  };\n  stakeResetCount: bigint;\n  stakeResetSnapshots: {\n    scalingFactor: bigint;\n    totalRewardPerToken: bigint;\n    totalCollateralPerToken: bigint;\n    totalSBRRewardPerToken: bigint;\n  };\n  stakeScalingFactor: bigint;\n  totalCollateralPerToken: bigint;\n  totalRewardPerToken: bigint;\n  totalSbrRewardPerToken: bigint;\n  totalStakedRaw: bigint;\n  userPendingCollateral: bigint;\n  userPendingReward: bigint;\n  userPendingRewardAndCollateral: bigint[];\n  users: {\n    stake: bigint;\n    rewardSnapshot: bigint;\n    collateralSnapshot: bigint;\n    cumulativeProductScalingFactor: bigint;\n    stakeResetCount: bigint;\n  };\n}\n",
+    "contract_snapshot_interface_code": "interface UserInfo {\n  stake: bigint;\n  rewardSnapshot: bigint;\n  collateralSnapshot: bigint;\n  cumulativeProductScalingFactor: bigint;\n  stakeResetCount: bigint;\n}\n\ninterface SBRRewardSnapshots {\n  rewardSnapshot: bigint;\n  status: number;\n}\n\ninterface StakeResetSnapshots {\n  scalingFactor: bigint;\n  totalRewardPerToken: bigint;\n  totalCollateralPerToken: bigint;\n  totalSBRRewardPerToken: bigint;\n}\n\ninterface Users {\n  stake: bigint;\n  rewardSnapshot: bigint;\n  collateralSnapshot: bigint;\n  cumulativeProductScalingFactor: bigint;\n  stakeResetCount: bigint;\n}\n\ninterface StabilityPoolSnapshot {\n  basisPointsDivisor: bigint;\n  collateralLoss: bigint;\n  userInfo: UserInfo;\n  liquidationPossible: boolean;\n  lastSBRRewardDistributedTime: bigint;\n  minimumScalingFactor: bigint;\n  precision: bigint;\n  rewardLoss: bigint;\n  rewardSenderActive: boolean;\n  sbrDistributionRate: bigint;\n  sbrRewardDistributionEndTime: bigint;\n  sbrRewardDistributionStatus: number;\n  sbrRewardLoss: bigint;\n  sbrRewardSnapshots: SBRRewardSnapshots;\n  stakeResetCount: bigint;\n  stakeResetSnapshots: StakeResetSnapshots;\n  stakeScalingFactor: bigint;\n  totalCollateralPerToken: bigint;\n  totalRewardPerToken: bigint;\n  totalSbrRewardPerToken: bigint;\n  totalStakedRaw: bigint;\n  users: Users;\n  userPendingCollateral: bigint;\n  userPendingReward: bigint;\n  userPendingRewardAndCollateral: [bigint, bigint, bigint];\n}",
     "interface_name": "StabilityPoolSnapshot"
   }
 }
