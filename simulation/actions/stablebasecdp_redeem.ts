@@ -1,12 +1,13 @@
-import { Actor, RunContext, Snapshot, Action } from '@svylabs/ilumia';
-import { ethers } from 'ethers';
-import { expect } from 'chai';
+import { Action, Actor, Snapshot } from "@svylabs/ilumina";
+import type RunContext, { ExecutionReceipt } from "@svylabs/ilumina";
+import { ethers } from "ethers";
+import { expect } from "chai";
 
 export class RedeemAction extends Action {
-  private contract: ethers.Contract;
+  contract: ethers.Contract;
 
   constructor(contract: ethers.Contract) {
-    super('RedeemAction');
+    super("RedeemAction");
     this.contract = contract;
   }
 
@@ -14,24 +15,33 @@ export class RedeemAction extends Action {
     context: RunContext,
     actor: Actor,
     currentSnapshot: Snapshot
-  ): Promise<[any, Record<string, any>]> {
-    // Ensure the user has sufficient SBD tokens to redeem
-    const userAddress = actor.account.address;
-    const userSBDTokenBalance = currentSnapshot.contractSnapshot.dfidToken.Balance[userAddress] || BigInt(0);
+  ): Promise<[boolean, any, Record<string, any>]> {
+    const stableBaseCDP = currentSnapshot.contractSnapshot.stableBaseCDP;
+    const dfidToken = currentSnapshot.contractSnapshot.dfidToken;
 
-    // Generate a random amount within the user's SBD token balance, but at least 1
-    const maxRedeemableAmount = userSBDTokenBalance > 0 ? userSBDTokenBalance : BigInt(1);
-    const amount = BigInt(Math.floor(context.prng.next() % Number(maxRedeemableAmount)) + 1);
+    const accountBalance = currentSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+    const sbdTokenBalance = (dfidToken.balances && dfidToken.balances[actor.account.address]) || BigInt(0);
 
+    if (sbdTokenBalance <= BigInt(0)) {
+      console.log("RedeemAction: Insufficient SBD balance.");
+      return [false, {}, {}];
+    }
+
+    // Generate a random amount within the available SBD token balance
+    const amount = BigInt(Math.floor(context.prng.next() % Number(sbdTokenBalance) + 1));
     // Generate a random value for nearestSpotInLiquidationQueue
-    const nearestSpotInLiquidationQueue = BigInt(Math.floor(context.prng.next() % 100));
+    const nearestSpotInLiquidationQueue = BigInt(Math.floor(context.prng.next() % 100)); // Assuming a reasonable upper bound for the queue spot
 
-    const actionParams = [
-      amount,
-      nearestSpotInLiquidationQueue,
-    ];
+    console.log(`RedeemAction: amount = ${amount}, nearestSpotInLiquidationQueue = ${nearestSpotInLiquidationQueue}`);
 
-    return [actionParams, {}];
+    const canExecute = amount > BigInt(0) && sbdTokenBalance >= amount;
+
+    const actionParams = {
+      amount: amount,
+      nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue,
+    };
+
+    return [canExecute, actionParams, {}];
   }
 
   async execute(
@@ -40,12 +50,26 @@ export class RedeemAction extends Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<Record<string, any> | void> {
-    const signer = actor.account.value as ethers.Signer;
-    const tx = await this.contract.connect(signer).redeem(
-      actionParams[0],
-      actionParams[1]
+    const { amount, nearestSpotInLiquidationQueue } = actionParams;
+
+    // Approve the contract to spend the SBD tokens
+    const dfidTokenContract = new ethers.Contract(
+      (context.contracts.dfidToken as any).target,
+      (context.contracts.dfidToken as any).interface,
+      actor.account.value
     );
+
+    const stableBaseCDPAddress = (context.contracts.stableBaseCDP as any).target;
+    const approveTx = await dfidTokenContract.approve(stableBaseCDPAddress, amount);
+    await approveTx.wait();
+
+    // Execute the redeem action
+    const tx = await this.contract
+      .connect(actor.account.value)
+      .redeem(amount, nearestSpotInLiquidationQueue);
     await tx.wait();
+
+    console.log("RedeemAction: redeem transaction executed.");
   }
 
   async validate(
@@ -53,44 +77,45 @@ export class RedeemAction extends Action {
     actor: Actor,
     previousSnapshot: Snapshot,
     newSnapshot: Snapshot,
-    actionParams: any
+    actionParams: any,
+    executionReceipt: ExecutionReceipt
   ): Promise<boolean> {
-    const amount = actionParams[0] as bigint;
-    const nearestSpotInLiquidationQueue = actionParams[1] as bigint;
-    const userAddress = actor.account.address;
+    const { amount, nearestSpotInLiquidationQueue } = actionParams;
+    const stableBaseCDPPrevious = previousSnapshot.contractSnapshot.stableBaseCDP;
+    const stableBaseCDPNew = newSnapshot.contractSnapshot.stableBaseCDP;
+    const dfidTokenPrevious = previousSnapshot.contractSnapshot.dfidToken;
+    const dfidTokenNew = newSnapshot.contractSnapshot.dfidToken;
 
-    // Validate SBD Token Balance
-    const previousUserSBDTokenBalance = previousSnapshot.contractSnapshot.dfidToken.Balance[userAddress] || BigInt(0);
-    const newUserSBDTokenBalance = newSnapshot.contractSnapshot.dfidToken.Balance[userAddress] || BigInt(0);
-    expect(newUserSBDTokenBalance, 'User SBD token balance should decrease by redeemed amount').to.equal(
-      previousUserSBDTokenBalance - amount
-    );
+    const contractAddress = (context.contracts.stableBaseCDP as any).target;
+    const redeemerAddress = actor.account.address;
+    const sbdTokenContractAddress = (context.contracts.dfidToken as any).target;
 
-    // Validate Total Supply of SBD tokens
-    const previousTotalSupply = previousSnapshot.contractSnapshot.dfidToken.TotalSupply || BigInt(0);
-    const newTotalSupply = newSnapshot.contractSnapshot.dfidToken.TotalSupply || BigInt(0);
-    const redeemedAmount = amount; // Assuming redeemedAmount is equal to amount
-    const refundedAmount = BigInt(0); // Assuming refundedAmount is zero for simplicity
+    // Validate SBD token balance of the contract
+    const previousContractSBDTokenBalance = (dfidTokenPrevious.balances && dfidTokenPrevious.balances[contractAddress]) || BigInt(0);
+    const newContractSBDTokenBalance = (dfidTokenNew.balances && dfidTokenNew.balances[contractAddress]) || BigInt(0);
 
-    // In the redeem function, SBD tokens are burned only if redeemedAmount > refundedAmount
-    if (redeemedAmount > refundedAmount) {
-      expect(newTotalSupply, 'Total supply of SBD tokens should decrease when redeemedAmount > refundedAmount').to.lte(previousTotalSupply);
-    } else {
-      expect(newTotalSupply, 'Total supply of SBD tokens should not change').to.equal(previousTotalSupply);
-    }
+    // Validate the redeemer's SBD token balance
+    const previousRedeemerSBDTokenBalance = (dfidTokenPrevious.balances && dfidTokenPrevious.balances[redeemerAddress]) || BigInt(0);
+    const newRedeemerSBDTokenBalance = (dfidTokenNew.balances && dfidTokenNew.balances[redeemerAddress]) || BigInt(0);
 
-    // Validate Total Debt and Collateral
-    const previousTotalDebt = previousSnapshot.contractSnapshot.stableBaseCDP.totalDebt || BigInt(0);
-    const newTotalDebt = newSnapshot.contractSnapshot.stableBaseCDP.totalDebt || BigInt(0);
-    const previousTotalCollateral = previousSnapshot.contractSnapshot.stableBaseCDP.totalCollateral || BigInt(0);
-    const newTotalCollateral = newSnapshot.contractSnapshot.stableBaseCDP.totalCollateral || BigInt(0);
+    // Validate the redeemer's SBD token balance decreased by the amount redeemed
+    expect(newRedeemerSBDTokenBalance).to.equal(previousRedeemerSBDTokenBalance - amount, "Redeemer's SBD balance should decrease by the amount being redeemed");
 
-    // Expect totalDebt to be reduced, adjust for refundedAmount. For simplicity, considering refundedAmount to be 0.
-    expect(newTotalDebt, 'Total debt should be reduced').to.lte(previousTotalDebt);
+    // Assuming the contract burns the tokens, validate the contract's SBD balance remains the same because the contract received and burned.
+    expect(newContractSBDTokenBalance).to.equal(previousContractSBDTokenBalance, "Contract's SBD balance should remain the same");
 
-    // Expect totalCollateral to be reduced. Due to lack of redeemerFee and collateralAmount from event, a less specific check is used.
-    expect(newTotalCollateral, 'Total collateral should be reduced').to.lte(previousTotalCollateral);
+    // Validate total debt decreased
+    expect(stableBaseCDPNew.totalDebt).to.lte(stableBaseCDPPrevious.totalDebt, "Total debt should decrease");
 
+    // Validate total collateral decreased
+    expect(stableBaseCDPNew.totalCollateral).to.lte(stableBaseCDPPrevious.totalCollateral, "Total collateral should decrease");
+
+    // Additional validations based on state changes (example - more details will be needed based on which safes are being redeemed):
+    // Example: Validate safe state (if applicable, removal from queues, liquidation ratio updates)
+    // Example: Validate fee distribution
+    // Example: Validate stability pool updates
+
+    console.log("RedeemAction: validation successful.");
     return true;
   }
 }
