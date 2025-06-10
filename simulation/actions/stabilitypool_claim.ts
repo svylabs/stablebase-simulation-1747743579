@@ -1,7 +1,14 @@
 import { Action, Actor, Snapshot } from "@svylabs/ilumina";
 import type RunContext, { ExecutionReceipt } from "@svylabs/ilumina";
 import { ethers } from "ethers";
-import { expect } from "chai";
+import { expect } from 'chai';
+
+enum SBRRewardDistribution {
+    NOT_STARTED,
+    STARTED,
+    ENDED,
+    CLAIMED
+}
 
 export class ClaimAction extends Action {
   contract: ethers.Contract;
@@ -16,35 +23,15 @@ export class ClaimAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot
   ): Promise<[boolean, any, Record<string, any>]> {
-    // Option 1: Call claim() with no parameters.
-    // Option 2: Call claim(address frontend, uint256 fee).
-    const randomChoice = context.prng.next() % 2;
+    const stabilityPoolSnapshot = currentSnapshot.contractSnapshot.stabilityPool;
+    const userAddress = actor.account.address;
 
-    let actionParams: any;
-    if (randomChoice === 0) {
-      // No parameters for claim().
-      actionParams = [];
-      return [true, actionParams, {}];
-    } else {
-      // Parameters for claim(address frontend, uint256 fee).
-      // Determine a valid address for 'frontend'.  Use zero address if no fee desired.
-      let frontend = ethers.ZeroAddress; // Default to zero address
-
-      // Check if other actors exist and use their address if available
-        const otherActors = context.actors.filter(a => a.account.address !== actor.account.address);
-        if (otherActors.length > 0) {
-            const randomIndex = context.prng.next() % otherActors.length;
-            frontend = otherActors[randomIndex].account.address;
-        }
-
-      // Set 'fee' to a reasonable value between 0 and BASIS_POINTS_DIVISOR.
-      const stabilityPoolSnapshot = currentSnapshot.contractSnapshot.stabilityPool;
-      const basisPointsDivisor = stabilityPoolSnapshot.basisPointsDivisor;
-      const fee = BigInt(context.prng.next()) % (basisPointsDivisor + BigInt(1)); // Ensure fee is within bounds
-
-      actionParams = [frontend, fee];
-      return [true, actionParams, {}];
+    if (!stabilityPoolSnapshot.userInfos[userAddress] || stabilityPoolSnapshot.userInfos[userAddress].stake === BigInt(0)) {
+      return [false, {}, {}];
     }
+
+    // No parameters needed for claim function
+    return [true, [], {}];
   }
 
   async execute(
@@ -53,18 +40,9 @@ export class ClaimAction extends Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<Record<string, any> | void> {
-    if (actionParams.length === 0) {
-      // Call claim() with no parameters.
-      const tx = await this.contract.connect(actor.account.value).claim();
-      await tx.wait();
-    } else {
-      // Call claim(address frontend, uint256 fee).
-      const [frontend, fee] = actionParams;
-      const tx = await this.contract
-        .connect(actor.account.value)
-        .claim(frontend, fee);
-      await tx.wait();
-    }
+    const tx = await this.contract.connect(actor.account.value).claim();
+    const receipt = await tx.wait();
+    return { receipt };
   }
 
   async validate(
@@ -75,51 +53,167 @@ export class ClaimAction extends Action {
     actionParams: any,
     executionReceipt: ExecutionReceipt
   ): Promise<boolean> {
-    const stabilityPoolPrevious = previousSnapshot.contractSnapshot.stabilityPool;
-    const stabilityPoolNew = newSnapshot.contractSnapshot.stabilityPool;
-    const actorAddress = actor.account.address;
+    const userAddress = actor.account.address;
+    const previousStabilityPool = previousSnapshot.contractSnapshot.stabilityPool;
+    const newStabilityPool = newSnapshot.contractSnapshot.stabilityPool;
 
-    // Reward Snapshots validation.
-    const previousRewardSnapshot = stabilityPoolPrevious.users[actorAddress]?.rewardSnapshot || BigInt(0);
-    const newRewardSnapshot = stabilityPoolNew.users[actorAddress]?.rewardSnapshot || BigInt(0);
+    const previousDFIDToken = previousSnapshot.contractSnapshot.dfidToken;
+    const newDFIDToken = newSnapshot.contractSnapshot.dfidToken;
 
-    expect(newRewardSnapshot).to.equal(stabilityPoolNew.totalRewardPerToken, "Reward snapshot should be equal to totalRewardPerToken after claim.");
+    const previousDFIREToken = previousSnapshot.contractSnapshot.dfireToken;
+    const newDFIREToken = newSnapshot.contractSnapshot.dfireToken;
 
-    const previousCollateralSnapshot = stabilityPoolPrevious.users[actorAddress]?.collateralSnapshot || BigInt(0);
-    const newCollateralSnapshot = stabilityPoolNew.users[actorAddress]?.collateralSnapshot || BigInt(0);
-    expect(newCollateralSnapshot).to.equal(stabilityPoolNew.totalCollateralPerToken, "Collateral snapshot should be equal to totalCollateralPerToken after claim.");
+    const previousAccountSnapshot = previousSnapshot.accountSnapshot;
+    const newAccountSnapshot = newSnapshot.accountSnapshot;
 
-    const sbrRewardDistributionStatusPrevious = stabilityPoolPrevious.sbrRewardDistributionStatus;
-    const sbrRewardDistributionStatusNew = stabilityPoolNew.sbrRewardDistributionStatus;
+    const previousETHBalance = previousAccountSnapshot[userAddress] || BigInt(0);
+    const newETHBalance = newAccountSnapshot[userAddress] || BigInt(0);
 
-    const previousSbrRewardSnapshot = stabilityPoolPrevious.sbrRewardSnapshots[actorAddress]?.rewardSnapshot || BigInt(0);
-    const newSbrRewardSnapshot = stabilityPoolNew.sbrRewardSnapshots[actorAddress]?.rewardSnapshot || BigInt(0);
-    const previousSbrRewardStatus = stabilityPoolPrevious.sbrRewardSnapshots[actorAddress]?.status || 0; // Assume 0 for not claimed
-    const newSbrRewardStatus = stabilityPoolNew.sbrRewardSnapshots[actorAddress]?.status || 0;
+    const previousUserInfo = previousStabilityPool.userInfos[userAddress];
+    const newUserInfo = newStabilityPool.userInfos[userAddress];
 
-    if (sbrRewardDistributionStatusNew != 2) { // SBRRewardDistribution.ENDED = 2
-      expect(newSbrRewardSnapshot).to.equal(stabilityPoolNew.totalSbrRewardPerToken, "SBR reward snapshot should be equal to totalSbrRewardPerToken if not ended.");
-    } else {
-      expect(newSbrRewardStatus).to.equal(1, "SBR reward status should be CLAIMED if distribution ended."); // CLAIMED = 1
+    const BASIS_POINTS_DIVISOR = newStabilityPool.BASIS_POINTS_DIVISOR;
+
+    // Validate stake, rewardSnapshot, collateralSnapshot, cumulativeProductScalingFactor, and stakeResetCount
+    if (previousUserInfo && previousUserInfo.stake > BigInt(0)) {
+      expect(newUserInfo.rewardSnapshot).to.equal(newStabilityPool.totalRewardPerToken, "rewardSnapshot should equal totalRewardPerToken");
+      expect(newUserInfo.collateralSnapshot).to.equal(newStabilityPool.totalCollateralPerToken, "collateralSnapshot should equal totalCollateralPerToken");
+      expect(newUserInfo.cumulativeProductScalingFactor).to.equal(newStabilityPool.stakeScalingFactor, "cumulativeProductScalingFactor should equal stakeScalingFactor");
+      expect(newUserInfo.stakeResetCount).to.equal(newStabilityPool.stakeResetCount, "stakeResetCount should equal stakeResetCount");
     }
 
-    // User Stake validation.
-    const previousStake = stabilityPoolPrevious.users[actorAddress]?.stake || BigInt(0);
-    const newStake = stabilityPoolNew.users[actorAddress]?.stake || BigInt(0);
+    // Validate SBR reward snapshots and status
+    const previousSBRSnapshot = previousStabilityPool.sbrRewardSnapshots[userAddress];
+        const newSBRSnapshot = newStabilityPool.sbrRewardSnapshots[userAddress];
 
-    const newCumulativeProductScalingFactor = stabilityPoolNew.users[actorAddress]?.cumulativeProductScalingFactor || BigInt(0);
-    expect(newCumulativeProductScalingFactor).to.equal(stabilityPoolNew.stakeScalingFactor, "CumulativeProductScalingFactor should be equal to stakeScalingFactor after claim.");
+        if (newStabilityPool.sbrRewardDistributionStatus !== "ENDED") {
+            expect(newSBRSnapshot.rewardSnapshot).to.equal(newStabilityPool.totalSbrRewardPerToken, "sbrRewardSnapshots[msg.sender].rewardSnapshot should equal totalSbrRewardPerToken");
+        } else {
+            expect(newSBRSnapshot.status).to.equal(SBRRewardDistribution.CLAIMED, "sbrRewardSnapshots[msg.sender].status should be CLAIMED");
+        }
 
-    const newStakeResetCount = stabilityPoolNew.users[actorAddress]?.stakeResetCount || BigInt(0);
-    expect(newStakeResetCount).to.equal(stabilityPoolNew.stakeResetCount, "StakeResetCount should be equal to stakeResetCount after claim.");
+    // Calculate pending rewards and collateral
+    let pendingReward = BigInt(0);
+    let pendingCollateral = BigInt(0);
+    let pendingSbrRewards = BigInt(0);
+    let rewardFee = BigInt(0);
+    let collateralFee = BigInt(0);
+    let sbrFee = BigInt(0);
+    const frontendAddress = ethers.ZeroAddress; // Assuming no frontend
+    let fee = BigInt(0);
 
-        //Total stake raw validation
-        const previousTotalStakedRaw = stabilityPoolPrevious.totalStakedRaw
-        const newTotalStakedRaw = stabilityPoolNew.totalStakedRaw
+        //Parameter generation based on snapshot data
+        if (previousStabilityPool.totalStakedRaw > 0) {
+           fee = BigInt(context.prng.next()) % (BASIS_POINTS_DIVISOR + BigInt(1)); // Ensure fee is within BASIS_POINTS_DIVISOR
+        }
 
-    // Token Balance Validations - simplified, assumes the token contracts are available and tokens transferred.
-    // To validate correctly, you will need to read events emitted and compare to expected value based on actionParams
-    // and then also check the balances.
+    if (previousUserInfo && previousUserInfo.cumulativeProductScalingFactor !== BigInt(0)) {
+      const stakeResetCount = newStabilityPool.stakeResetCount;
+      const userStakeResetCount = previousUserInfo.stakeResetCount;
+
+      let pendingRewardVal: bigint;
+      let pendingCollateralVal: bigint;
+      let pendingSbrRewardsVal: bigint;
+
+      const calculateSbrRewards = newStabilityPool.sbrRewardSnapshots[userAddress]?.status !== SBRRewardDistribution.CLAIMED;
+
+      if (userStakeResetCount === stakeResetCount) {
+        pendingRewardVal = (((newStabilityPool.totalRewardPerToken - previousUserInfo.rewardSnapshot) * previousUserInfo.stake) * newStabilityPool.precision) / previousUserInfo.cumulativeProductScalingFactor / newStabilityPool.precision;
+        pendingCollateralVal = (((newStabilityPool.totalCollateralPerToken - previousUserInfo.collateralSnapshot) * previousUserInfo.stake) * newStabilityPool.precision) / previousUserInfo.cumulativeProductScalingFactor / newStabilityPool.precision;
+
+        if (calculateSbrRewards) {
+          pendingSbrRewardsVal = (((newStabilityPool.totalSbrRewardPerToken - (previousSBRSnapshot?.rewardSnapshot || BigInt(0))) * previousUserInfo.stake) * newStabilityPool.precision) / previousUserInfo.cumulativeProductScalingFactor / newStabilityPool.precision;
+        }
+      } else {
+        const snapshot = newStabilityPool.stakeResetSnapshots[userStakeResetCount];
+        pendingRewardVal = (((snapshot.totalRewardPerToken - previousUserInfo.rewardSnapshot) * previousUserInfo.stake) * newStabilityPool.precision) / previousUserInfo.cumulativeProductScalingFactor / newStabilityPool.precision;
+        pendingCollateralVal = (((snapshot.totalCollateralPerToken - previousUserInfo.collateralSnapshot) * previousUserInfo.stake) * newStabilityPool.precision) / previousUserInfo.cumulativeProductScalingFactor / newStabilityPool.precision;
+
+        if (calculateSbrRewards) {
+          pendingSbrRewardsVal = (((snapshot.totalSBRRewardPerToken - (previousSBRSnapshot?.rewardSnapshot || BigInt(0))) * previousUserInfo.stake) * newStabilityPool.precision) / previousUserInfo.cumulativeProductScalingFactor / newStabilityPool.precision;
+        }
+
+        const userStake = (previousUserInfo.stake * snapshot.scalingFactor * newStabilityPool.precision) / previousUserInfo.cumulativeProductScalingFactor / newStabilityPool.precision;
+
+        if (userStakeResetCount + 1 !== stakeResetCount) {
+          const snapshot2 = newStabilityPool.stakeResetSnapshots[userStakeResetCount + 1];
+          pendingRewardVal += (snapshot2.totalRewardPerToken * userStake) / newStabilityPool.precision;
+          pendingCollateralVal += (snapshot2.totalCollateralPerToken * userStake) / newStabilityPool.precision;
+          if (calculateSbrRewards) {
+            pendingSbrRewardsVal += (snapshot2.totalSBRRewardPerToken * userStake) / newStabilityPool.precision;
+          }
+        } else {
+          pendingRewardVal += (newStabilityPool.totalRewardPerToken * userStake) / newStabilityPool.precision;
+          pendingCollateralVal += (newStabilityPool.totalCollateralPerToken * userStake) / newStabilityPool.precision;
+          if (calculateSbrRewards) {
+            pendingSbrRewardsVal += (newStabilityPool.totalSbrRewardPerToken * userStake) / newStabilityPool.precision;
+          }
+        }
+      }
+
+      pendingReward = pendingRewardVal > BigInt(0) ? pendingRewardVal : BigInt(0); // Avoid negative pendingReward
+      pendingCollateral = pendingCollateralVal > BigInt(0) ? pendingCollateralVal : BigInt(0);
+      pendingSbrRewards = pendingSbrRewardsVal > BigInt(0) ? pendingSbrRewardsVal : BigInt(0);
+
+            rewardFee = (fee * pendingReward) / BASIS_POINTS_DIVISOR;
+            collateralFee = (fee * pendingCollateral) / BASIS_POINTS_DIVISOR;
+            sbrFee = (fee * pendingSbrRewards) / BASIS_POINTS_DIVISOR;
+    }
+
+        const expectedDFIDTokenBalanceChange = pendingReward - rewardFee;
+        if (expectedDFIDTokenBalanceChange > BigInt(0)) {
+            expect(newDFIDToken.balances[userAddress] - previousDFIDToken.balances[userAddress]).to.equal(expectedDFIDTokenBalanceChange, "User's DFIDToken balance should increase by the reward amount");
+
+            if (fee > BigInt(0)) {
+                const expectedFeeBalance = rewardFee;
+                expect(newDFIDToken.balances[frontendAddress] - previousDFIDToken.balances[frontendAddress]).to.equal(expectedFeeBalance, "Frontend's DFIDToken balance should increase by the reward fee amount");
+            }
+        }
+
+        const expectedETHBalanceChange = pendingCollateral - collateralFee;
+        if (expectedETHBalanceChange > BigInt(0)) {
+            expect(newETHBalance - previousETHBalance).to.equal(expectedETHBalanceChange, "User's ETH balance should increase by the collateral amount");
+
+            if (fee > BigInt(0)) {
+                // Assuming frontendAddress exists and has an ETH balance
+                const previousFrontendETHBalance = previousAccountSnapshot[frontendAddress] || BigInt(0);
+                const expectedFrontendETHBalanceChange = collateralFee;
+                //expect((newAccountSnapshot[frontendAddress] || BigInt(0)) - previousFrontendETHBalance).to.equal(expectedFrontendETHBalanceChange, "Frontend's ETH balance should increase by the collateral fee amount");
+            }
+        }
+
+        const expectedSBRBalanceChange = pendingSbrRewards - sbrFee;
+        if (expectedSBRBalanceChange > BigInt(0)) {
+            expect(newDFIREToken.balances[userAddress] - previousDFIREToken.balances[userAddress]).to.equal(expectedSBRBalanceChange, "User's DFIREToken balance should increase by the SBR reward amount");
+
+            if (fee > BigInt(0)) {
+                 const expectedFeeBalance = sbrFee;
+                expect(newDFIREToken.balances[frontendAddress] - previousDFIREToken.balances[frontendAddress]).to.equal(expectedFeeBalance, "Frontend's DFIREToken balance should increase by the SBR reward fee amount");
+            }
+        }
+
+        // Validate user stake update
+        if (previousUserInfo && previousUserInfo.cumulativeProductScalingFactor !== BigInt(0)) {
+            let expectedStake: bigint;
+
+            if (previousUserInfo.stakeResetCount == newStabilityPool.stakeResetCount) {
+                expectedStake = (((previousUserInfo.stake * newStabilityPool.stakeScalingFactor) * newStabilityPool.precision) /
+                    previousUserInfo.cumulativeProductScalingFactor) / newStabilityPool.precision;
+            } else {
+                const snapshot = newStabilityPool.stakeResetSnapshots[previousUserInfo.stakeResetCount];
+                expectedStake = ((previousUserInfo.stake * snapshot.scalingFactor * newStabilityPool.precision) /
+                    previousUserInfo.cumulativeProductScalingFactor) / newStabilityPool.precision;
+
+                if (previousUserInfo.stakeResetCount + 1 != newStabilityPool.stakeResetCount) {
+                    const snapshot2 = newStabilityPool.stakeResetSnapshots[previousUserInfo.stakeResetCount + 1];
+                    expectedStake = (expectedStake * snapshot2.scalingFactor) / newStabilityPool.precision;
+                } else {
+                    expectedStake = (expectedStake * newStabilityPool.stakeScalingFactor) / newStabilityPool.precision;
+                }
+            }
+
+            expect(newUserInfo.stake).to.equal(expectedStake, "User's stake should be updated correctly based on scaling factors");
+        }
 
     return true;
   }
