@@ -1,9 +1,10 @@
-import { ethers } from 'ethers';
-import { Actor, RunContext, Snapshot, Action } from '@svylabs/ilumia';
+import { Action, Actor, Snapshot } from "@svylabs/ilumina";
+import type RunContext, { ExecutionReceipt } from "@svylabs/ilumina";
+import { ethers } from "ethers";
 import { expect } from 'chai';
 
-class AddCollateralAction extends Action {
-  private contract: ethers.Contract;
+export class AddCollateralAction extends Action {
+  contract: ethers.Contract;
 
   constructor(contract: ethers.Contract) {
     super("AddCollateralAction");
@@ -14,34 +15,36 @@ class AddCollateralAction extends Action {
     context: RunContext,
     actor: Actor,
     currentSnapshot: Snapshot
-  ): Promise<[any, Record<string, any>]> {
-    const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
-    const safes = stableBaseCDPSnapshot.safes;
-
-    let safeId: bigint | undefined;
-    const safeIds = Object.keys(safes).filter(id => safes[id].collateralAmount > BigInt(0));
-
-    if (safeIds.length === 0) {
-      throw new Error("No existing safe with collateral found.");
+  ): Promise<[boolean, any, Record<string, any>]> {
+    const stableBaseCDPSnapshot: any = currentSnapshot.contractSnapshot.stableBaseCDP; // added any to avoid ts error
+    // Ensure safeId exists within the safes mapping.
+    let safeId: bigint;
+    if (stableBaseCDPSnapshot.safes && Object.keys(stableBaseCDPSnapshot.safes).length > 0) {
+        const safeIds = Object.keys(stableBaseCDPSnapshot.safes);
+        safeId = BigInt(safeIds[context.prng.next() % safeIds.length]);
+    } else {
+        // If no safes exist, return early.
+        return [false, {}, {}];
     }
 
-    safeId = BigInt(safeIds[Math.floor(context.prng.next() % safeIds.length)]);
+    // Amount should be a reasonable value based on account balance
+    const accountBalance = currentSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+    const amount = BigInt(context.prng.next()) % (accountBalance > BigInt(1000) ? BigInt(1000) : accountBalance) + BigInt(1);
 
-    // Calculate a random amount, capped by the actor's ETH balance
-    const actorBalance = currentSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-    const maxAmount = actorBalance > BigInt(1000) ? BigInt(1000) : actorBalance;
-    const amount = maxAmount > BigInt(0) ? BigInt(Math.floor(context.prng.next() % Number(maxAmount))) + BigInt(1) : BigInt(0);
+    // nearestSpotInLiquidationQueue - a random value for testing purposes.
+    const nearestSpotInLiquidationQueue = BigInt(context.prng.next()) % BigInt(100);
 
-    const nearestSpotInLiquidationQueue = BigInt(0); // Assuming zero if the list is empty. Can get head from snapshot if needed.
+    if (accountBalance < amount) {
+      return [false, {}, {}];
+    }
 
-    const actionParams = {
+    const parameters = {
       safeId: safeId,
       amount: amount,
       nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue,
-      value: amount,
     };
 
-    return [actionParams, {}];
+    return [true, parameters, {}];
   }
 
   async execute(
@@ -50,15 +53,13 @@ class AddCollateralAction extends Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<Record<string, any> | void> {
-    const { safeId, amount, nearestSpotInLiquidationQueue, value } = actionParams;
+    const { safeId, amount, nearestSpotInLiquidationQueue } = actionParams;
 
     const tx = await this.contract
       .connect(actor.account.value)
-      .addCollateral(safeId, amount, nearestSpotInLiquidationQueue, {
-        value: value,
-      });
+      .addCollateral(safeId, amount, nearestSpotInLiquidationQueue, { value: amount });
 
-    await tx.wait();
+    return { txHash: tx.hash };
   }
 
   async validate(
@@ -66,69 +67,38 @@ class AddCollateralAction extends Action {
     actor: Actor,
     previousSnapshot: Snapshot,
     newSnapshot: Snapshot,
-    actionParams: any
+    actionParams: any,
+    executionReceipt: ExecutionReceipt
   ): Promise<boolean> {
     const { safeId, amount } = actionParams;
-    const stableBaseCDPPrevious = previousSnapshot.contractSnapshot.stableBaseCDP;
-    const stableBaseCDPNew = newSnapshot.contractSnapshot.stableBaseCDP;
+    const stableBaseCDPPrevious: any = previousSnapshot.contractSnapshot.stableBaseCDP;
+    const stableBaseCDPNew: any = newSnapshot.contractSnapshot.stableBaseCDP;
 
-    const previousSafe = stableBaseCDPPrevious.safes[safeId.toString()];
-    const newSafe = stableBaseCDPNew.safes[safeId.toString()];
+    const safesOrderedForLiquidationPrevious = previousSnapshot.contractSnapshot.safesOrderedForLiquidation;
+    const safesOrderedForLiquidationNew = newSnapshot.contractSnapshot.safesOrderedForLiquidation;
 
-    const previousTotalCollateral = stableBaseCDPPrevious.totalCollateral;
-    const newTotalCollateral = stableBaseCDPNew.totalCollateral;
-    const previousTotalDebt = stableBaseCDPPrevious.totalDebt;
-    const newTotalDebt = stableBaseCDPNew.totalDebt;
+    // Safe State Validation
+    const previousSafe = stableBaseCDPPrevious.safes ? stableBaseCDPPrevious.safes[safeId.toString()] : undefined;
+    const newSafe = stableBaseCDPNew.safes ? stableBaseCDPNew.safes[safeId.toString()] : undefined;
 
-    // Collateral & Debt Updates
-    if (previousSafe && newSafe) {
-      // Check collateralAmount increased
-      expect(newSafe.collateralAmount).to.be.gte(previousSafe.collateralAmount);
-
-      // Check totalCollateral increased
-      expect(newTotalCollateral).to.be.gte(previousTotalCollateral);
-
-      if (
-        stableBaseCDPPrevious.cumulativeCollateralPerUnitCollateral !=
-        stableBaseCDPNew.cumulativeCollateralPerUnitCollateral
-      ) {
-        //If cumulativeCollateralPerUnitCollateral changes borrowedAmount, collateralAmount, totalCollateral and totalDebt are updated.
-
-        //Check if borrowed amount is updated
-        expect(newSafe.borrowedAmount).to.be.gte(previousSafe.borrowedAmount);
-
-        //Check if collateral amount is updated
-        expect(newSafe.collateralAmount).to.be.gte(previousSafe.collateralAmount);
-
-        //Check if totalCollateral is updated
-        expect(newTotalCollateral).to.be.gte(previousTotalCollateral);
-
-        // Check if totalDebt is updated
-        expect(newTotalDebt).to.be.gte(previousTotalDebt);
-      }
-
-      //Check liquidation snapshot is updated
-      const previousLiquidationSnapshot = stableBaseCDPPrevious.liquidationSnapshots && stableBaseCDPPrevious.liquidationSnapshots[safeId.toString()] ? stableBaseCDPPrevious.liquidationSnapshots[safeId.toString()] : undefined;
-      const newLiquidationSnapshot = stableBaseCDPNew.liquidationSnapshots && stableBaseCDPNew.liquidationSnapshots[safeId.toString()] ? stableBaseCDPNew.liquidationSnapshots[safeId.toString()] : undefined;
-
-      if (newLiquidationSnapshot && previousLiquidationSnapshot) {
-          expect(newLiquidationSnapshot.collateralPerCollateralSnapshot).to.be.gte(previousLiquidationSnapshot.collateralPerCollateralSnapshot);
-          expect(newLiquidationSnapshot.debtPerCollateralSnapshot).to.be.gte(previousLiquidationSnapshot.debtPerCollateralSnapshot);
-      }
-
-        // Check protocol mode if debt exceeds threshold
-        if (newTotalDebt > 1000 && stableBaseCDPPrevious.mode == 0 && stableBaseCDPNew.mode ==1) {
-          expect(stableBaseCDPNew.mode).to.equal(1);
-        }
-    } else {
-      throw new Error("Safe not found in snapshot.");
+    if (!previousSafe || !newSafe) {
+        console.warn("Safe information not found in snapshots for safeId:", safeId.toString());
+        return false;  // Or throw an error, depending on your validation needs
     }
 
-    //Account Balance validations
-    expect(newSnapshot.accountSnapshot[actor.account.address]).to.be.lte(previousSnapshot.accountSnapshot[actor.account.address] - amount);
+    expect(newSafe.collateralAmount).to.equal(previousSafe.collateralAmount + amount, "safes[safeId].collateralAmount should be increased by amount.");
+
+    // Total State Validation
+    expect(stableBaseCDPNew.totalCollateral).to.equal(stableBaseCDPPrevious.totalCollateral + amount, "totalCollateral should be increased by the amount added.");
+
+    // Account Balance Validation
+    const previousAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+    const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+    expect(newAccountBalance).to.equal(previousAccountBalance - amount, "Account balance should be decreased by amount.");
+
+
+    //Liquidation Queue state validation
 
     return true;
   }
 }
-
-export default AddCollateralAction;
