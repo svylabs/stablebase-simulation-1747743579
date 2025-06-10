@@ -1,8 +1,8 @@
 {
   "attributes": [
     {
-      "name": "Allowance",
-      "type": "view",
+      "name": "allowanceAmount",
+      "type": "uint256",
       "contract_function": "allowance",
       "parameters": [
         {
@@ -13,13 +13,13 @@
         {
           "name": "spender",
           "type": "address",
-          "reference": "accountAddress"
+          "reference": "spender"
         }
       ]
     },
     {
-      "name": "Balance",
-      "type": "view",
+      "name": "balance",
+      "type": "uint256",
       "contract_function": "balanceOf",
       "parameters": [
         {
@@ -30,44 +30,44 @@
       ]
     },
     {
-      "name": "Decimals",
-      "type": "view",
+      "name": "decimals",
+      "type": "uint8",
       "contract_function": "decimals",
       "parameters": []
     },
     {
-      "name": "Name",
-      "type": "view",
+      "name": "tokenName",
+      "type": "string",
       "contract_function": "name",
       "parameters": []
     },
     {
-      "name": "Owner",
-      "type": "view",
+      "name": "contractOwner",
+      "type": "address",
       "contract_function": "owner",
       "parameters": []
     },
     {
-      "name": "Symbol",
-      "type": "view",
+      "name": "symbol",
+      "type": "string",
       "contract_function": "symbol",
       "parameters": []
     },
     {
-      "name": "TotalBurned",
-      "type": "view",
+      "name": "totalBurnedAmount",
+      "type": "uint256",
       "contract_function": "totalBurned",
       "parameters": []
     },
     {
-      "name": "TotalSupply",
-      "type": "view",
+      "name": "totalSupplyAmount",
+      "type": "uint256",
       "contract_function": "totalSupply",
       "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface DFIDTokenSnapshot {\n  Name: string;\n  Symbol: string;\n  Decimals: number;\n  TotalSupply: bigint;\n  TotalBurned: bigint;\n  Owner: string;\n  Balance: {[accountAddress: string]: bigint};\n  Allowance: {[accountAddress: string]: {[accountAddress: string]: bigint}};\n}",
-    "interface_name": "DFIDTokenSnapshot"
+    "contract_snapshot_interface_code": "interface IDFIDTokenSnapshot {\n  allowanceAmount: bigint;\n  balance: bigint;\n  decimals: number;\n  tokenName: string;\n  contractOwner: string;\n  symbol: string;\n  totalBurnedAmount: bigint;\n  totalSupplyAmount: bigint;\n}\n",
+    "interface_name": "IDFIDTokenSnapshot"
   }
 }
