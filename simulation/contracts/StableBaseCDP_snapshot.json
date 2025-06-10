@@ -1,104 +1,8 @@
 {
   "attributes": [
     {
-      "name": "safes",
-      "type": "mapping",
-      "contract_function": "safes",
-      "parameters": [
-        {
-          "name": "",
-          "type": "uint256",
-          "reference": "_safeId"
-        }
-      ]
-    },
-    {
-      "name": "collateralLoss",
-      "type": "uint256",
-      "contract_function": "collateralLoss",
-      "parameters": []
-    },
-    {
-      "name": "cumulativeCollateralPerUnitCollateral",
-      "type": "uint256",
-      "contract_function": "cumulativeCollateralPerUnitCollateral",
-      "parameters": []
-    },
-    {
-      "name": "cumulativeDebtPerUnitCollateral",
-      "type": "uint256",
-      "contract_function": "cumulativeDebtPerUnitCollateral",
-      "parameters": []
-    },
-    {
-      "name": "debtLoss",
-      "type": "uint256",
-      "contract_function": "debtLoss",
-      "parameters": []
-    },
-    {
-      "name": "liquidationSnapshots",
-      "type": "mapping",
-      "contract_function": "liquidationSnapshots",
-      "parameters": [
-        {
-          "name": "",
-          "type": "uint256",
-          "reference": "safeId"
-        }
-      ]
-    },
-    {
-      "name": "mode",
-      "type": "uint8",
-      "contract_function": "mode",
-      "parameters": []
-    },
-    {
-      "name": "name",
-      "type": "string",
-      "contract_function": "name",
-      "parameters": []
-    },
-    {
-      "name": "dfireTokenStaking",
-      "type": "address",
-      "contract_function": "dfireTokenStaking",
-      "parameters": []
-    },
-    {
-      "name": "safesOrderedForLiquidation",
-      "type": "address",
-      "contract_function": "safesOrderedForLiquidation",
-      "parameters": []
-    },
-    {
-      "name": "safesOrderedForRedemption",
-      "type": "address",
-      "contract_function": "safesOrderedForRedemption",
-      "parameters": []
-    },
-    {
-      "name": "symbol",
-      "type": "string",
-      "contract_function": "symbol",
-      "parameters": []
-    },
-    {
-      "name": "totalCollateral",
-      "type": "uint256",
-      "contract_function": "totalCollateral",
-      "parameters": []
-    },
-    {
-      "name": "totalDebt",
-      "type": "uint256",
-      "contract_function": "totalDebt",
-      "parameters": []
-    },
-    {
-      "name": "balanceOf",
-      "type": "function",
+      "name": "TokenBalance",
+      "type": "view",
       "contract_function": "balanceOf",
       "parameters": [
         {
@@ -109,20 +13,38 @@
       ]
     },
     {
-      "name": "getApproved",
-      "type": "function",
+      "name": "CumulativeCollateralPerUnitCollateral",
+      "type": "view",
+      "contract_function": "cumulativeCollateralPerUnitCollateral",
+      "parameters": []
+    },
+    {
+      "name": "CumulativeDebtPerUnitCollateral",
+      "type": "view",
+      "contract_function": "cumulativeDebtPerUnitCollateral",
+      "parameters": []
+    },
+    {
+      "name": "DebtLoss",
+      "type": "view",
+      "contract_function": "debtLoss",
+      "parameters": []
+    },
+    {
+      "name": "ApprovedAddress",
+      "type": "view",
       "contract_function": "getApproved",
       "parameters": [
         {
           "name": "tokenId",
           "type": "uint256",
-          "reference": "safeId"
+          "reference": "_safeId"
         }
       ]
     },
     {
-      "name": "isApprovedForAll",
-      "type": "function",
+      "name": "IsApprovedForAll",
+      "type": "view",
       "contract_function": "isApprovedForAll",
       "parameters": [
         {
@@ -138,44 +60,170 @@
       ]
     },
     {
-      "name": "ownerOf",
-      "type": "function",
+      "name": "CurrentMode",
+      "type": "view",
+      "contract_function": "mode",
+      "parameters": []
+    },
+    {
+      "name": "ContractName",
+      "type": "view",
+      "contract_function": "name",
+      "parameters": []
+    },
+    {
+      "name": "ContractOwner",
+      "type": "view",
+      "contract_function": "owner",
+      "parameters": []
+    },
+    {
+      "name": "TokenOwner",
+      "type": "view",
       "contract_function": "ownerOf",
       "parameters": [
         {
           "name": "tokenId",
           "type": "uint256",
-          "reference": "safeId"
+          "reference": "_safeId"
         }
       ]
     },
     {
-      "name": "tokenURI",
-      "type": "function",
+      "name": "PriceOracleAddress",
+      "type": "view",
+      "contract_function": "priceOracle",
+      "parameters": []
+    },
+    {
+      "name": "SafeInfo",
+      "type": "view",
+      "contract_function": "safes",
+      "parameters": [
+        {
+          "name": "",
+          "type": "uint256",
+          "reference": "_safeId"
+        }
+      ]
+    },
+    {
+      "name": "LiquidationQueueAddress",
+      "type": "view",
+      "contract_function": "safesOrderedForLiquidation",
+      "parameters": []
+    },
+    {
+      "name": "RedemptionQueueAddress",
+      "type": "view",
+      "contract_function": "safesOrderedForRedemption",
+      "parameters": []
+    },
+    {
+      "name": "SbdTokenAddress",
+      "type": "view",
+      "contract_function": "sbdToken",
+      "parameters": []
+    },
+    {
+      "name": "StabilityPoolAddress",
+      "type": "view",
+      "contract_function": "stabilityPool",
+      "parameters": []
+    },
+    {
+      "name": "TokenSymbol",
+      "type": "view",
+      "contract_function": "symbol",
+      "parameters": []
+    },
+    {
+      "name": "TokenUri",
+      "type": "view",
       "contract_function": "tokenURI",
       "parameters": [
         {
           "name": "tokenId",
           "type": "uint256",
-          "reference": "safeId"
+          "reference": "_safeId"
         }
       ]
     },
     {
-      "name": "getInactiveDebtAndCollateral",
-      "type": "function",
+      "name": "TotalCollateral",
+      "type": "view",
+      "contract_function": "totalCollateral",
+      "parameters": []
+    },
+    {
+      "name": "TotalDebt",
+      "type": "view",
+      "contract_function": "totalDebt",
+      "parameters": []
+    },
+    {
+      "name": "DfireTokenStakingAddress",
+      "type": "view",
+      "contract_function": "dfireTokenStaking",
+      "parameters": []
+    },
+    {
+      "name": "LiquidationSnapshot",
+      "type": "view",
+      "contract_function": "liquidationSnapshots",
+      "parameters": [
+        {
+          "name": "",
+          "type": "uint256",
+          "reference": "_safeId"
+        }
+      ]
+    },
+    {
+      "name": "InactiveDebt",
+      "type": "view",
       "contract_function": "getInactiveDebtAndCollateral",
       "parameters": [
         {
           "name": "safeId",
           "type": "uint256",
-          "reference": "safeId"
+          "reference": "_safeId"
         }
       ]
+    },
+    {
+      "name": "InactiveCollateral",
+      "type": "view",
+      "contract_function": "getInactiveDebtAndCollateral",
+      "parameters": [
+        {
+          "name": "safeId",
+          "type": "uint256",
+          "reference": "_safeId"
+        }
+      ]
+    },
+    {
+      "name": "SbrStakingPoolCanReceiveRewards",
+      "type": "view",
+      "contract_function": "sbrStakingPoolCanReceiveRewards",
+      "parameters": []
+    },
+    {
+      "name": "StabilityPoolCanReceiveRewards",
+      "type": "view",
+      "contract_function": "stabilityPoolCanReceiveRewards",
+      "parameters": []
+    },
+    {
+      "name": "CollateralLoss",
+      "type": "view",
+      "contract_function": "collateralLoss",
+      "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface StableBaseCDPSnapshot {\n  safes: { [safeId: bigint]: Safe };\n  collateralLoss: bigint;\n  cumulativeCollateralPerUnitCollateral: bigint;\n  cumulativeDebtPerUnitCollateral: bigint;\n  debtLoss: bigint;\n  liquidationSnapshots: { [safeId: bigint]: LiquidationSnapshot };\n  mode: number;\n  name: string;\n  dfireTokenStaking: string;\n  safesOrderedForLiquidation: string;\n  safesOrderedForRedemption: string;\n  symbol: string;\n  totalCollateral: bigint;\n  totalDebt: bigint;\n  balanceOf: { [accountAddress: string]: bigint };\n  getApproved: { [safeId: bigint]: string };\n  isApprovedForAll: { [accountAddress: string]: { [accountAddress: string]: boolean } };\n  ownerOf: { [safeId: bigint]: string };\n  tokenURI: { [safeId: bigint]: string };\n  getInactiveDebtAndCollateral: { [safeId: bigint]: { debt: bigint; collateral: bigint } };\n}\n\ninterface Safe {\n  collateralAmount: bigint;\n  borrowedAmount: bigint;\n  weight: bigint;\n  totalBorrowedAmount: bigint;\n  feePaid: bigint;\n}\n\ninterface LiquidationSnapshot {\n  collateralPerCollateralSnapshot: bigint;\n  debtPerCollateralSnapshot: bigint;\n}",
+    "contract_snapshot_interface_code": "interface StableBaseCDPSnapshot {\n  tokenBalance: bigint;\n  cumulativeCollateralPerUnitCollateral: bigint;\n  cumulativeDebtPerUnitCollateral: bigint;\n  debtLoss: bigint;\n  approvedAddress: string;\n  isApprovedForAll: boolean;\n  currentMode: number;\n  contractName: string;\n  contractOwner: string;\n  tokenOwner: string;\n  priceOracleAddress: string;\n  safeInfo: {\n    collateralAmount: bigint;\n    borrowedAmount: bigint;\n    weight: bigint;\n    totalBorrowedAmount: bigint;\n    feePaid: bigint;\n  };\n  liquidationQueueAddress: string;\n  redemptionQueueAddress: string;\n  sbdTokenAddress: string;\n  stabilityPoolAddress: string;\n  tokenSymbol: string;\n  tokenUri: string;\n  totalCollateral: bigint;\n  totalDebt: bigint;\n  dfireTokenStakingAddress: string;\n  liquidationSnapshot: {\n        collateralPerCollateralSnapshot: bigint;\n        debtPerCollateralSnapshot: bigint;\n  };\n  inactiveDebt: bigint;\n  inactiveCollateral: bigint;\n  sbrStakingPoolCanReceiveRewards: boolean;\n  stabilityPoolCanReceiveRewards: boolean;\n  collateralLoss: bigint;\n}",
     "interface_name": "StableBaseCDPSnapshot"
   }
 }
