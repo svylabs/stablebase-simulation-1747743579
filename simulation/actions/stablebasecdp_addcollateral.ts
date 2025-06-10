@@ -4,101 +4,125 @@ import { ethers } from "ethers";
 import { expect } from 'chai';
 
 export class AddCollateralAction extends Action {
-  contract: ethers.Contract;
+    private contract: ethers.Contract;
 
-  constructor(contract: ethers.Contract) {
-    super("AddCollateralAction");
-    this.contract = contract;
-  }
-
-  async initialize(
-    context: RunContext,
-    actor: Actor,
-    currentSnapshot: Snapshot
-  ): Promise<[boolean, any, Record<string, any>]> {
-    const stableBaseCDPSnapshot: any = currentSnapshot.contractSnapshot.stableBaseCDP; // added any to avoid ts error
-    // Ensure safeId exists within the safes mapping.
-    let safeId: bigint;
-    if (stableBaseCDPSnapshot.safes && Object.keys(stableBaseCDPSnapshot.safes).length > 0) {
-        const safeIds = Object.keys(stableBaseCDPSnapshot.safes);
-        safeId = BigInt(safeIds[context.prng.next() % safeIds.length]);
-    } else {
-        // If no safes exist, return early.
-        return [false, {}, {}];
+    constructor(contract: ethers.Contract) {
+        super("AddCollateralAction");
+        this.contract = contract;
     }
 
-    // Amount should be a reasonable value based on account balance
-    const accountBalance = currentSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-    const amount = BigInt(context.prng.next()) % (accountBalance > BigInt(1000) ? BigInt(1000) : accountBalance) + BigInt(1);
+    async initialize(
+        context: RunContext,
+        actor: Actor,
+        currentSnapshot: Snapshot
+    ): Promise<[boolean, any, Record<string, any>]> {
+        const safeId = BigInt(actor.identifiers.safeId || 0);
 
-    // nearestSpotInLiquidationQueue - a random value for testing purposes.
-    const nearestSpotInLiquidationQueue = BigInt(context.prng.next()) % BigInt(100);
+        if (!currentSnapshot.contractSnapshot.stableBaseCDP.safes[Number(safeId)]) {
+            console.log("Safe does not exist.");
+            return [false, {}, {}];
+        }
 
-    if (accountBalance < amount) {
-      return [false, {}, {}];
+        const previousSafe = currentSnapshot.contractSnapshot.stableBaseCDP.safes[Number(safeId)];
+        const maxCollateralAmount = currentSnapshot.accountSnapshot[actor.account.address] || 0n;
+        if (maxCollateralAmount <= 0n) {
+            console.log("Not enough ETH balance to add collateral.");
+            return [false, {}, {}];
+        }
+
+        // Limit the amount to avoid potential overflows. A more sophisticated approach might be needed.
+        const amount = BigInt(Math.floor(context.prng.next() % Number(maxCollateralAmount / 2n)) + 1); // Ensure amount is > 0 and less than half of the available balance
+        const nearestSpotInLiquidationQueue = BigInt(Math.floor(context.prng.next() % 10)); // Random value for now
+
+        const actionParams = {
+            safeId: safeId,
+            amount: amount,
+            nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue,
+            value: amount // msg.value
+        };
+
+        return [true, actionParams, {}];
     }
 
-    const parameters = {
-      safeId: safeId,
-      amount: amount,
-      nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue,
-    };
-
-    return [true, parameters, {}];
-  }
-
-  async execute(
-    context: RunContext,
-    actor: Actor,
-    currentSnapshot: Snapshot,
-    actionParams: any
-  ): Promise<Record<string, any> | void> {
-    const { safeId, amount, nearestSpotInLiquidationQueue } = actionParams;
-
-    const tx = await this.contract
-      .connect(actor.account.value)
-      .addCollateral(safeId, amount, nearestSpotInLiquidationQueue, { value: amount });
-
-    return { txHash: tx.hash };
-  }
-
-  async validate(
-    context: RunContext,
-    actor: Actor,
-    previousSnapshot: Snapshot,
-    newSnapshot: Snapshot,
-    actionParams: any,
-    executionReceipt: ExecutionReceipt
-  ): Promise<boolean> {
-    const { safeId, amount } = actionParams;
-    const stableBaseCDPPrevious: any = previousSnapshot.contractSnapshot.stableBaseCDP;
-    const stableBaseCDPNew: any = newSnapshot.contractSnapshot.stableBaseCDP;
-
-    const safesOrderedForLiquidationPrevious = previousSnapshot.contractSnapshot.safesOrderedForLiquidation;
-    const safesOrderedForLiquidationNew = newSnapshot.contractSnapshot.safesOrderedForLiquidation;
-
-    // Safe State Validation
-    const previousSafe = stableBaseCDPPrevious.safes ? stableBaseCDPPrevious.safes[safeId.toString()] : undefined;
-    const newSafe = stableBaseCDPNew.safes ? stableBaseCDPNew.safes[safeId.toString()] : undefined;
-
-    if (!previousSafe || !newSafe) {
-        console.warn("Safe information not found in snapshots for safeId:", safeId.toString());
-        return false;  // Or throw an error, depending on your validation needs
+    async execute(
+        context: RunContext,
+        actor: Actor,
+        currentSnapshot: Snapshot,
+        actionParams: any
+    ): Promise<Record<string, any> | void> {
+        const { safeId, amount, nearestSpotInLiquidationQueue, value } = actionParams;
+        const tx = await this.contract.connect(actor.account.value).addCollateral(
+            safeId,
+            amount,
+            nearestSpotInLiquidationQueue,
+            { value: value }
+        );
+        await tx.wait();
     }
 
-    expect(newSafe.collateralAmount).to.equal(previousSafe.collateralAmount + amount, "safes[safeId].collateralAmount should be increased by amount.");
+    async validate(
+        context: RunContext,
+        actor: Actor,
+        previousSnapshot: Snapshot,
+        newSnapshot: Snapshot,
+        actionParams: any,
+        executionReceipt: ExecutionReceipt
+    ): Promise<boolean> {
+        const { safeId, amount } = actionParams;
 
-    // Total State Validation
-    expect(stableBaseCDPNew.totalCollateral).to.equal(stableBaseCDPPrevious.totalCollateral + amount, "totalCollateral should be increased by the amount added.");
+        const previousSafe = previousSnapshot.contractSnapshot.stableBaseCDP.safes[Number(safeId)] || {
+            collateralAmount: 0n,
+            borrowedAmount: 0n,
+            totalBorrowedAmount: 0n,
+            feePaid: 0n,
+            weight: 0n
+        };
+        const newSafe = newSnapshot.contractSnapshot.stableBaseCDP.safes[Number(safeId)] || {
+            collateralAmount: 0n,
+            borrowedAmount: 0n,
+            totalBorrowedAmount: 0n,
+            feePaid: 0n,
+            weight: 0n
+        };
 
-    // Account Balance Validation
-    const previousAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-    const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-    expect(newAccountBalance).to.equal(previousAccountBalance - amount, "Account balance should be decreased by amount.");
+        const previousTotalCollateral = previousSnapshot.contractSnapshot.stableBaseCDP.totalCollateral;
+        const newTotalCollateral = newSnapshot.contractSnapshot.stableBaseCDP.totalCollateral;
+
+         const previousTotalDebt = previousSnapshot.contractSnapshot.stableBaseCDP.totalDebt;
+        const newTotalDebt = newSnapshot.contractSnapshot.stableBaseCDP.totalDebt;
 
 
-    //Liquidation Queue state validation
+        // Collateral Management Validation
+        expect(newSafe.collateralAmount).to.be.gte(previousSafe.collateralAmount + amount, "Collateral amount should increase by amount or more due to cumulative updates");
+        expect(newTotalCollateral).to.be.gte(previousTotalCollateral + amount, "Total collateral should increase by amount or more due to cumulative updates");
 
-    return true;
-  }
+        //Borrowed amount can increase due to cumulative updates
+        expect(newSafe.borrowedAmount).to.be.gte(previousSafe.borrowedAmount, "Borrowed amount can increase due to cumulative updates");
+
+
+        // Input Validation
+        expect(executionReceipt.gasUsed).to.be.greaterThan(0, "Gas should be used");
+
+        // ETH Balance Validation
+        const previousEthBalance = previousSnapshot.accountSnapshot[actor.account.address] || 0n;
+        const newEthBalance = newSnapshot.accountSnapshot[actor.account.address] || 0n;
+        const gasCost = executionReceipt.gasUsed * executionReceipt.effectiveGasPrice;
+        expect(newEthBalance).to.equal(previousEthBalance - amount - gasCost, "ETH balance should decrease by amount and gas cost");
+
+        //Liquidation Snapshot validation. DebtPerCollateralSnapshot should match cumulativeDebtPerUnitCollateral.
+        expect(newSnapshot.contractSnapshot.stableBaseCDP.debtPerCollateralSnapshot[Number(safeId)]).to.equal(newSnapshot.contractSnapshot.stableBaseCDP.cumulativeDebtPerUnitCollateral, 'debtPerCollateralSnapshot must match cumulativeDebtPerUnitCollateral');
+        expect(newSnapshot.contractSnapshot.stableBaseCDP.collateralPerCollateralSnapshot[Number(safeId)]).to.equal(newSnapshot.contractSnapshot.stableBaseCDP.cumulativeCollateralPerUnitCollateral, 'collateralPerCollateralSnapshot must match cumulativeCollateralPerUnitCollateral');
+
+
+        //Protocol mode validation
+         if (previousSnapshot.contractSnapshot.stableBaseCDP.PROTOCOL_MODE === 'BOOTSTRAP') {
+            const bootstrapModeDebtThreshold = 1000;  // Assuming this value, replace with actual snapshot if available
+
+            if (newSnapshot.contractSnapshot.stableBaseCDP.totalDebt > bootstrapModeDebtThreshold) {
+                expect(newSnapshot.contractSnapshot.stableBaseCDP.PROTOCOL_MODE).to.equal('NORMAL', 'protocol mode should be NORMAL');
+            }
+        }
+
+        return true;
+    }
 }
