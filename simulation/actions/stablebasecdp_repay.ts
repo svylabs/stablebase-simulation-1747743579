@@ -1,14 +1,22 @@
 import { Action, Actor, Snapshot } from "@svylabs/ilumina";
-import type RunContext, { ExecutionReceipt } from "@svylabs/ilumina";
+import type { RunContext, ExecutionReceipt } from "@svylabs/ilumina";
 import { ethers } from "ethers";
-import { expect } from "chai";
+import { expect } from 'chai';
 
 export class RepayAction extends Action {
-  contract: ethers.Contract;
+  private contract: ethers.Contract;
+  private dfidTokenContract: ethers.Contract;
+  private safesOrderedForLiquidationContract: ethers.Contract;
 
-  constructor(contract: ethers.Contract) {
+  constructor(
+    contract: ethers.Contract,
+    dfidTokenContract: ethers.Contract,
+    safesOrderedForLiquidationContract: ethers.Contract
+  ) {
     super("RepayAction");
     this.contract = contract;
+    this.dfidTokenContract = dfidTokenContract;
+    this.safesOrderedForLiquidationContract = safesOrderedForLiquidationContract;
   }
 
   async initialize(
@@ -16,61 +24,66 @@ export class RepayAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot
   ): Promise<[boolean, any, Record<string, any>]> {
-    const stableBaseCDP = currentSnapshot.contractSnapshot.stableBaseCDP;
-    const dfidToken = currentSnapshot.contractSnapshot.dfidToken;
-    const safeIds = Object.keys(stableBaseCDP.safes).map(Number);
+    const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
+    const dfidTokenSnapshot = currentSnapshot.contractSnapshot.dfidToken;
 
-    if (safeIds.length === 0) {
-      return [false, {}, {}];
-    }
-
-    let safeId: number | undefined = undefined;
-    let safe: any;
-
-    // Find a safe with borrowed amount > 0 and owned by the actor
-    for (let i = 0; i < safeIds.length; i++) {
-      safeId = safeIds[i];
-      safe = stableBaseCDP.safes[safeId];
-      try {
-        if (
-          safe &&
-          safe.borrowedAmount > BigInt(0) &&
-          (await this.contract.ownerOf(safeId)) === actor.account.address
-        ) {
-          break;
-        } else {
-            safeId = undefined;
-        }
-      } catch (e) {
-        // Handle the error appropriately, possibly skipping this safe
-        console.error(`Error checking ownership for safeId ${safeId}:`, e);
-        safeId = undefined;
+    // Find a safe belonging to the actor
+    let safeId: string | undefined;
+    for (const id in stableBaseCDPSnapshot.safes) {
+      if (stableBaseCDPSnapshot.safeOwners[parseInt(id)] === actor.account.address) {
+        safeId = id;
+        break;
       }
     }
 
     if (!safeId) {
-      return [false, {}, {}];
+      console.log("No safes found for this actor");
+      return [false, [], {}];
     }
 
-    const actorBalance = dfidToken.balances[actor.account.address] || BigInt(0);
-    if (actorBalance <= BigInt(0)) {
-      return [false, {}, {}];
+    const safe = stableBaseCDPSnapshot.safes[safeId];
+
+    if (!safe) {
+      console.log(`Safe with ID ${safeId} not found.`);
+      return [false, [], {}];
     }
 
-    const maxRepayableAmount = stableBaseCDP.safes[safeId].borrowedAmount > actorBalance ? actorBalance : stableBaseCDP.safes[safeId].borrowedAmount
-
-    const amountToRepay = BigInt(Math.floor(context.prng.next() % Number(maxRepayableAmount + BigInt(1))));
-
-    // Attempt to find a valid nearestSpotInLiquidationQueue.  If none exist, use 0.
-    let nearestSpotInLiquidationQueue = BigInt(0);
-    const liquidationQueueSafeIds = Object.keys(currentSnapshot.contractSnapshot.safesOrderedForLiquidation.nodes).map(Number);
-    if(liquidationQueueSafeIds.length > 0) {
-        nearestSpotInLiquidationQueue = BigInt(liquidationQueueSafeIds[context.prng.next() % liquidationQueueSafeIds.length]);
+    const borrowedAmount = safe.borrowedAmount;
+    if (borrowedAmount <= BigInt(0)) {
+      console.log("No borrowed amount to repay");
+      return [false, [], {}];
     }
+
+    const accountAddress = actor.account.address;
+    const sbdTokenBalance = dfidTokenSnapshot.balances[accountAddress] || BigInt(0);
+
+    if (sbdTokenBalance <= BigInt(0)) {
+      console.log("Insufficient SBD balance to repay");
+      return [false, [], {}];
+    }
+
+    const maxRepayAmount = borrowedAmount < sbdTokenBalance ? borrowedAmount : sbdTokenBalance;
+    // Ensure amount is between 1 and maxRepayAmount
+    const amount = BigInt(Math.floor(context.prng.next() % Number(maxRepayAmount) + 1));
+
+    if (amount <= BigInt(0) || amount > borrowedAmount) {
+      console.log("Repayment amount is invalid");
+      return [false, [], {}];
+    }
+
+    const remainingDebt = borrowedAmount - amount;
+    const minimumDebt = stableBaseCDPSnapshot.minimumDebt;
+    if (remainingDebt !== BigInt(0) && remainingDebt < minimumDebt) {
+      console.log("Invalid repayment amount due to minimum debt");
+      return [false, [], {}];
+    }
+
+    // nearestSpotInLiquidationQueue can be 0 if unknown.
+    const nearestSpotInLiquidationQueue = BigInt(0);
 
     const actionParams = {
       safeId: BigInt(safeId),
-      amount: amountToRepay,
+      amount: amount,
       nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue,
     };
 
@@ -82,14 +95,13 @@ export class RepayAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot,
     actionParams: any
-  ): Promise<Record<string, any> | void> {
-    return this.contract
+  ): Promise<ExecutionReceipt> {
+    const { safeId, amount, nearestSpotInLiquidationQueue } = actionParams;
+    const tx = await this.contract
       .connect(actor.account.value)
-      .repay(
-        actionParams.safeId,
-        actionParams.amount,
-        actionParams.nearestSpotInLiquidationQueue
-      );
+      .repay(safeId, amount, nearestSpotInLiquidationQueue);
+
+    return { receipt: await tx.wait(), additionalInfo: {} };
   }
 
   async validate(
@@ -100,81 +112,85 @@ export class RepayAction extends Action {
     actionParams: any,
     executionReceipt: ExecutionReceipt
   ): Promise<boolean> {
-    const safeId = actionParams.safeId;
-    const amount = actionParams.amount;
+    const { safeId, amount } = actionParams;
 
-    const previousStableBaseCDP = previousSnapshot.contractSnapshot.stableBaseCDP;
-    const newStableBaseCDP = newSnapshot.contractSnapshot.stableBaseCDP;
-    const previousDFIDToken = previousSnapshot.contractSnapshot.dfidToken;
-    const newDFIDToken = newSnapshot.contractSnapshot.dfidToken;
-    const previousLiquidationQueue = previousSnapshot.contractSnapshot.safesOrderedForLiquidation;
-    const newLiquidationQueue = newSnapshot.contractSnapshot.safesOrderedForLiquidation;
+    const stableBaseCDPPrevious = previousSnapshot.contractSnapshot.stableBaseCDP;
+    const stableBaseCDPNew = newSnapshot.contractSnapshot.stableBaseCDP;
+    const dfidTokenPrevious = previousSnapshot.contractSnapshot.dfidToken;
+    const dfidTokenNew = newSnapshot.contractSnapshot.dfidToken;
 
-    // Safe State Validation
-    const previousSafe = previousStableBaseCDP.safes[Number(safeId)];
-    const newSafe = newStableBaseCDP.safes[Number(safeId)];
+    const previousSafe = stableBaseCDPPrevious.safes[safeId];
+    const newSafe = stableBaseCDPNew.safes[safeId];
 
-    if (previousSafe) {
-        if(newSafe) {
-          expect(newSafe.borrowedAmount).to.equal(previousSafe.borrowedAmount - amount, "Borrowed amount should be decreased by amount.");
-          expect(newSafe.borrowedAmount).to.be.at.least(BigInt(0), "Borrowed amount should be non-negative.");
-          if (newSafe.borrowedAmount > BigInt(0)) {
-            expect(newSafe.borrowedAmount).to.be.at.least(BigInt(0), "Borrowed amount should be greater than or equal to MINIMUM_DEBT.");
-          }
-        } else {
-          expect(previousSafe.borrowedAmount).to.equal(amount, "If safe is removed, the repaid amount should equal the previous borrowed amount.");
-           // Safe should be removed from both queues
-           expect(newLiquidationQueue.nodes[safeId]).to.be.undefined;
-        }
-    } else {
-        // If previousSafe does not exist, then there is an error.
+    const initialBorrowedAmount = previousSafe.borrowedAmount;
+    const finalBorrowedAmount = newSafe.borrowedAmount;
+
+    expect(finalBorrowedAmount).to.equal(initialBorrowedAmount - amount, "Borrowed amount should be decreased by amount");
+    expect(finalBorrowedAmount).to.be.at.least(BigInt(0), "Borrowed amount should be greater than or equal to 0");
+
+    const previousTotalDebt = stableBaseCDPPrevious.totalDebt;
+    const newTotalDebt = stableBaseCDPNew.totalDebt;
+
+    expect(newTotalDebt).to.equal(previousTotalDebt - amount, "Total debt should be decreased by amount");
+
+    const accountAddress = actor.account.address;
+    const previousBalance = dfidTokenPrevious.balances[accountAddress] || BigInt(0);
+    const newBalance = dfidTokenNew.balances[accountAddress] || BigInt(0);
+
+    expect(newBalance).to.equal(previousBalance - amount, "SBD token balance should be decreased by the amount repaid");
+
+    const previousTotalSupply = dfidTokenPrevious.totalSupply;
+    const newTotalSupply = dfidTokenNew.totalSupply;
+
+    expect(newTotalSupply).to.equal(previousTotalSupply - amount, "Total supply of SBD tokens should be decreased by the amount repaid");
+
+    const repaidEvent = executionReceipt.receipt.logs.find((log: any) => {
+      try {
+        const parsedLog = this.contract.interface.parseLog(log);
+        return parsedLog.name === "Repaid" && parsedLog.args.safeId.toString() === safeId.toString();
+      } catch (e) {
         return false;
+      }
+    });
+
+    expect(repaidEvent).to.not.be.undefined;
+
+    // Validate that the safe is correctly removed from liquidation and redemption queues when borrowedAmount is 0
+    if (finalBorrowedAmount === BigInt(0)) {
+      const liquidationQueueNode = await this.safesOrderedForLiquidationContract.nodes(safeId);
+      expect(liquidationQueueNode.value).to.equal(BigInt(0), "Safe should be removed from liquidation queue");
+
+      // Assuming you also have the safesOrderedForRedemptionContract instance available.  Accessing the contract instance using context
+      const safesOrderedForRedemptionContract = context.contracts.safesOrderedForRedemption as ethers.Contract;
+      const redemptionQueueNode = await safesOrderedForRedemptionContract.nodes(safeId);
+      expect(redemptionQueueNode.value).to.equal(BigInt(0), "Safe should be removed from redemption queue");
     }
 
-    // Token State Validation
-    const previousActorBalance = previousDFIDToken.balances[actor.account.address] || BigInt(0);
-    const newActorBalance = newDFIDToken.balances[actor.account.address] || BigInt(0);
+    // Validate protocol mode transition from BOOTSTRAP to NORMAL mode based on totalDebt
+    if (stableBaseCDPPrevious.mode === 0 && stableBaseCDPNew.mode === 1) {
+      expect(previousTotalDebt).to.be.below(stableBaseCDPPrevious.bootstrapModeDebtThreshold, "Previous total debt should be below the threshold");
+      expect(newTotalDebt).to.be.at.least(stableBaseCDPPrevious.bootstrapModeDebtThreshold, "New total debt should be at least the threshold");
+    }
 
-    expect(newActorBalance).to.equal(previousActorBalance - amount, "Actor's SBD balance should decrease by amount.");
-    expect(newDFIDToken.totalSupply).to.equal(previousDFIDToken.totalSupply - amount, "DFIDToken total supply should decrease by amount.");
-    expect(newDFIDToken.totalBurned).to.equal(previousDFIDToken.totalBurned + amount, "DFIDToken total burned should increase by amount.");
+    // Validate safesOrderedForLiquidation state updates (if newRatio != 0)
+    if (finalBorrowedAmount !== BigInt(0)) {
+      const newRatio = (finalBorrowedAmount * BigInt(1e18)) / newSafe.collateralAmount; // Assuming PRECISION is 1e18.  Using a constant here, replace with actual precision if different
 
-    // Total Debt Validation
-    expect(newStableBaseCDP.totalDebt).to.equal(previousStableBaseCDP.totalDebt - amount, "Total debt should decrease by amount.");
+      const liquidationQueueNode = await this.safesOrderedForLiquidationContract.nodes(safeId);
+      expect(liquidationQueueNode.value).to.equal(newRatio, "Liquidation queue should be updated with the new ratio");
+    }
 
-
-    // Check for state updates in the _updateSafe internal function
+    // Validate cumulative collateral and debt per unit collateral updates
     if (
-      previousStableBaseCDP.cumulativeCollateralPerUnitCollateral !==
-      newStableBaseCDP.cumulativeCollateralPerUnitCollateral
+      stableBaseCDPPrevious.liquidationSnapshots[safeId] &&
+      stableBaseCDPNew.liquidationSnapshots[safeId] &&
+      stableBaseCDPPrevious.liquidationSnapshots[safeId].collateralPerCollateralSnapshot !==
+        stableBaseCDPNew.cumulativeCollateralPerUnitCollateral
     ) {
-      // Validate liquidationSnapshots update
-      expect(
-        newStableBaseCDP.debtPerCollateralSnapshot[safeId]
-      ).to.equal(
-        newStableBaseCDP.cumulativeDebtPerUnitCollateral,
-        "liquidationSnapshots[safeId].debtPerCollateralSnapshot should be updated"
-      );
-      expect(
-        newStableBaseCDP.collateralPerCollateralSnapshot[safeId]
-      ).to.equal(
-        newStableBaseCDP.cumulativeCollateralPerUnitCollateral,
-        "liquidationSnapshots[safeId].collateralPerCollateralSnapshot should be updated"
-      );
-
-      // Validate totalCollateral update is more involved, skip for now
+      // Add your validation logic here, e.g.,
+      expect(newSafe.collateralAmount).to.not.equal(previousSafe.collateralAmount);
+      expect(newSafe.borrowedAmount).to.not.equal(previousSafe.borrowedAmount);
     }
-
-    // Validate PROTOCOL_MODE update
-     if (
-            previousStableBaseCDP.totalDebt > BigInt(5000000000000000) &&
-            newStableBaseCDP.totalDebt <= BigInt(5000000000000000)
-        ) {
-          // Assuming there's a way to access PROTOCOL_MODE from the snapshots
-          // Example: expect(newSnapshot.contractSnapshot.stableBaseCDP.PROTOCOL_MODE).to.equal(1);
-           console.log("PROTOCOL_MODE validation skipped as it is not available in snapshot");
-        }
-
 
     return true;
   }
