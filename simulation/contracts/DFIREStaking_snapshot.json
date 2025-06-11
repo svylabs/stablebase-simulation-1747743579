@@ -1,20 +1,20 @@
 {
   "attributes": [
     {
-      "name": "precision",
+      "name": "PrecisionValue",
       "type": "uint256",
       "contract_function": "PRECISION",
       "parameters": []
     },
     {
-      "name": "rewardSenderActive",
+      "name": "IsRewardSenderActive",
       "type": "bool",
       "contract_function": "rewardSenderActive",
       "parameters": []
     },
     {
-      "name": "stakes",
-      "type": "struct",
+      "name": "StakeInfo",
+      "type": "tuple",
       "contract_function": "stakes",
       "parameters": [
         {
@@ -25,50 +25,26 @@
       ]
     },
     {
-      "name": "totalCollateralPerToken",
+      "name": "TotalCollateralPerTokenValue",
       "type": "uint256",
       "contract_function": "totalCollateralPerToken",
       "parameters": []
     },
     {
-      "name": "totalRewardPerToken",
+      "name": "TotalRewardPerTokenValue",
       "type": "uint256",
       "contract_function": "totalRewardPerToken",
       "parameters": []
     },
     {
-      "name": "totalStake",
+      "name": "TotalStakeValue",
       "type": "uint256",
       "contract_function": "totalStake",
       "parameters": []
-    },
-    {
-      "name": "userStakeDetails",
-      "type": "struct",
-      "contract_function": "getStake",
-      "parameters": [
-        {
-          "name": "user",
-          "type": "address",
-          "reference": "accountAddress"
-        }
-      ]
-    },
-    {
-      "name": "userPendingReward",
-      "type": "uint256",
-      "contract_function": "userPendingReward",
-      "parameters": [
-        {
-          "name": "user",
-          "type": "address",
-          "reference": "accountAddress"
-        }
-      ]
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface DFIREStakingSnapshot {\n  precision: bigint;\n  rewardSenderActive: boolean;\n  stakes: { [accountAddress: string]: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint } };\n  totalCollateralPerToken: bigint;\n  totalRewardPerToken: bigint;\n  totalStake: bigint;\n  userStakeDetails: { [accountAddress: string]: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint } };\n  userPendingReward: { [accountAddress: string]: [bigint, bigint] };\n}",
+    "contract_snapshot_interface_code": "interface DFIREStakingSnapshot {\n  precisionValue: bigint;\n  isRewardSenderActive: boolean;\n  stakes: { [accountAddress: string]: StakeInfo };\n  totalCollateralPerTokenValue: bigint;\n  totalRewardPerTokenValue: bigint;\n  totalStakeValue: bigint;\n}\n\ninterface StakeInfo {\n  stake: bigint;\n  rewardSnapshot: bigint;\n  collateralSnapshot: bigint;\n}",
     "interface_name": "DFIREStakingSnapshot"
   }
 }
