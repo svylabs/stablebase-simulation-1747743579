@@ -1,7 +1,7 @@
 {
   "attributes": [
     {
-      "name": "allowanceAmount",
+      "name": "Allowance",
       "type": "uint256",
       "contract_function": "allowance",
       "parameters": [
@@ -18,7 +18,7 @@
       ]
     },
     {
-      "name": "tokenBalance",
+      "name": "Balance",
       "type": "uint256",
       "contract_function": "balanceOf",
       "parameters": [
@@ -30,50 +30,44 @@
       ]
     },
     {
-      "name": "decimalPlaces",
+      "name": "Decimals",
       "type": "uint8",
       "contract_function": "decimals",
       "parameters": []
     },
     {
-      "name": "tokenName",
+      "name": "Name",
       "type": "string",
       "contract_function": "name",
       "parameters": []
     },
     {
-      "name": "tokenSymbol",
-      "type": "string",
-      "contract_function": "symbol",
-      "parameters": []
-    },
-    {
-      "name": "burnedTokens",
-      "type": "uint256",
-      "contract_function": "totalBurned",
-      "parameters": []
-    },
-    {
-      "name": "totalTokens",
-      "type": "uint256",
-      "contract_function": "totalSupply",
-      "parameters": []
-    },
-    {
-      "name": "ownerAddress",
+      "name": "Owner",
       "type": "address",
       "contract_function": "owner",
       "parameters": []
     },
     {
-      "name": "stabilityPoolAddress",
-      "type": "address",
-      "contract_function": "N/A",
+      "name": "Symbol",
+      "type": "string",
+      "contract_function": "symbol",
+      "parameters": []
+    },
+    {
+      "name": "TotalBurned",
+      "type": "uint256",
+      "contract_function": "totalBurned",
+      "parameters": []
+    },
+    {
+      "name": "TotalSupply",
+      "type": "uint256",
+      "contract_function": "totalSupply",
       "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface DFIRETokenSnapshot {\n  allowanceAmounts: { [owner: string]: { [spender: string]: bigint } };\n  tokenBalances: { [account: string]: bigint };\n  decimalPlaces: bigint;\n  tokenName: string;\n  tokenSymbol: string;\n  burnedTokens: bigint;\n  totalTokens: bigint;\n  ownerAddress: string;\n  stabilityPoolAddress: string;\n}\n",
+    "contract_snapshot_interface_code": "interface DFIRETokenSnapshot {\n  allowances: { [owner: string]: { [spender: string]: bigint } };\n  balances: { [account: string]: bigint };\n  decimals: bigint;\n  name: string;\n  owner: string;\n  symbol: string;\n  totalBurned: bigint;\n  totalSupply: bigint;\n}",
     "interface_name": "DFIRETokenSnapshot"
   }
 }
