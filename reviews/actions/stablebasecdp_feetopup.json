@@ -1,61 +1,71 @@
 {
   "reviews": [
     {
-      "line_number": 26,
-      "description": "The initialize function should check if the actor owns more than one safe. If they do, the code currently selects the first safe found which might not be the intention.",
+      "line_number": 27,
+      "description": "Inefficiently iterates through all safes to find one owned by the actor. This is slow for large numbers of safes.",
       "function_name": "initialize",
-      "suggested_fix": "Consider adding logic to allow the user to specify which safe to top up if they own multiple safes, perhaps by introducing a parameter to the initialize function or relying on an external actor state. For example, the actionParams could include safeId."
+      "suggested_fix": "Use a mapping of owner to safeId for direct access. If on-chain mapping isn't feasible, use an off-chain index."
     },
     {
-      "line_number": 33,
-      "description": "The initialize function relies on `console.log` for error reporting. This isn't ideal for automated systems.",
+      "line_number": 36,
+      "description": "`console.log` is used for logging, which is not ideal for production.",
       "function_name": "initialize",
-      "suggested_fix": "Throw an error or return a specific error code/message that can be handled by the calling system instead of using `console.log`. For example: `return [false, {}, { error: 'No safe owned by the actor' }];` This applies to lines 33, 40, 46 and 57."
+      "suggested_fix": "Replace `console.log` with a more robust logging mechanism, like emitting an event."
     },
     {
-      "line_number": 54,
-      "description": "The calculation of `fee` in initialize doesn't account for possible division by zero if `safe.borrowedAmount` is 0.",
+      "line_number": 57,
+      "description": "`nearestSpotInRedemptionQueue` is hardcoded to 0, which might not be optimal. The pre-execution rule suggests using an existing safeId in the redemption queue.",
       "function_name": "initialize",
-      "suggested_fix": "Add a check to ensure `safe.borrowedAmount` is not zero before calculating the fee. If it is zero, return an error state. For example: `if (safe.borrowedAmount === 0n) { return [false, {}, { error: 'Safe borrowed amount is zero' }]; }`"
+      "suggested_fix": "Dynamically determine `nearestSpotInRedemptionQueue` by querying the `OrderedDoublyLinkedList` contract."
     },
     {
-      "line_number": 61,
-      "description": "The `nearestSpotInRedemptionQueue` parameter in `execute` is always set to 0 in `initialize`. This effectively disables the feature of providing a hint.",
+      "line_number": 59,
+      "description": "The `fee` calculation uses different `borrowedAmount` in `initialize` and `validate`. `initialize` uses `safeInfo.borrowedAmount`, while `validate` uses `newSafeInfo.borrowedAmount`.",
       "function_name": "initialize",
-      "suggested_fix": "Remove the hardcoding of `nearestSpotInRedemptionQueue = 0n;`. The value should be taken from the snapshot data or actor state. Additionally, validate that the provided `nearestSpotInRedemptionQueue` is indeed a valid id in the linked list. If not provided in actionParams, set a default value (e.g., 0n)."
+      "suggested_fix": "Use `stableBaseCDPSnapshot.safes[safeId.toString()].borrowedAmount` to calculate `fee` in the `initialize` method."
     },
     {
-      "line_number": 79,
-      "description": "Consider adding error handling around the contract execution in the `execute` function.",
-      "function_name": "execute",
-      "suggested_fix": "Wrap the contract call in a try-catch block to handle potential errors during execution, such as the transaction reverting. Return an error ExecutionReceipt if an error occurs, including the error message. For example: `try { ... } catch (error: any) { return { receipt: null, error: error.message }; }`"
-    },
-    {
-      "line_number": 90,
-      "description": "The validate function doesn't check for potential updates to `borrowedAmount` based on `cumulativeDebtPerUnitCollateral` and `liquidationSnapshot` difference.",
+      "line_number": 117,
+      "description": "Missing validation of updates to safe's `collateralAmount` and `borrowedAmount` based on `cumulativeCollateralPerUnitCollateral` and `cumulativeDebtPerUnitCollateral`.",
       "function_name": "validate",
-      "suggested_fix": "Implement the logic to compare `liquidationSnapshot.collateralPerCollateralSnapshot` and `cumulativeCollateralPerUnitCollateral` in both previous and new snapshots, and validate the change in `borrowedAmount` accordingly if a difference exists. Retrieve liquidation snapshots from the snapshot using `const previousLiquidationSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshots[safeId.toString()];` and `const newLiquidationSnapshot = newSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshots[safeId.toString()];`."
+      "suggested_fix": "Check that `newSafeInfo.collateralAmount` and `newSafeInfo.borrowedAmount` are updated correctly. Fetch previous values from `previousStableBaseCDPSnapshot` and compare the differences against expected values."
     },
     {
-      "line_number": 167,
-      "description": "Validate that FeeDistributed event's parameters are correct.",
+      "line_number": 115,
+      "description": "The `validate` method calculates the fee based on `newSafeInfo.borrowedAmount`. It should also consider `previousSafeInfo.borrowedAmount` because of the `_updateSafe` function.",
       "function_name": "validate",
-      "suggested_fix": "Parse the FeeDistributed event and validate the values of `sbrStakersFee`, `stabilityPoolFee` and `canRefund`. Check that their sum equals `fee` and validate that these amounts were correctly distributed to the DFIREStaking and StabilityPool contracts. Retrieve the contract addresses from the context: `const dfireStakingAddress = (context.contracts.dfireTokenStaking as any).target;` and `const stabilityPoolAddress = (context.contracts.stabilityPool as any).target;`. Then check `newDFIDTokenSnapshot.balances[dfireStakingAddress]` and `newDFIDTokenSnapshot.balances[stabilityPoolAddress]`."
+      "suggested_fix": "Calculate fee based on both `previousSafeInfo.borrowedAmount` and `newSafeInfo.borrowedAmount` to ensure proper fee calculation and validate the fee difference."
     },
     {
-      "line_number": 136,
-      "description": "The validation for redemption queue can be improved.",
+      "line_number": 137,
+      "description": "Missing validation for events emitted during execution (`FeeTopup`, `RedemptionQueueUpdated`, `FeeRefund`, `SafeUpdated`).",
       "function_name": "validate",
-      "suggested_fix": "The validation should include verifying that the previous node's `next` pointer and the next node's `prev` pointer are correctly updated to point to the current safe's `safeId`. This ensures the integrity of the doubly linked list. Access the previous and new nodes via `const previousNode = previousOrderedDoublyLinkedListSnapshot.nodes[safeId.toString()];` and `const newNode = newOrderedDoublyLinkedListSnapshot.nodes[safeId.toString()];`. Then validate `if (previousNode) { expect(previousNode.next).to.equal(safeId); }` and similar for `newNode.prev`."
+      "suggested_fix": "Parse logs from `executionReceipt.tx.wait()` and assert that expected events are emitted with the correct parameters."
     },
     {
-      "line_number": 154,
-      "description": "There's a commented-out check for `parsedFeeTopupEvent.args.feePaid` in `validate`. This should be enabled.",
+      "line_number": 135,
+      "description": "Missing validation for the `FeeDistributed` event. No balance validations for StabilityPool and DFIREStaking.",
       "function_name": "validate",
-      "suggested_fix": "Uncomment the line `expect(parsedFeeTopupEvent.args.feePaid).to.equal(fee, \"FeeTopup event feePaid should match\");` and ensure `fee` is correctly calculated based on the snapshots. Fee can be calculated using `const fee = (topupRate * previousSafe.borrowedAmount) / 10000n;`"
+      "suggested_fix": "Include `FeeDistributed` event in receipt parsing. Validate SBD token balance updates for StabilityPool and DFIREStaking contracts."
+    },
+    {
+      "line_number": 181,
+      "description": "Incorrect validation of liquidation snapshots; compares cumulative values instead of specific snapshot values.",
+      "function_name": "validate",
+      "suggested_fix": "Check `liquidationSnapshots[safeId].collateralPerCollateralSnapshot` and `liquidationSnapshots[safeId].debtPerCollateralSnapshot` against `cumulativeCollateralPerUnitCollateral` and `cumulativeDebtPerUnitCollateral` respectively."
+    },
+    {
+      "line_number": 174,
+      "description": "PROTOCOL_MODE change from BOOTSTRAP to NORMAL is not validated based on the action execution state updates.",
+      "function_name": "validate",
+      "suggested_fix": "Check `previousStableBaseCDPSnapshot.PROTOCOL_MODE` and `newStableBaseCDPSnapshot.PROTOCOL_MODE` and validate if it changed from BOOTSTRAP to NORMAL based on `totalDebt`."
     }
   ],
   "overall_assessment": [
-    "The code appears well-structured and implements the fee topup functionality as described in the action summary. The `initialize`, `execute`, and `validate` methods cover the necessary steps for preparing, executing, and verifying the action. However, several areas can be improved for better robustness, clarity, and completeness."
+    "The code generally follows good practices, with clear separation of concerns in the `initialize`, `execute`, and `validate` methods.",
+    "The `initialize` method prepares parameters for `feeTopup`, generating a random `topupRate`.",
+    "The `execute` method calls the contract's `feeTopup` function.",
+    "The `validate` method checks state updates and validates balances and safe properties.",
+    "Improvements can be made to `validate`, including validation for liquidation snapshot updates and event validations. Additional checks for edge cases, error handling, and clearer logging would increase robustness."
   ]
 }
