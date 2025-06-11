@@ -12,22 +12,28 @@
     "function_name": "setPrice",
     "pre_execution_parameter_generation_rules": [
       "The `_price` parameter should be a uint256 representing the desired price.",
-      "The `_price` parameter can be any non-negative integer.",
-      "The sender must be the owner of the contract."
+      "The `_price` parameter can be any non-negative integer."
     ],
     "on_execution_state_updates_made": [
       {
-        "category": "Price Update",
+        "category": "Price",
         "state_update_descriptions": [
-          "The `price` variable is updated to `_price * 10^18`."
+          "The `price` variable is updated to the value of `_price * 1e18`."
         ]
       }
     ],
     "post_execution_contract_state_validation_rules": [
       {
-        "category": "Price Validation",
+        "category": "Price",
         "rule_descriptions": [
-          "The `price` variable should be equal to the provided `_price` multiplied by 10^18."
+          "The `price` variable should be equal to the input `_price` multiplied by 1e18.",
+          "The `price` must be non-negative."
+        ]
+      },
+      {
+        "category": "Ownership",
+        "rule_descriptions": [
+          "The function execution should revert if the caller is not the owner."
         ]
       }
     ]
@@ -46,13 +52,13 @@
             "state_variable_name": "price",
             "type": "uint256",
             "what_does_it_track": "Tracks the current price.",
-            "why_is_is_important": "It represents the current price used by other contracts or functions to determine the value of an asset.",
-            "when_is_it_updated": "It is updated when the contract owner calls the 'setPrice' function.",
-            "how_to_validate_state_update": "Check the value of the 'price' state variable after the function execution. Ensure that the new value is equal to the '_price' parameter multiplied by 1e18.",
+            "why_is_is_important": "It determines the current price used by other contracts.",
+            "when_is_it_updated": "It is updated when the owner calls the setPrice function.",
+            "how_to_validate_state_update": "Check if the price state variable is updated to the new price multiplied by 1e18.",
             "has_conditional_updates": true,
-            "summary_of_update": "The 'price' state variable is updated with the new price provided as input, scaled by 1e18.",
+            "summary_of_update": "The price state variable is updated to the new price multiplied by 1e18.",
             "conditions": [
-              "The function caller must be the owner of the contract, as enforced by the onlyOwner modifier"
+              "The caller must be the owner of the contract."
             ]
           }
         ]
@@ -66,7 +72,8 @@
         "code_snippet": "function setPrice(uint256 _price) external onlyOwner {\n        price = _price * 1e18;\n    }",
         "references": {
           "references": []
-        }
+        },
+        "constants": []
       }
     ]
   }
