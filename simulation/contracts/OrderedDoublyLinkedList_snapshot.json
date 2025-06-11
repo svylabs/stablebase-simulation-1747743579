@@ -1,19 +1,19 @@
 {
   "attributes": [
     {
-      "name": "LinkedList Head",
+      "name": "Head",
       "type": "uint256",
       "contract_function": "getHead",
       "parameters": []
     },
     {
-      "name": "LinkedList Tail",
+      "name": "Tail",
       "type": "uint256",
       "contract_function": "getTail",
       "parameters": []
     },
     {
-      "name": "Node Details",
+      "name": "Node",
       "type": "tuple",
       "contract_function": "getNode",
       "parameters": [
@@ -25,25 +25,26 @@
       ]
     },
     {
-      "name": "Nodes Batch",
-      "type": "tuple[50]",
-      "contract_function": "getNodes",
+      "name": "NodesMapping",
+      "type": "tuple",
+      "contract_function": "nodes",
       "parameters": [
         {
-          "name": "beginAt",
-          "type": "uint256",
-          "reference": "Safe ID"
-        },
-        {
-          "name": "total",
+          "name": "",
           "type": "uint256",
           "reference": "Safe ID"
         }
       ]
+    },
+    {
+      "name": "OwnerAddress",
+      "type": "address",
+      "contract_function": "owner",
+      "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface Node {\n  value: bigint;\n  prev: bigint;\n  next: bigint;\n}\n\ninterface OrderedDoublyLinkedListSnapshot {\n  head: bigint;\n  tail: bigint;\n  nodes: { [safeId: string]: Node };\n  nodesBatch: {n: Node[], totalFound: bigint}\n}\n",
+    "contract_snapshot_interface_code": "interface OrderedDoublyLinkedListSnapshot {\n  head: bigint;\n  tail: bigint;\n  nodes: { [key: bigint]: Node };\n  owner: string;\n}\n\ninterface Node {\n  value: bigint;\n  prev: bigint;\n  next: bigint;\n}",
     "interface_name": "OrderedDoublyLinkedListSnapshot"
   }
 }
