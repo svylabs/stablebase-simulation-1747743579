@@ -1,10 +1,10 @@
 import { Action, Actor, Snapshot } from "@svylabs/ilumina";
-import type RunContext, { ExecutionReceipt } from "@svylabs/ilumina";
+import type { RunContext, ExecutionReceipt } from "@svylabs/ilumina";
 import { ethers } from "ethers";
 import { expect } from "chai";
 
 export class SetPriceAction extends Action {
-  private contract: ethers.Contract;
+  contract: ethers.Contract;
 
   constructor(contract: ethers.Contract) {
     super("SetPriceAction");
@@ -16,21 +16,21 @@ export class SetPriceAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot
   ): Promise<[boolean, any, Record<string, any>]> {
-    const mockPriceOracleState = currentSnapshot.contractSnapshot.mockPriceOracle;
-    const currentPrice = mockPriceOracleState.price;
+    // Get current price from snapshot to determine a reasonable upper bound
+    const mockPriceOracleSnapshot = currentSnapshot.contractSnapshot.mockPriceOracle;
+    const currentPrice = mockPriceOracleSnapshot.price;
 
-    // Generate a random price between 50% and 150% of the current price
-    const minPrice = currentPrice / 2n;
-    const maxPrice = currentPrice + currentPrice / 2n;
+    // Generate a random price no more than twice the current price
+    // Ensure the maxPrice is not zero to avoid division by zero errors.
+    const maxPrice = currentPrice > 0 ? (currentPrice * BigInt(2)) / BigInt(10 ** 18) : BigInt(100); // Default max price if currentPrice is 0
+    const price = BigInt(Math.floor(context.prng.next() % Number(maxPrice)));
 
-    // Generate a random price within the calculated range
-    const priceRange = maxPrice - minPrice + 1n;
-    let price = minPrice + BigInt(Math.floor(context.prng.next() % Number(priceRange)));
-    if(price <= 0n){
-        price = 1n; //Setting a minimum possible price to 1 to avoid errors, and to make sure it is executable
+    // Check if the actor is the owner
+    if (mockPriceOracleSnapshot.owner.toLowerCase() !== actor.account.address.toLowerCase()) {
+      return [false, {}, {}];
     }
 
-    return [true, [price], {}];
+    return [true, { _price: price }, {}];
   }
 
   async execute(
@@ -38,10 +38,11 @@ export class SetPriceAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot,
     actionParams: any
-  ): Promise<Record<string, any> | void> {
-    const price = actionParams[0];
-    const tx = await this.contract.connect(actor.account.value).setPrice(price);
-    await tx.wait();
+  ): Promise<ExecutionReceipt> {
+    const { _price } = actionParams;
+    const tx = await this.contract.connect(actor.account.value).setPrice(_price);
+    const receipt = await tx.wait();
+    return { receipt };
   }
 
   async validate(
@@ -52,21 +53,24 @@ export class SetPriceAction extends Action {
     actionParams: any,
     executionReceipt: ExecutionReceipt
   ): Promise<boolean> {
-    const price = actionParams[0];
+    const { _price } = actionParams;
 
-    const previousMockPriceOracleState = previousSnapshot.contractSnapshot.mockPriceOracle;
-    const newMockPriceOracleState = newSnapshot.contractSnapshot.mockPriceOracle;
+    // Validate price update
+    const previousMockPriceOracleSnapshot = previousSnapshot.contractSnapshot.mockPriceOracle;
+    const newMockPriceOracleSnapshot = newSnapshot.contractSnapshot.mockPriceOracle;
 
-    // Validate that the price was updated correctly.
-    expect(newMockPriceOracleState.price).to.equal(
-      price,
-      "Price was not updated correctly"
-    );
+    const expectedNewPrice = _price * BigInt(10 ** 18);
+    expect(newMockPriceOracleSnapshot.price).to.equal(expectedNewPrice, "Price should be updated correctly");
 
-    // Validate eth balances
-    const previousAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || 0n;
-    const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || 0n;
-    expect(newAccountBalance).to.lte(previousAccountBalance - executionReceipt.gasCost, 'Eth balance should be reduced due to gas fees');
+    // Validate owner didn't change
+    expect(previousMockPriceOracleSnapshot.owner).to.equal(newMockPriceOracleSnapshot.owner, "Owner should not change");
+
+    // Validate account balances (if applicable). This example assumes there are no
+    // ETH transfers as part of this action. If there were, you'd compare the previous and new
+    // account snapshots for changes in ETH balance.
+    const previousAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+    const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+    expect(newAccountBalance).to.equal(previousAccountBalance, "Account balance should not change");
 
     return true;
   }
