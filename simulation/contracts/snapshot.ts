@@ -24,21 +24,21 @@ import { takemockPriceOracleContractSnapshot } from "./mockPriceOracle_snapshot.
 
 export interface ContractSnapshot {
 
-    dfidToken: DFIDTokenState;
+    dfidToken: DFIDTokenSnapshot;
 
     dfireToken: DFIRETokenSnapshot;
 
-    dfireStaking: DFIREStakingState;
+    dfireStaking: DFIREStakingSnapshot;
 
     stabilityPool: StabilityPoolSnapshot;
 
     stableBaseCDP: StableBaseCDPSnapshot;
 
-    safesOrderedForLiquidation: OrderedDoublyLinkedListState;
+    safesOrderedForLiquidation: OrderedDoublyLinkedListSnapshot;
 
-    safesOrderedForRedemption: OrderedDoublyLinkedListState;
+    safesOrderedForRedemption: OrderedDoublyLinkedListSnapshot;
 
-    mockPriceOracle: MockPriceOracleState;
+    mockPriceOracle: MockPriceOracleSnapshot;
 
 }
 

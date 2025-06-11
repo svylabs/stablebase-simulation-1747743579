@@ -2,54 +2,86 @@
 
 import { ethers } from 'ethers';
 import { Actor, Snapshot } from '@svylabs/ilumina';
-import { OrderedDoublyLinkedListState, Node } from './snapshot_interfaces';
+import { OrderedDoublyLinkedListSnapshot, Node } from './snapshot_interfaces';
 
 /**
- * Takes a snapshot of OrderedDoublyLinkedList state
+ * Takes a snapshot of OrderedDoublyLinkedList contract state
  * @param contract - ethers.Contract instance
  * @param actors - Array of Actor instances
- * @returns Promise returning the interface OrderedDoublyLinkedListState
+ * @returns Promise resolving to an OrderedDoublyLinkedListSnapshot
  */
-export async function takesafesOrderedForLiquidationContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<OrderedDoublyLinkedListState> {
+export async function takesafesOrderedForLiquidationContractSnapshot(
+  contract: ethers.Contract,
+  actors: Actor[]
+): Promise<OrderedDoublyLinkedListSnapshot> {
   try {
-    const head = BigInt(await contract.getHead());
-    const tail = BigInt(await contract.getTail());
-    const nodes: { [key: string]: Node } = {};
+    const head: bigint = BigInt(await contract.getHead());
+    const tail: bigint = BigInt(await contract.getTail());
 
-    // Process actors to fetch node-related data
+    const nodes: { [safeId: string]: Node } = {};
+
+    // Extract all Safe IDs from actors
+    const safeIds: bigint[] = [];
     for (const actor of actors) {
       const identifiers = actor.getIdentifiers();
-      if (identifiers && identifiers._safeId) {
-        const safeIds = Array.isArray(identifiers._safeId) ? identifiers._safeId : [identifiers._safeId];
-
-        for (const safeId of safeIds) {
-          const safeIdBigInt = BigInt(safeId);
-
-          // Fetch node by ID
+      if (identifiers['Safe ID']) {
+        const safeIdValues = Array.isArray(identifiers['Safe ID']) ? identifiers['Safe ID'] : [identifiers['Safe ID']];
+        for (const safeIdValue of safeIdValues) {
           try {
-            const nodeData = await contract.nodes(safeIdBigInt);
-            const node: Node = {
-              value: BigInt(nodeData.value),
-              prev: BigInt(nodeData.prev),
-              next: BigInt(nodeData.next),
-            };
-            nodes[safeIdBigInt.toString()] = node;
-          } catch (nodeError: any) {
-            console.error(`Error fetching node for safeId ${safeIdBigInt}:`, nodeError);
-            // Handle the error appropriately, e.g., by logging or setting a default value
+            const safeId = BigInt(safeIdValue);
+            safeIds.push(safeId);
+          } catch (error: any) {
+            console.error(`Error converting Safe ID to BigInt: ${safeIdValue}`, error);
           }
-
         }
       }
     }
+
+    // Fetch individual node details for each Safe ID
+    for (const safeId of safeIds) {
+      try {
+        const nodeDetails = await contract.getNode(safeId);
+        nodes[safeId.toString()] = {
+          value: BigInt(nodeDetails.value),
+          prev: BigInt(nodeDetails.prev),
+          next: BigInt(nodeDetails.next),
+        };
+      } catch (error: any) {
+        console.error(`Error fetching node details for Safe ID ${safeId}:`, error);
+      }
+    }
+
+    // Fetch nodes in batches
+    const batchSize = 50;
+    const nodesBatch: { n: Node[]; totalFound: bigint } = { n: [], totalFound: BigInt(0) };
+    for (let i = 0; i < safeIds.length; i += batchSize) {
+      const beginAt = safeIds[i];
+      const total = BigInt(Math.min(batchSize, safeIds.length - i));
+
+      try {
+        const batchResult = await contract.getNodes(beginAt, total);
+        const nodeArray: Node[] = batchResult[0].map((node: any) => ({
+          value: BigInt(node.value),
+          prev: BigInt(node.prev),
+          next: BigInt(node.next),
+        }));
+        nodesBatch.n = [...nodesBatch.n, ...nodeArray];
+        nodesBatch.totalFound = BigInt(batchResult[1]);
+
+      } catch (error: any) {
+        console.error(`Error fetching nodes batch starting at ${beginAt}:`, error);
+      }
+    }
+
 
     return {
       head,
       tail,
       nodes,
+      nodesBatch,
     };
   } catch (error: any) {
-    console.error('Error taking snapshot:', error);
-    throw new Error(`Failed to take snapshot: ${error.message}`);
+    console.error('Error taking OrderedDoublyLinkedList snapshot:', error);
+    throw new Error(`Failed to take OrderedDoublyLinkedList snapshot: ${error.message}`);
   }
 }

@@ -2,58 +2,70 @@
 
 import { ethers } from 'ethers';
 import { Actor, Snapshot } from '@svylabs/ilumina';
-import { OrderedDoublyLinkedListState, Node, NodeReturn, NodesReturn } from './snapshot_interfaces';
+import { OrderedDoublyLinkedListSnapshot, Node } from './snapshot_interfaces';
 
 /**
- * Takes a snapshot of OrderedDoublyLinkedList state
+ * Takes a snapshot of OrderedDoublyLinkedList contract state
  * @param contract - ethers.Contract instance
- * @param actors - An array of Actor objects.
- * @returns Promise returning the interface OrderedDoublyLinkedListState
+ * @param actors - Array of Actor instances, each representing a Safe.
+ * @returns Promise resolving to an OrderedDoublyLinkedListSnapshot interface
  */
-export async function takesafesOrderedForRedemptionContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<OrderedDoublyLinkedListState> {
-    try {
-        const head = BigInt(await contract.getHead());
-        const tail = BigInt(await contract.getTail());
+export async function takesafesOrderedForRedemptionContractSnapshot(
+  contract: ethers.Contract,
+  actors: Actor[]
+): Promise<OrderedDoublyLinkedListSnapshot> {
+  try {
+    const head: bigint = BigInt(await contract.getHead());
+    const tail: bigint = BigInt(await contract.getTail());
+    const nodes: { [safeId: string]: Node } = {};
+    const safeIds: bigint[] = [];
 
-        const nodes: { [key: string]: Node } = {};
+    for (const actor of actors) {
+      const identifiers = actor.getIdentifiers();
+      if (identifiers["Safe ID"] !== undefined) {
+          const safeIdValues = Array.isArray(identifiers["Safe ID"]) ? identifiers["Safe ID"] : [identifiers["Safe ID"]];
 
-        // Process each actor to fetch node data
-        for (const actor of actors) {
-            const identifiers = actor.getIdentifiers();
-            if (identifiers && identifiers._safeId) {
-                const safeIds = Array.isArray(identifiers._safeId) ? identifiers._safeId : [identifiers._safeId];
-
-                for (const safeId of safeIds) {
-                    if (safeId !== undefined) {
-                        const safeIdBigInt = BigInt(safeId);
-
-                        // Fetch node using nodes mapping
-                        const nodeMapping = await contract.nodes(safeIdBigInt);
-
-                        // Fetch node using getNode
-                        const nodeData = await contract.getNode(safeIdBigInt);
-
-                        //Fetch nodes using getNodes
-                        // const nodesData = await contract.getNodes(safeIdBigInt, safeIdBigInt);
-
-
-                        nodes[safeIdBigInt.toString()] = {
-                            value: BigInt(nodeMapping.value),
-                            prev: BigInt(nodeMapping.prev),
-                            next: BigInt(nodeMapping.next),
-                        };
-                    }
-                }
-            }
-        }
-
-        return {
-            head,
-            tail,
-            nodes,
-        };
-    } catch (error: any) {
-        console.error('Error in takesafesOrderedForRedemptionContractSnapshot:', error);
-        throw new Error(`Failed to snapshot OrderedDoublyLinkedList state: ${error.message}`);
+          for (const safeIdValue of safeIdValues) {
+            const safeId = BigInt(safeIdValue);
+            safeIds.push(safeId);
+          }
+      }
     }
+
+    for (const safeId of safeIds) {
+      try {
+        const nodeDetails = await contract.getNode(safeId);
+        nodes[safeId.toString()] = {
+          value: BigInt(nodeDetails.value),
+          prev: BigInt(nodeDetails.prev),
+          next: BigInt(nodeDetails.next),
+        };
+      } catch (nodeError: any) {
+        console.error(`Error fetching node ${safeId.toString()}:`, nodeError);
+        // Optionally, continue or rethrow based on your error handling policy
+      }
+    }
+
+    // Assuming getNodes also returns the total number of nodes for accurate pagination
+    const initialNodesBatch = await contract.getNodes(0, safeIds.length > 0 ? safeIds.length : 1);
+    const totalNodes = safeIds.length > 0 ? BigInt(safeIds.length) : BigInt(0); //safeIds.length
+
+    const nodesBatch: {n: Node[], totalFound: bigint} = {n: [], totalFound: totalNodes}
+
+      nodesBatch.n = initialNodesBatch.map((node: any) => ({
+        value: BigInt(node.value),
+        prev: BigInt(node.prev),
+        next: BigInt(node.next),
+      }))
+
+    return {
+      head,
+      tail,
+      nodes,
+      nodesBatch
+    };
+  } catch (error: any) {
+    console.error('Error in takesafesOrderedForRedemptionContractSnapshot:', error);
+    throw new Error(`Failed to snapshot OrderedDoublyLinkedList contract state: ${error.message}`);
+  }
 }

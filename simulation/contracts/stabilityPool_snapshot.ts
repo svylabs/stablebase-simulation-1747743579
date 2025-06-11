@@ -2,139 +2,95 @@
 
 import { ethers } from 'ethers';
 import { Actor } from '@svylabs/ilumina';
-import { StabilityPoolSnapshot } from './snapshot_interfaces';
+import { StabilityPoolSnapshot, UserInfo, SBRRewardSnapshot, StakeResetSnapshot } from './snapshot_interfaces';
 
 /**
  * Takes a snapshot of StabilityPool state
  * @param contract - ethers.Contract instance
- * @param actors - Array of Actor instances for fetching user-specific data
- * @returns Promise returning the StabilityPoolSnapshot interface
+ * @param actors - Array of Actor instances to fetch user-specific data
+ * @returns Promise returning the interface StabilityPoolSnapshot
  */
 export async function takestabilityPoolContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<StabilityPoolSnapshot> {
-  try {
-    /** @dev Getting BASIS_POINTS_DIVISOR */
-    const BASIS_POINTS_DIVISOR = BigInt(await contract.BASIS_POINTS_DIVISOR() as any);
-    /** @dev Getting collateralLoss */
-    const collateralLoss = BigInt(await contract.collateralLoss() as any);
-    /** @dev Getting lastSBRRewardDistributedTime */
-    const lastSBRRewardDistributedTime = BigInt(await contract.lastSBRRewardDistributedTime() as any);
-    /** @dev Getting minimumScalingFactor */
-    const minimumScalingFactor = BigInt(await contract.minimumScalingFactor() as any);
-    /** @dev Getting precision */
-    const precision = BigInt(await contract.precision() as any);
-    /** @dev Getting rewardLoss */
-    const rewardLoss = BigInt(await contract.rewardLoss() as any);
-    /** @dev Getting rewardSenderActive */
-    const rewardSenderActive = await contract.rewardSenderActive() as any;
-    /** @dev Getting sbrDistributionRate */
-    const sbrDistributionRate = BigInt(await contract.sbrDistributionRate() as any);
-    /** @dev Getting sbrRewardDistributionEndTime */
-    const sbrRewardDistributionEndTime = BigInt(await contract.sbrRewardDistributionEndTime() as any);
-    /** @dev Getting sbrRewardDistributionStatus */
-    const sbrRewardDistributionStatus = await contract.sbrRewardDistributionStatus() as any;
-    /** @dev Getting sbrRewardLoss */
-    const sbrRewardLoss = BigInt(await contract.sbrRewardLoss() as any);
-    /** @dev Getting stakeResetCount */
-    const stakeResetCount = BigInt(await contract.stakeResetCount() as any);
-    /** @dev Getting stakeScalingFactor */
-    const stakeScalingFactor = BigInt(await contract.stakeScalingFactor() as any);
-    /** @dev Getting totalCollateralPerToken */
-    const totalCollateralPerToken = BigInt(await contract.totalCollateralPerToken() as any);
-    /** @dev Getting totalRewardPerToken */
-    const totalRewardPerToken = BigInt(await contract.totalRewardPerToken() as any);
-    /** @dev Getting totalSbrRewardPerToken */
-    const totalSbrRewardPerToken = BigInt(await contract.totalSbrRewardPerToken() as any);
-    /** @dev Getting totalStakedRaw */
-    const totalStakedRaw = BigInt(await contract.totalStakedRaw() as any);
+  try {\n    const basisPointsDivisor = await contract.BASIS_POINTS_DIVISOR();
+    const collateralLoss = await contract.collateralLoss();
+    const lastSBRRewardDistributedTime = await contract.lastSBRRewardDistributedTime();
+    const minimumScalingFactor = await contract.minimumScalingFactor();
+    const precision = await contract.precision();
+    const rewardLoss = await contract.rewardLoss();
+    const rewardSenderActive = await contract.rewardSenderActive();
+    const sbrDistributionRate = await contract.sbrDistributionRate();
+    const sbrRewardDistributionEndTime = await contract.sbrRewardDistributionEndTime();
+    const sbrRewardDistributionStatus = await contract.sbrRewardDistributionStatus();
+    const sbrRewardLoss = await contract.sbrRewardLoss();
+    const stakeResetCount = await contract.stakeResetCount();
+    const stakeScalingFactor = await contract.stakeScalingFactor();
+    const totalCollateralPerToken = await contract.totalCollateralPerToken();
+    const totalRewardPerToken = await contract.totalRewardPerToken();
+    const totalSbrRewardPerToken = await contract.totalSbrRewardPerToken();
+    const totalStakedRaw = await contract.totalStakedRaw();
 
-    /** @dev Mapping for sbrRewardSnapshots */
-    const sbrRewardSnapshots: { [accountAddress: string]: { rewardSnapshot: bigint; status: number } } = {};
-    /** @dev Mapping for stakeResetSnapshots */
-    const stakeResetSnapshots: { [stakeResetCount: string]: { scalingFactor: bigint; totalRewardPerToken: bigint; totalCollateralPerToken: bigint; totalSBRRewardPerToken: bigint } } = {};
-    /** @dev Mapping for userInfos */
-    const userInfos: { [accountAddress: string]: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint; cumulativeProductScalingFactor: bigint; stakeResetCount: bigint } } = {};
-    /** @dev Mapping for pendingCollaterals */
-    const pendingCollaterals: { [accountAddress: string]: bigint } = {};
-    /** @dev Mapping for pendingRewards */
-    const pendingRewards: { [accountAddress: string]: bigint } = {};
-    /** @dev Mapping for pendingRewardAndCollaterals */
-    const pendingRewardAndCollaterals: { [accountAddress: string]: {pendingReward: bigint, pendingCollateral: bigint, total: bigint} } = {};
+    // Fetch user-specific data
+    const users: { [accountAddress: string]: UserInfo } = {};
+    const sbrRewardSnapshots: { [accountAddress: string]: SBRRewardSnapshot } = {};
+    const stakeResetSnapshots: { [stakeResetCount: number]: StakeResetSnapshot } = {};
+    const userPendingCollateral: { [accountAddress: string]: bigint } = {};
+    const userPendingReward: { [accountAddress: string]: bigint } = {};
+    const userPendingRewardAndCollateral: { [accountAddress: string]: [bigint, bigint, bigint] } = {};
 
     for (const actor of actors) {
-      const accountAddress = actor.accountAddress;
-
-      /** @dev Fetching sbrRewardSnapshots for account: ${accountAddress} */
-      const sbrRewardSnapshot = await contract.sbrRewardSnapshots(accountAddress) as any;
-      sbrRewardSnapshots[accountAddress] = { rewardSnapshot: BigInt(sbrRewardSnapshot.rewardSnapshot), status: sbrRewardSnapshot.status };
-
-      /** @dev Fetching userInfos for account: ${accountAddress} */
-      const userInfo = await contract.getUser(accountAddress) as any;
-      userInfos[accountAddress] = { 
-        stake: BigInt(userInfo.stake), 
-        rewardSnapshot: BigInt(userInfo.rewardSnapshot),
-        collateralSnapshot: BigInt(userInfo.collateralSnapshot),
-        cumulativeProductScalingFactor: BigInt(userInfo.cumulativeProductScalingFactor), 
-        stakeResetCount: BigInt(userInfo.stakeResetCount) 
-      };
-
-      /** @dev Fetching pendingCollaterals for account: ${accountAddress} */
-      pendingCollaterals[accountAddress] = BigInt(await contract.userPendingCollateral(accountAddress) as any);
-
-      /** @dev Fetching pendingRewards for account: ${accountAddress} */
-      pendingRewards[accountAddress] = BigInt(await contract.userPendingReward(accountAddress) as any);
-
-      /** @dev Fetching pendingRewardAndCollaterals for account: ${accountAddress} */
-      const pendingRewardAndCollateral = await contract.userPendingRewardAndCollateral(accountAddress) as any;
-      pendingRewardAndCollaterals[accountAddress] = { 
-        pendingReward: BigInt(pendingRewardAndCollateral.pendingReward),
-        pendingCollateral: BigInt(pendingRewardAndCollateral.pendingCollateral),
-        total: BigInt(pendingRewardAndCollateral.total)
-      };
+      const accountAddress = actor.getIdentifier('accountAddress') as string;
+      if (accountAddress) {
+        try {
+          users[accountAddress] = await contract.getUser(accountAddress);
+          sbrRewardSnapshots[accountAddress] = await contract.sbrRewardSnapshots(accountAddress);
+          userPendingCollateral[accountAddress] = await contract.userPendingCollateral(accountAddress);
+          userPendingReward[accountAddress] = await contract.userPendingReward(accountAddress);
+          userPendingRewardAndCollateral[accountAddress] = await contract.userPendingRewardAndCollateral(accountAddress);
+        } catch (error) {
+          console.error(`Error fetching user data for ${accountAddress}:`, error);
+          // Handle error, e.g., set default values or skip the user
+        }
+      }
     }
 
-    /**
-     * @dev Fetch stakeResetSnapshots for each stakeResetCount.
-     * @dev Warning: stakeResetCount is converted to a Number, which could cause issues if stakeResetCount is very large.
-     */
-    const stakeResetCountValue = Number(stakeResetCount);
-    for (let i = 0; i <= stakeResetCountValue; i++) {
-        /** @dev Fetching stakeResetSnapshots for stakeResetCount: ${i} */
-        const stakeResetSnapshot = await contract.stakeResetSnapshots(i) as any;
-        stakeResetSnapshots[i.toString()] = {
-            scalingFactor: BigInt(stakeResetSnapshot.scalingFactor),
-            totalRewardPerToken: BigInt(stakeResetSnapshot.totalRewardPerToken),
-            totalCollateralPerToken: BigInt(stakeResetSnapshot.totalCollateralPerToken),
-            totalSBRRewardPerToken: BigInt(stakeResetSnapshot.totalSBRRewardPerToken)
-        };
+     // Populate StakeResetSnapshots
+     for (let i = 0; i <= Number(stakeResetCount); i++) {
+      try {
+        stakeResetSnapshots[i] = await contract.stakeResetSnapshots(i);
+      } catch (error) {
+        console.error(`Error fetching stake reset snapshot for index ${i}:`, error);
+      }
     }
 
-    return {
-      BASIS_POINTS_DIVISOR,
-      collateralLoss,
-      lastSBRRewardDistributedTime,
-      minimumScalingFactor,
-      precision,
-      rewardLoss,
+    const snapshot: StabilityPoolSnapshot = {
+      basisPointsDivisor: BigInt(basisPointsDivisor.toString()),
+      collateralLoss: BigInt(collateralLoss.toString()),
+      lastSBRRewardDistributedTime: BigInt(lastSBRRewardDistributedTime.toString()),
+      minimumScalingFactor: BigInt(minimumScalingFactor.toString()),
+      precision: BigInt(precision.toString()),
+      rewardLoss: BigInt(rewardLoss.toString()),
       rewardSenderActive,
-      sbrDistributionRate,
-      sbrRewardDistributionEndTime,
+      sbrDistributionRate: BigInt(sbrDistributionRate.toString()),
+      sbrRewardDistributionEndTime: BigInt(sbrRewardDistributionEndTime.toString()),
       sbrRewardDistributionStatus,
-      sbrRewardLoss,
-      stakeResetCount,
-      stakeScalingFactor,
-      totalCollateralPerToken,
-      totalRewardPerToken,
-      totalSbrRewardPerToken,
-      totalStakedRaw,
+      sbrRewardLoss: BigInt(sbrRewardLoss.toString()),
+      stakeResetCount: BigInt(stakeResetCount.toString()),
+      stakeScalingFactor: BigInt(stakeScalingFactor.toString()),
+      totalCollateralPerToken: BigInt(totalCollateralPerToken.toString()),
+      totalRewardPerToken: BigInt(totalRewardPerToken.toString()),
+      totalSbrRewardPerToken: BigInt(totalSbrRewardPerToken.toString()),
+      totalStakedRaw: BigInt(totalStakedRaw.toString()),
+      users,
       sbrRewardSnapshots,
       stakeResetSnapshots,
-      userInfos,
-      pendingCollaterals,
-      pendingRewards,
-      pendingRewardAndCollaterals
+      userPendingCollateral,
+      userPendingReward,
+      userPendingRewardAndCollateral,
     };
-  } catch (error: any) {
+
+    return snapshot;
+  } catch (error) {
     console.error('Error taking StabilityPool snapshot:', error);
-    throw new Error(`Failed to take StabilityPool snapshot: ${error.message}. Stack: ${error.stack}`);
+    throw error; // Re-throw the error to be handled upstream
   }
 }

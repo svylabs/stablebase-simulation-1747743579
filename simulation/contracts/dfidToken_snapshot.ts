@@ -2,64 +2,119 @@
 
 import { ethers } from 'ethers';
 import { Actor } from '@svylabs/ilumina';
-import { DFIDTokenState } from './snapshot_interfaces';
+import { DFIDTokenSnapshot } from './snapshot_interfaces';
 
 /**
  * Takes a snapshot of DFIDToken state
  * @param contract - ethers.Contract instance
- * @param actors - Array of Actor instances to fetch user-specific data.
- * @returns Promise returning the interface DFIDTokenState
+ * @param actors - Array of actors to fetch user-specific data
+ * @returns Promise returning the interface DFIDTokenSnapshot
  */
-export async function takedfidTokenContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<DFIDTokenState> {
+export async function takedfidTokenContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<DFIDTokenSnapshot> {
   try {
-    const name = await contract.name();
-    const symbol = await contract.symbol();
-    const decimals = await contract.decimals();
-    const totalSupply = await contract.totalSupply();
-    const totalBurned = await contract.totalBurned();
-    const owner = await contract.owner();
+    const contractAddress = await contract.getAddress();
+    const allowances: { [owner: string]: { [spender: string]: bigint } } = {};
+    const balances: { [account: string]: bigint } = {};
 
-    const allowances: { [accountAddress: string]: { [accountAddress: string]: bigint } } = {};
-    const balances: { [accountAddress: string]: bigint } = {};
-
+    // Fetch all allowances and balances for each actor (user)
     for (const actor of actors) {
       const accountAddress = actor.accountAddress;
 
-      // Fetch Balances
+      // Fetch Balance
       try {
         const balance = await contract.balanceOf(accountAddress);
-        balances[accountAddress] = balance;
-      } catch (err: any) {
-        console.error(`Error fetching balance for ${accountAddress}:`, err);
-        balances[accountAddress] = BigInt(0);
+        balances[accountAddress] = BigInt(balance.toString());
+      } catch (error: any) {
+        console.error(`Error fetching balance for ${accountAddress} from contract ${contractAddress}: ${error.message}`);
       }
 
       // Fetch Allowances
       allowances[accountAddress] = {};
       for (const otherActor of actors) {
         const spenderAddress = otherActor.accountAddress;
+        // Skip fetching allowance for the same account
+        if (spenderAddress === accountAddress) {
+            continue;
+        }
+
         try {
           const allowance = await contract.allowance(accountAddress, spenderAddress);
-          allowances[accountAddress][spenderAddress] = allowance;
-        } catch (err: any) {
-          console.error(`Error fetching allowance for ${accountAddress} -> ${spenderAddress}:`, err);
-          allowances[accountAddress][spenderAddress] = BigInt(0);
+          allowances[accountAddress][spenderAddress] = BigInt(allowance.toString());
+        } catch (error: any) {
+          console.error(`Error fetching allowance for ${accountAddress} to ${spenderAddress} from contract ${contractAddress}: ${error.message}`);
         }
       }
     }
 
+    // Fetch Decimals
+    let decimals: bigint;
+    try {
+      const decimalsResult = await contract.decimals();
+      decimals = BigInt(decimalsResult.toString());
+    } catch (error: any) {
+      console.error(`Error fetching decimals from contract ${contractAddress}: ${error.message}`);
+      decimals = BigInt(0);
+    }
+
+    // Fetch Name
+    let name: string;
+    try {
+      name = await contract.name();
+    } catch (error: any) {
+      console.error(`Error fetching name from contract ${contractAddress}: ${error.message}`);
+      name = '';
+    }
+
+    // Fetch Owner
+    let owner: string;
+    try {
+      owner = await contract.owner();
+    } catch (error: any) {
+      console.error(`Error fetching owner from contract ${contractAddress}: ${error.message}`);
+      owner = '';
+    }
+
+    // Fetch Symbol
+    let symbol: string;
+    try {
+      symbol = await contract.symbol();
+    } catch (error: any) {
+      console.error(`Error fetching symbol from contract ${contractAddress}: ${error.message}`);
+      symbol = '';
+    }
+
+    // Fetch TotalBurned
+    let totalBurned: bigint;
+    try {
+      const totalBurnedResult = await contract.totalBurned();
+      totalBurned = BigInt(totalBurnedResult.toString());
+    } catch (error: any) {
+      console.error(`Error fetching totalBurned from contract ${contractAddress}: ${error.message}`);
+      totalBurned = BigInt(0);
+    }
+
+    // Fetch TotalSupply
+    let totalSupply: bigint;
+    try {
+      const totalSupplyResult = await contract.totalSupply();
+      totalSupply = BigInt(totalSupplyResult.toString());
+    } catch (error: any) {
+      console.error(`Error fetching totalSupply from contract ${contractAddress}: ${error.message}`);
+      totalSupply = BigInt(0);
+    }
+
     return {
-      name,
-      symbol,
-      decimals,
-      totalSupply,
-      totalBurned,
       allowances,
       balances,
+      decimals,
+      name,
       owner,
+      symbol,
+      totalBurned,
+      totalSupply,
     };
   } catch (error: any) {
-    console.error('Error taking DFIDToken contract snapshot:', error);
-    throw new Error(`Failed to take DFIDToken snapshot: ${error.message}`);
+    console.error(`Error taking DFIDToken snapshot: ${error.message}`);
+    throw error;
   }
 }
