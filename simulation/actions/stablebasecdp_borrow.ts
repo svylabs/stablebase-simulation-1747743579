@@ -1,10 +1,10 @@
 import { Action, Actor, Snapshot } from "@svylabs/ilumina";
-import type RunContext, { ExecutionReceipt } from "@svylabs/ilumina";
+import type { RunContext, ExecutionReceipt } from "@svylabs/ilumina";
 import { ethers } from "ethers";
-import { expect } from "chai";
+import { expect } from 'chai';
 
 export class BorrowAction extends Action {
-  contract: ethers.Contract;
+  private contract: ethers.Contract;
 
   constructor(contract: ethers.Contract) {
     super("BorrowAction");
@@ -16,60 +16,45 @@ export class BorrowAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot
   ): Promise<[boolean, any, Record<string, any>]> {
-    const stableBaseCDP = currentSnapshot.contractSnapshot.stableBaseCDP;
-    const dfidToken = currentSnapshot.contractSnapshot.dfidToken;
-    const mockPriceOracle = currentSnapshot.contractSnapshot.mockPriceOracle;
+    const stableBaseCDPState = currentSnapshot.contractSnapshot.stableBaseCDP;
+    const safeIds = Object.keys(stableBaseCDPState.safes).map(Number);
 
-    if (!stableBaseCDP || !dfidToken || !mockPriceOracle) {
-      console.warn("Required contract snapshot not found.");
-      return [false, {}, {}];
-    }
-
-    const safeIds = Object.keys(stableBaseCDP.safes).map(Number);
     if (safeIds.length === 0) {
-      console.warn("No safes available for borrowing.");
       return [false, {}, {}];
     }
 
-    let safeId: number;
-    let safe;
-    let attempts = 0;
-    const maxAttempts = 10;
+    // Filter safes with collateral
+    const availableSafeIds = safeIds.filter(safeId => stableBaseCDPState.safes[safeId].collateralAmount > BigInt(0));
 
-    do {
-      safeId = context.prng.pick(safeIds);
-      safe = stableBaseCDP.safes[safeId];
-      attempts++;
-
-      if (!safe || safe.collateralAmount === BigInt(0)) {
-        console.warn(`Safe ${safeId} does not exist or has no collateral, trying another safe. Attempt: ${attempts}`);
-      }
-    } while ((!safe || safe.collateralAmount === BigInt(0)) && attempts < maxAttempts);
-
-    if (!safe || safe.collateralAmount === BigInt(0)) {
-      console.warn("No valid safes found after multiple attempts.");
+    if (availableSafeIds.length === 0) {
       return [false, {}, {}];
     }
 
-    const price = mockPriceOracle.price;
-    const liquidationRatio = BigInt(15000); // Example liquidation ratio (150%)
+    const safeId = availableSafeIds[context.prng.next() % availableSafeIds.length];
+    const safe = stableBaseCDPState.safes[safeId];
+
+    const mockPriceOracleState = currentSnapshot.contractSnapshot.mockPriceOracle;
+    const price = mockPriceOracleState.price;
+    // liquidationRatio, PRECISION, BASIS_POINTS_DIVISOR, MINIMUM_DEBT should ideally be fetched from the contract
+    const liquidationRatio = BigInt(15000); // Example liquidation ratio
     const PRECISION = BigInt(10) ** BigInt(18); // Example precision
     const BASIS_POINTS_DIVISOR = BigInt(10000);
     const MINIMUM_DEBT = BigInt(100); // Example minimum debt
 
-    const maxBorrowAmount = (
-      (safe.collateralAmount * price * BASIS_POINTS_DIVISOR) / liquidationRatio
-    ) / PRECISION - safe.borrowedAmount;
+    const maxBorrowAmount = ((
+      (safe.collateralAmount * price * BASIS_POINTS_DIVISOR)
+    ) / liquidationRatio) / PRECISION - safe.borrowedAmount;
 
-    if (maxBorrowAmount <= BigInt(0)) {
-      console.warn("Maximum borrow amount is zero or less.");
+    if (maxBorrowAmount <= BigInt(0) || (safe.borrowedAmount + MINIMUM_DEBT > ((
+      (safe.collateralAmount * price * BASIS_POINTS_DIVISOR)
+    ) / liquidationRatio) / PRECISION)) {
       return [false, {}, {}];
     }
 
-    const amount = BigInt(context.prng.next()) % maxBorrowAmount + MINIMUM_DEBT;
-    const shieldingRate = BigInt(context.prng.next()) % BigInt(10000); // Up to 100%
-    const nearestSpotInLiquidationQueue = BigInt(0);
-    const nearestSpotInRedemptionQueue = BigInt(0);
+    const amount = BigInt(context.prng.next()) % (maxBorrowAmount - MINIMUM_DEBT + BigInt(1)) + MINIMUM_DEBT; // Ensure amount is within bounds and >= MINIMUM_DEBT
+    const shieldingRate = BigInt(context.prng.next()) % BASIS_POINTS_DIVISOR;
+    const nearestSpotInLiquidationQueue = BigInt(0); // Can be randomized if there's a valid range
+    const nearestSpotInRedemptionQueue = BigInt(0); // Can be randomized if there's a valid range
 
     const actionParams = {
       safeId: BigInt(safeId),
@@ -87,15 +72,16 @@ export class BorrowAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot,
     actionParams: any
-  ): Promise<Record<string, any> | void> {
+  ): Promise<ExecutionReceipt> {
+    const { safeId, amount, shieldingRate, nearestSpotInLiquidationQueue, nearestSpotInRedemptionQueue } = actionParams;
     return this.contract
       .connect(actor.account.value)
       .borrow(
-        actionParams.safeId,
-        actionParams.amount,
-        actionParams.shieldingRate,
-        actionParams.nearestSpotInLiquidationQueue,
-        actionParams.nearestSpotInRedemptionQueue
+        safeId,
+        amount,
+        shieldingRate,
+        nearestSpotInLiquidationQueue,
+        nearestSpotInRedemptionQueue
       );
   }
 
@@ -107,70 +93,92 @@ export class BorrowAction extends Action {
     actionParams: any,
     executionReceipt: ExecutionReceipt
   ): Promise<boolean> {
-    const safeId = actionParams.safeId;
-    const amount = actionParams.amount;
-    const shieldingRate = actionParams.shieldingRate;
+    const { safeId, amount, shieldingRate } = actionParams;
+    const safeIdNumber = Number(safeId);
 
-    const prevStableBaseCDP = previousSnapshot.contractSnapshot.stableBaseCDP;
-    const newStableBaseCDP = newSnapshot.contractSnapshot.stableBaseCDP;
-    const prevDFIDToken = previousSnapshot.contractSnapshot.dfidToken;
-    const newDFIDToken = newSnapshot.contractSnapshot.dfidToken;
+    // Validate events
+    await expect(executionReceipt.events.length).to.be.greaterThan(0);
+    const borrowedEvent = executionReceipt.events.find((event: any) => event.event === "Borrowed");
+    expect(borrowedEvent).to.not.be.undefined;
+    expect(borrowedEvent.args.safeId).to.eq(safeId);
+    expect(borrowedEvent.args.amount).to.eq(amount);
 
-    if (!prevStableBaseCDP || !newStableBaseCDP || !prevDFIDToken || !newDFIDToken) {
-      console.warn("Required contract snapshot not found.");
-      return false;
-    }
+    const feeDistributedEvent = executionReceipt.events.find((event: any) => event.event === "FeeDistributed");
+    expect(feeDistributedEvent).to.not.be.undefined;
 
-    const prevSafe = prevStableBaseCDP.safes[Number(safeId.toString())];
-    const newSafe = newStableBaseCDP.safes[Number(safeId.toString())];
+    const previousStableBaseCDPState = previousSnapshot.contractSnapshot.stableBaseCDP;
+    const newStableBaseCDPState = newSnapshot.contractSnapshot.stableBaseCDP;
 
-    if (!newSafe) {
-      expect(newStableBaseCDP.safes[Number(safeId.toString())]).to.not.be.undefined, 'Safe should still exist after borrow';
-    }
+    const previousDFIDTokenState = previousSnapshot.contractSnapshot.dfidToken;
+    const newDFIDTokenState = newSnapshot.contractSnapshot.dfidToken;
 
-    if (!prevSafe || !newSafe) {
-      console.warn("Safe not found in previous or new snapshot.");
-      return false;
-    }
+    const previousSafe = previousStableBaseCDPState.safes[safeIdNumber] || {
+      collateralAmount: BigInt(0),
+      borrowedAmount: BigInt(0),
+      weight: BigInt(0),
+      totalBorrowedAmount: BigInt(0),
+      feePaid: BigInt(0),
+    };
 
-    // Calculate Shielding Fee
-    const shieldingFee = (amount * shieldingRate) / BigInt(10000);
+    const newSafe = newStableBaseCDPState.safes[safeIdNumber];
+
+    expect(newSafe).to.not.be.undefined;
+    expect(newSafe.collateralAmount).to.be.gt(BigInt(0));
 
     // Safe State Validation
-    expect(newSafe.borrowedAmount).to.equal(prevSafe.borrowedAmount + amount, "Incorrect borrowedAmount");
-    expect(newSafe.totalBorrowedAmount).to.equal(prevSafe.totalBorrowedAmount + amount, "Incorrect totalBorrowedAmount");
-    expect(newSafe.feePaid).to.gte(prevSafe.feePaid, "Fee paid should increase or remain the same");
+    expect(newSafe.borrowedAmount).to.equal(previousSafe.borrowedAmount + amount);
+    expect(newSafe.totalBorrowedAmount).to.equal(previousSafe.totalBorrowedAmount + amount);
+
+    // Calculate shielding fee
+    const BASIS_POINTS_DIVISOR = BigInt(10000);
+    const _shieldingFee = (amount * shieldingRate) / BASIS_POINTS_DIVISOR;
+    expect(newSafe.feePaid).to.equal(previousSafe.feePaid + _shieldingFee);
+
+    // Token Validation
+    const borrowerAddress = actor.account.address;
+
+    const previousBorrowerBalance = previousDFIDTokenState.balances[borrowerAddress] || BigInt(0);
+    const newBorrowerBalance = newDFIDTokenState.balances[borrowerAddress] || BigInt(0);
+
+    const canRefund = feeDistributedEvent.args.canRefund || BigInt(0);
+    const amountToBorrow = amount - _shieldingFee + canRefund;
+
+    expect(newBorrowerBalance).to.equal(previousBorrowerBalance + amountToBorrow);
+
+    const previousTotalSupply = previousDFIDTokenState.totalSupply;
+    const newTotalSupply = newDFIDTokenState.totalSupply;
+    expect(newTotalSupply).to.equal(previousTotalSupply + amountToBorrow);
 
     // Protocol Debt Validation
-    expect(newStableBaseCDP.totalDebt).to.equal(prevStableBaseCDP.totalDebt + amount, "Incorrect totalDebt");
+    expect(newStableBaseCDPState.totalDebt).to.equal(previousStableBaseCDPState.totalDebt + amount);
 
-    // Token Validation - Borrower's SBD balance
-    const borrowerAddress = actor.account.address; // Assuming actor's account is the borrower
-    const prevBorrowerBalance = prevDFIDToken.balances[borrowerAddress] || BigInt(0);
-    const newBorrowerBalance = newDFIDToken.balances[borrowerAddress] || BigInt(0);
-    const expectedBorrowerBalance = prevBorrowerBalance + (amount - shieldingFee);
+    // Contract's SBD Balance Validation
+    const stableBaseCDPAddress = (context.contracts.stableBaseCDP as ethers.Contract).target;
+    const previousContractBalance = previousDFIDTokenState.balances[stableBaseCDPAddress] || BigInt(0);
+    const newContractBalance = newDFIDTokenState.balances[stableBaseCDPAddress] || BigInt(0);
 
-    expect(newBorrowerBalance).to.equal(expectedBorrowerBalance, "Incorrect borrower balance after borrowing");
+    // Assuming fees are distributed to the contract, so contract balance should increase
+    const feePaid = feeDistributedEvent.args.feePaid || BigInt(0);
+    expect(newContractBalance).to.equal(previousContractBalance + feePaid);
 
-    // Token Validation - Total Supply
-    const prevTotalSupply = prevDFIDToken.totalSupply;
-    const newTotalSupply = newDFIDToken.totalSupply;
-    const expectedTotalSupply = prevTotalSupply + (amount - shieldingFee);
+    // DFIREStaking reward validation
+    const previousDFIREStakingState = previousSnapshot.contractSnapshot.dfireStaking;
+    const newDFIREStakingState = newSnapshot.contractSnapshot.dfireStaking;
+    const dfireStakingAddress = (context.contracts.dfireStaking as ethers.Contract).target;    
+    const sbrStakersFee = feeDistributedEvent.args.sbrStakersFee || BigInt(0);
 
-    expect(newTotalSupply).to.equal(expectedTotalSupply, "Incorrect total supply after borrowing");
+     if (sbrStakersFee > BigInt(0)) {
+          expect(newDFIREStakingState.totalRewardPerToken).to.be.gte(previousDFIREStakingState.totalRewardPerToken);
+     }
 
-    // Fee distribution validation - Assuming fees are distributed to the contract
-    const prevContractBalance = prevDFIDToken.balances[this.contract.target] || BigInt(0);
-    const newContractBalance = newDFIDToken.balances[this.contract.target] || BigInt(0);
-    expect(newContractBalance).to.gte(prevContractBalance, "Contract balance should increase due to fee distribution");
+    // StabilityPool reward validation
+    const previousStabilityPoolState = previousSnapshot.contractSnapshot.stabilityPool;
+    const newStabilityPoolState = newSnapshot.contractSnapshot.stabilityPool;
+    const stabilityPoolAddress = (context.contracts.stabilityPool as ethers.Contract).target;
+    const stabilityPoolFee = feeDistributedEvent.args.stabilityPoolFee || BigInt(0);
 
-    // Event Validation - Assuming Borrowed event is emitted
-    const borrowedEvent = executionReceipt.events.find((event) => event.event === "Borrowed");
-    expect(borrowedEvent).to.not.be.undefined, "Borrowed event should be emitted";
-
-    if (borrowedEvent) {
-      expect(borrowedEvent.args.safeId).to.equal(safeId, "Borrowed event: Incorrect safeId");
-      expect(borrowedEvent.args.amount).to.equal(amount, "Borrowed event: Incorrect amount");
+    if (stabilityPoolFee > BigInt(0)) {
+         expect(newStabilityPoolState.totalRewardPerToken).to.be.gte(previousStabilityPoolState.totalRewardPerToken);
     }
 
     return true;
