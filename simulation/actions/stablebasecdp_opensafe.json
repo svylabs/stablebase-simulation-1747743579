@@ -11,10 +11,9 @@
     "contract_name": "StableBaseCDP",
     "function_name": "openSafe",
     "pre_execution_parameter_generation_rules": [
-      "_safeId: Generate a unique uint256 greater than 0 that does not already exist in the _owners mapping. Check _owners[_safeId] == address(0) should be true.",
-      "_amount: Generate a uint256 greater than 0. This will be the amount of collateral deposited. msg.value should be equal to _amount.",
-      "msg.value: Set msg.value equal to _amount to satisfy the collateral deposit requirement.",
-      "msg.sender:  Set to the address of the user who is opening the Safe. This should be an externally owned account."
+      "_safeId: Generate a unique integer greater than 0 that has not been used before.",
+      "_amount: Generate a positive integer representing the amount of collateral to deposit.",
+      "msg.value: Must be equal to _amount. Ensure sufficient funds are available in the user's account to cover this amount."
     ],
     "on_execution_state_updates_made": [
       {
@@ -26,60 +25,61 @@
           "The weight of the Safe is initialized to 0.",
           "The totalBorrowedAmount of the Safe is initialized to 0.",
           "The feePaid of the Safe is initialized to 0.",
-          "A LiquidationSnapshot is created for the Safe, capturing the current cumulativeDebtPerUnitCollateral and cumulativeCollateralPerUnitCollateral.",
-          "The Safe is mapped to the provided _safeId in the safes mapping."
+          "A LiquidationSnapshot is created for the Safe, storing the current cumulativeDebtPerUnitCollateral and cumulativeCollateralPerUnitCollateral. This snapshot is stored in the liquidationSnapshots mapping using _safeId as the key.",
+          "The Safe's information is stored in the safes mapping using _safeId as the key."
         ]
       },
       {
         "category": "Collateral Update",
         "state_update_descriptions": [
-          "The totalCollateral is increased by _amount."
+          "totalCollateral is increased by _amount."
         ]
       },
       {
-        "category": "NFT Minting",
+        "category": "NFT Minting and Transfer",
         "state_update_descriptions": [
-          "An NFT representing the Safe is minted and transferred to the msg.sender. The tokenId of the NFT is _safeId.",
-          "The ownership of the NFT with tokenId _safeId is assigned to msg.sender. _owners[_safeId] = msg.sender",
-          "The balance of the owner (msg.sender) is increased by 1. _balances[msg.sender] += 1;"
+          "An NFT representing the Safe is minted to the msg.sender with the tokenId being _safeId.",
+          "The owner of the NFT with tokenId _safeId is set to msg.sender in the _owners mapping.",
+          "The balance of the msg.sender (owner) is incremented by 1.",
+          "A Transfer event is emitted, indicating the transfer of the NFT from address(0) to msg.sender with tokenId _safeId."
         ]
       },
       {
         "category": "Events",
         "state_update_descriptions": [
-          "An OpenSafe event is emitted, containing the _safeId, msg.sender, _amount, totalCollateral, and totalDebt."
+          "An OpenSafe event is emitted, logging the _safeId, msg.sender, _amount, totalCollateral, and totalDebt."
         ]
       }
     ],
     "post_execution_contract_state_validation_rules": [
       {
-        "category": "Safe Existence and Properties",
+        "category": "Safe Existence",
         "rule_descriptions": [
-          "safes[_safeId].collateralAmount == _amount",
-          "safes[_safeId].borrowedAmount == 0",
-          "safes[_safeId].weight == 0",
-          "safes[_safeId].totalBorrowedAmount == 0",
-          "safes[_safeId].feePaid == 0"
-        ]
-      },
-      {
-        "category": "Total Collateral",
-        "rule_descriptions": [
-          "totalCollateral (after execution) == totalCollateral (before execution) + _amount"
+          "safes[_safeId].collateralAmount should be equal to _amount.",
+          "safes[_safeId].borrowedAmount should be equal to 0.",
+          "safes[_safeId].weight should be equal to 0.",
+          "safes[_safeId].totalBorrowedAmount should be equal to 0.",
+          "safes[_safeId].feePaid should be equal to 0."
         ]
       },
       {
         "category": "NFT Ownership",
         "rule_descriptions": [
-          "_ownerOf(_safeId) == msg.sender",
-          "balanceOf(msg.sender) (after execution) == balanceOf(msg.sender) (before execution) + 1"
+          "_ownerOf(_safeId) should be equal to msg.sender.",
+          "balanceOf(msg.sender) should be incremented by 1 compared to before the function call."
+        ]
+      },
+      {
+        "category": "Collateral Value",
+        "rule_descriptions": [
+          "totalCollateral should be increased by _amount compared to before the function call."
         ]
       },
       {
         "category": "Liquidation Snapshot",
         "rule_descriptions": [
-          "liquidationSnapshots[_safeId].debtPerCollateralSnapshot == cumulativeDebtPerUnitCollateral (at the time of execution)",
-          "liquidationSnapshots[_safeId].collateralPerCollateralSnapshot == cumulativeCollateralPerUnitCollateral (at the time of execution)"
+          "liquidationSnapshots[_safeId].debtPerCollateralSnapshot should be equal to cumulativeDebtPerUnitCollateral before the function call.",
+          "liquidationSnapshots[_safeId].collateralPerCollateralSnapshot should be equal to cumulativeCollateralPerUnitCollateral before the function call."
         ]
       }
     ]
@@ -91,11 +91,11 @@
     "does_register_new_identifier": true,
     "new_identifiers": [
       {
-        "name": "_safeId",
+        "name": "Safe ID",
         "type": "random_id",
         "has_max_identifier_limit_per_address": false,
         "max_identifier_limit_per_address": 0,
-        "description": "Unique identifier for the created safe."
+        "description": "Unique identifier for each Safe (CDP)."
       }
     ],
     "all_state_updates": [
@@ -105,29 +105,12 @@
           {
             "state_variable_name": "safes",
             "type": "mapping",
-            "what_does_it_track": "Tracks the details (collateralAmount, borrowedAmount, weight, totalBorrowedAmount, feePaid) of each safe by its ID.",
-            "why_is_is_important": "It stores the core information about each safe, which is essential for all other operations.",
-            "when_is_it_updated": "When a new safe is opened using the openSafe function, a new entry is added to this mapping.",
-            "how_to_validate_state_update": "Check if the safe with the given _safeId exists and verify its parameters (collateralAmount, borrowedAmount, weight, totalBorrowedAmount, feePaid) match the provided _amount and initialized values.",
+            "what_does_it_track": "Tracks the details of each Safe, including collateral amount, borrowed amount, weight, total borrowed amount, and fee paid.",
+            "why_is_is_important": "It stores the state of each Safe, which is crucial for tracking collateral, debt, and other important parameters for liquidations, redemptions, and overall system health.",
+            "when_is_it_updated": "When a new Safe is opened using the 'openSafe' function, and the conditions mentioned above are met.",
+            "how_to_validate_state_update": "Check the 'safes' mapping for the given '_safeId'. Verify that 'collateralAmount' is equal to '_amount', 'borrowedAmount' is 0, 'weight' is 0, 'totalBorrowedAmount' is 0, and 'feePaid' is 0.",
             "has_conditional_updates": true,
-            "summary_of_update": "A new safe is created and its details are stored in the `safes` mapping using the provided _safeId.",
-            "conditions": [
-              "_amount > 0",
-              "msg.value == _amount",
-              "_safeId > 0",
-              "safes[_safeId].collateralAmount == 0",
-              "_ownerOf(_safeId) == address(0)"
-            ]
-          },
-          {
-            "state_variable_name": "totalCollateral",
-            "type": "uint256",
-            "what_does_it_track": "The total amount of collateral locked in all safes.",
-            "why_is_is_important": "This variable is used to calculate the collateralization ratio and to determine the overall health of the protocol.",
-            "when_is_it_updated": "When a new safe is opened or when collateral is added to an existing safe.",
-            "how_to_validate_state_update": "Verify that the totalCollateral is increased by the amount of collateral provided when opening the safe.",
-            "has_conditional_updates": true,
-            "summary_of_update": "The total collateral is increased by the amount deposited in the new safe.",
+            "summary_of_update": "A new Safe is created and its details are stored in the 'safes' mapping using '_safeId' as the key.",
             "conditions": [
               "_amount > 0",
               "msg.value == _amount",
@@ -139,60 +122,60 @@
           {
             "state_variable_name": "liquidationSnapshots",
             "type": "mapping",
-            "what_does_it_track": "It tracks cumulative debt and collateral per unit collateral at the time of safe opening.",
-            "why_is_is_important": "This information is critical for liquidation calculations, ensuring fairness and accuracy.",
-            "when_is_it_updated": "It is updated when a new safe is opened.",
-            "how_to_validate_state_update": "Check if the `liquidationSnapshots` mapping with the key `_safeId` holds the current values of `cumulativeDebtPerUnitCollateral` and `cumulativeCollateralPerUnitCollateral`. ",
-            "has_conditional_updates": true,
-            "summary_of_update": "Stores a snapshot of cumulative debt and collateral per unit collateral at the time of safe opening.",
+            "what_does_it_track": "It tracks cumulative debt per unit collateral and cumulative collateral per unit collateral at the time of opening Safe for later liquidations.",
+            "why_is_is_important": "It is important for liquidation process to know debt and collateral snapshots at the time of opening safe.",
+            "when_is_it_updated": "When a new Safe is opened using the 'openSafe' function.",
+            "how_to_validate_state_update": "Verify that the 'liquidationSnapshots' mapping contains the current cumulative debt per unit collateral and cumulative collateral per unit collateral for the '_safeId'.",
+            "has_conditional_updates": false,
+            "summary_of_update": "A new LiquidationSnapshot is created and stored in the 'liquidationSnapshots' mapping using '_safeId' as the key. It contains the debtPerCollateralSnapshot and collateralPerCollateralSnapshot",
             "conditions": [
-              "_amount > 0",
-              "msg.value == _amount",
-              "_safeId > 0",
-              "safes[_safeId].collateralAmount == 0",
-              "_ownerOf(_safeId) == address(0)"
+              "None"
             ]
-          }
-        ]
-      },
-      {
-        "contract_name": "ERC721",
-        "state_updated": [
+          },
+          {
+            "state_variable_name": "totalCollateral",
+            "type": "uint256",
+            "what_does_it_track": "Tracks the total amount of collateral held by the contract.",
+            "why_is_is_important": "It is important for calculating the overall collateralization ratio of the system and assessing its health.",
+            "when_is_it_updated": "When a new Safe is opened using the 'openSafe' function.",
+            "how_to_validate_state_update": "Verify that 'totalCollateral' has increased by '_amount'.",
+            "has_conditional_updates": false,
+            "summary_of_update": "The 'totalCollateral' variable is increased by the amount of collateral provided for the new Safe.",
+            "conditions": [
+              "None"
+            ]
+          },
           {
             "state_variable_name": "_owners",
             "type": "mapping",
-            "what_does_it_track": "Tracks the owner of each safe (tokenId).",
-            "why_is_is_important": "This ensures that only the owner can control the safe, part of minting a ERC721 token",
-            "when_is_it_updated": "When a new safe is minted via _safeMint.",
-            "how_to_validate_state_update": "Verify that the _owners mapping is updated with the msg.sender as the owner of the _safeId.",
+            "what_does_it_track": "Tracks the owner of each Safe NFT.",
+            "why_is_is_important": "It is crucial for tracking ownership of Safe NFTs, allowing users to manage their positions and interact with the protocol.",
+            "when_is_it_updated": "When a new Safe NFT is minted using '_safeMint', which is called by 'openSafe'.",
+            "how_to_validate_state_update": "Check _owners mapping. Verify that '_owners[tokenId]' is equal to 'to'",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the _owners mapping to record the owner of the newly created safe.",
+            "summary_of_update": "The '_owners' mapping is updated to associate the 'tokenId' (Safe ID) with the 'to' address (msg.sender). This effectively assigns ownership of the Safe NFT to the user.",
             "conditions": [
-              "_amount > 0",
-              "msg.value == _amount",
-              "_safeId > 0",
-              "safes[_safeId].collateralAmount == 0",
-              "_ownerOf(_safeId) == address(0)"
+              "to != address(0)"
             ]
           },
           {
             "state_variable_name": "_balances",
             "type": "mapping",
-            "what_does_it_track": "Tracks the number of safes owned by each address.",
-            "why_is_is_important": "Used to track ownership and count of safes owned by an address, following ERC721 standards.",
-            "when_is_it_updated": "When a new safe is minted.",
-            "how_to_validate_state_update": "Verify that the _balances mapping is updated, increasing the balance of the msg.sender by 1.",
+            "what_does_it_track": "Tracks the balance of each address, i.e., the number of Safe NFTs owned by each address.",
+            "why_is_is_important": "It is important for tracking number of tokens held by each address",
+            "when_is_it_updated": "When a new Safe NFT is minted using '_safeMint', which is called by 'openSafe'.",
+            "how_to_validate_state_update": "Check _balances mapping. Verify that '_balances[to]' increased by 1",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the _balances mapping to reflect the new safe ownership.",
+            "summary_of_update": "The '_balances' mapping which tracks the number of tokens held by each address is incremented by 1 for the recipient 'to'.",
             "conditions": [
-              "_amount > 0",
-              "msg.value == _amount",
-              "_safeId > 0",
-              "safes[_safeId].collateralAmount == 0",
-              "_ownerOf(_safeId) == address(0)"
+              "to != address(0)"
             ]
           }
         ]
+      },
+      {
+        "contract_name": "StableBaseCDP",
+        "state_updated": []
       }
     ]
   },
