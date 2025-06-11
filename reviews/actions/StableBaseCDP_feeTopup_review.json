@@ -1,35 +1,56 @@
 {
   "reviews": [
     {
-      "line_number": 72,
-      "description": "The `validate` method doesn't check updates to `safes[safeId].borrowedAmount`, `safes[safeId].collateralAmount`, `liquidationSnapshots[safeId].debtPerCollateralSnapshot`, `liquidationSnapshots[safeId].collateralPerCollateralSnapshot`, `totalCollateral`, and `totalDebt` when the liquidation snapshot is outdated.",
-      "function_affected": "validate",
-      "category": "implementation_missing",
-      "suggested_fix": "Add checks within `validate` to verify these state variables are updated correctly when `liquidationSnapshots[safeId].collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral`. Retrieve cumulative collateral/debt values from snapshots, calculate expected changes, and compare with actual changes in `borrowedAmount` and `collateralAmount`."
-    },
-    {
-      "line_number": 134,
-      "description": "The `validate` method doesn't parse and validate the `FeeDistributed` event; it only checks for its emission.",
-      "function_affected": "validate",
-      "category": "implementation_missing",
-      "suggested_fix": "Add code to parse the `FeeDistributed` event and verify that `feePaid`, `sbrStakersFee`, `stabilityPoolFee`, and `canRefund` values match expected values based on contract logic and the states of `DFIREStaking` and `StabilityPool` contracts. Account for `mint` being true or false."
-    },
-    {
       "line_number": 97,
-      "description": "The `validate` method doesn't handle fee refunds, leading to incorrect balance comparisons.",
+      "description": "The `validate` function lacks validation for potential `FeeRefund` events. When a refund occurs, the message sender's SBD balance should increase, and the contract's balance should decrease. The current implementation only considers the case where no refund occurs.",
       "function_affected": "validate",
       "category": "implementation_missing",
-      "suggested_fix": "Modify `validate` to parse the `FeeRefund` event. If emitted, retrieve `refundFee`. Adjust expected changes in actor/contract SBD token balances to account for the refund. Actor's balance increases, contract's decreases by `refundFee`."
+      "suggested_fix": "Parse the transaction receipt logs for `FeeRefund` events. If a `FeeRefund` event is found, adjust the expected changes in the actor's and contract's SBD balances accordingly. Add appropriate assertions to check the updated balances."
     },
     {
-      "line_number": 131,
-      "description": "Validation of `RedemptionQueueUpdated` event is incomplete; it doesn't validate the `prev` parameter.",
+      "line_number": 79,
+      "description": "The `validate` function doesn't account for updating `safes[safeId].borrowedAmount`, `safes[safeId].totalBorrowedAmount`,`safes[safeId].collateralAmount`, `liquidationSnapshots[safeId].debtPerCollateralSnapshot`, `liquidationSnapshots[safeId].collateralPerCollateralSnapshot`, `totalCollateral`, and `totalDebt` when the liquidation snapshot is outdated. Although the `_updateSafe` function in the smart contract handles these updates, the action's `validate` method should verify these state changes against snapshot data.  The condition for updating these values is `liquidationSnapshots[safeId].collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral`.",
       "function_affected": "validate",
       "category": "implementation_missing",
-      "suggested_fix": "Add logic to fetch the previous node from the Doubly Linked List contract and check that the event-emitted previous node matches this fetched value."
+      "suggested_fix": "In the `validate` function, check if `stableBaseCDPPrevious.liquidationSnapshots[safeId].collateralPerCollateralSnapshot != stableBaseCDPPrevious.cumulativeCollateralPerUnitCollateral`. If this condition is true, fetch the corresponding values from `stableBaseCDPPrevious` and `stableBaseCDPNew` and add assertions to check that `borrowedAmount`, `totalBorrowedAmount`, `collateralAmount`, `liquidationSnapshots[safeId].debtPerCollateralSnapshot`, `liquidationSnapshots[safeId].collateralPerCollateralSnapshot`, `totalCollateral`, and `totalDebt` are updated correctly based on the logic implemented in the `_updateSafe` function in the smart contract. Specifically check the values from the snapshots to confirm they have the expected new values based on `debtIncrease` and `collateralIncrease`."
+    },
+    {
+      "line_number": 118,
+      "description": "The `validate` function does not validate changes to the redemption queue resulting from the `feeTopup` action. While the `RedemptionQueueUpdated` event is checked, the actual position of the safe in the queue and its relation to other safes is not validated. Also, the code doesn't have checks for OrderedDoublyLinkedList's head and tail pointers.",
+      "function_affected": "validate",
+      "category": "implementation_missing",
+      "suggested_fix": "Implement logic in the `validate` function to query the `OrderedDoublyLinkedList` contract to determine the updated position of the safe in the redemption queue. Compare the safe's new position with its previous position based on their respective weights.  Validate that the `prev` pointer of the subsequent node in the queue points back to the safe. If head and tail pointers are updated, make sure to add the validations for those scenarios by querying on-chain data. Also, implement assertions to validate the correctness of `head` and `tail` states."
+    },
+    {
+      "line_number": 133,
+      "description": "The `validate` function lacks validation for state changes related to the StabilityPool and DFIREStaking contracts. The `distributeFees` function distributes fees to these contracts, potentially updating their `totalRewardPerToken`.",
+      "function_affected": "validate",
+      "category": "implementation_missing",
+      "suggested_fix": "Add logic to the `validate` function to fetch the previous and new values of `totalRewardPerToken` from both the StabilityPool and DFIREStaking contracts.  Add assertions to verify that these values have increased by the expected amount based on the distributed fees. Also, validate changes to SBR rewards, including `totalSbrRewardPerToken`, `lastSBRRewardDistributedTime`, `sbrRewardDistributionEndTime`, and `sbrRewardDistributionStatus` in the StabilityPool, particularly when the `sbrRewardDistributionStatus` is `NOT_STARTED` or `STARTED`."
+    },
+    {
+      "line_number": 155,
+      "description": "The action implementation doesn't validate the emission of the `SafeUpdated` event, which is emitted by the `_updateSafe` function. This event provides key information about changes to the safe's state.",
+      "function_affected": "validate",
+      "category": "implementation_missing",
+      "suggested_fix": "Add logic to parse the transaction receipt logs for the `SafeUpdated` event. Extract the values for `collateralAmount`, `borrowedAmount`, `collateralIncrease`, and `debtIncrease` from the event. Add assertions to verify that these values match the expected changes based on the liquidation snapshot logic."
+    },
+    {
+      "line_number": 83,
+      "description": "In line 83 the weight is compared using `previousSafe.weight + topupRate`. The states in snapshot might be stale due to other actions, which might make this validation fail even if action is correct. This can result in false positives.",
+      "function_affected": "validate",
+      "category": "implementation_error",
+      "suggested_fix": "Query the new safe value from on-chain data instead of relying on `newSnapshot`. This will ensure accurate and reliable validation by using the actual state of the contract."
+    },
+    {
+      "line_number": 86,
+      "description": "Similar to line 83, in line 86 the feePaid is compared using `previousSafe.feePaid + fee`. The states in snapshot might be stale due to other actions, which might make this validation fail even if action is correct. This can result in false positives.",
+      "function_affected": "validate",
+      "category": "implementation_error",
+      "suggested_fix": "Query the new safe value from on-chain data instead of relying on `newSnapshot`. This will ensure accurate and reliable validation by using the actual state of the contract."
     }
   ],
   "overall_assessment": [
-    "The code implements the feeTopup action but lacks comprehensive validation, particularly for debt/collateral updates, fee distribution, refunds, and the RedemptionQueueUpdated event's 'prev' parameter."
+    "The `feeTopup` action implementation seems reasonably comprehensive, covering key state updates and event emissions. However, there are areas where the validation logic could be more robust, especially regarding handling of refunds and comprehensive state update checks related to liquidation snapshots, total debt, and protocol mode."
   ]
 }
