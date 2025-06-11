@@ -1,0 +1,21 @@
+{
+  "missing_validations": [
+    "The `distributeFees` function can mint or burn SBD tokens. The action implementation does not validate the emitted `FeeDistributed` event parameters like `feePaid`, `mint`, `sbrStakersFee`, `stabilityPoolFee`, and `canRefund` against the expected values based on the contract logic and previous/new snapshots. Specifically, parse the `FeeDistributed` event and assert that `parsedEvent.args.feePaid`, `parsedEvent.args.sbrStakersFee`, and `parsedEvent.args.stabilityPoolFee` sum up to the `fee` passed into the `distributeFees` function.  Also, check if `parsedEvent.args.canRefund` is equal to `fee - parsedEvent.args.feePaid`.",
+    "The `_updateSafe` function updates the `borrowedAmount`, `totalBorrowedAmount`, and `collateralAmount` if the liquidation snapshot is outdated. This action implementation does not validate those updates after `feeTopup` is called. Compare `newSafe.borrowedAmount`, `newSafe.totalBorrowedAmount`, and `newSafe.collateralAmount` against the values calculated within the `_updateSafe` function based on `cumulativeDebtPerUnitCollateral`, `cumulativeCollateralPerUnitCollateral`, and the liquidation snapshots in `stableBaseCDPPrevious`.",
+    "The `_updateTotalDebt` function updates the `PROTOCOL_MODE` if the `totalDebt` exceeds `BOOTSTRAP_MODE_DEBT_THRESHOLD`. The action implementation already validates it, but it only validates the case where the protocol mode is changed from `BOOTSTRAP` to `NORMAL`. It misses the case where the protocol is already in `NORMAL` mode, where `totalDebt` is also updated. Add a check to verify `stableBaseCDPNew.totalDebt` against the expected total debt after accounting for debt increases or decreases due to `_updateSafe` and fee distribution, regardless of the `PROTOCOL_MODE`.",
+    "The action implementation doesn't validate that the safe is still owned by the same owner after the transaction. It is crucial for security reasons. Validate that `stableBaseCDPNew.safeOwners[safeId]` is equal to `stableBaseCDPPrevious.safeOwners[safeId]`.",
+    "The action implementation does not check for `FeeRefund` event which is emitted when a refund occurs. Missing this leads to incomplete validation. Search for the `FeeRefund` event in `executionReceipt.receipt.logs`. If the event exists, parse it and assert that `parsedEvent.args.safeId` equals `safeId` and validate that `newActorBalance` is equal to `previousActorBalance - fee + parsedEvent.args.refundFee`."
+  ],
+  "errors_in_existing_validations": [
+    {
+      "line_number": 130,
+      "description": "Line 130 checks the 'weight' parameter in the `RedemptionQueueUpdated` event. However, the 'prev' parameter (previous node in the queue) is not validated. This is important for ensuring the integrity of the redemption queue's linked list structure.",
+      "severity": "medium",
+      "category": "validation",
+      "suggested_fix": "Add a validation to check `parsedEvent.args.prev` against the expected previous node in the redemption queue based on the new snapshot. If `nearestSpotInRedemptionQueue` is 0, retrieve the previous node's ID from `stableBaseCDPNew.safesOrderedForRedemption.nodes[safeId].prev` and validate that `parsedEvent.args.prev` matches. If `nearestSpotInRedemptionQueue` is non-zero, validate that `parsedEvent.args.prev` matches `nearestSpotInRedemptionQueue`."
+    }
+  ],
+  "overall_assessment": [
+    "The action implementation covers the core state changes and event emissions related to the `feeTopup` function. However, it lacks validation for fee distribution, debt/collateral updates via liquidation snapshots, total debt updates in normal mode, safe ownership, and the `FeeRefund` event, making it less robust in detecting potential issues during the fee topup process. There also is no proper validation on total debt changes and protocol mode updates which can impact the overall system state."
+  ]
+}
