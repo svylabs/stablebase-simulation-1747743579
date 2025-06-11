@@ -11,111 +11,102 @@
     "contract_name": "StableBaseCDP",
     "function_name": "feeTopup",
     "pre_execution_parameter_generation_rules": [
-      "safeId: A valid safeId owned by the caller.",
-      "topupRate: A positive integer representing the fee top-up rate, such that (topupRate * safe.borrowedAmount) / BASIS_POINTS_DIVISOR results in a reasonable fee amount.",
-      "nearestSpotInRedemptionQueue: A safeId that is currently present in redemption queue, used to find a nearest spot to insert the safe into the queue. If not available, can be set to 0."
+      "safeId: A valid safeId that exists in the safes mapping and is owned by the message sender.",
+      "topupRate: A non-zero uint256 representing the fee top-up rate.",
+      "nearestSpotInRedemptionQueue: A uint256 representing the nearest spot in the redemption queue, used as a hint for insertion; can be 0 to indicate head.",
+      "The user must have sufficient SBD tokens approved for transfer to the contract, or have sufficient balance if using transfer.",
+      "The current block timestamp should be after safe.lastUpdatedTimestamp to trigger potential updates."
     ],
     "on_execution_state_updates_made": [
       {
-        "category": "Safe",
+        "category": "Safe State",
         "state_update_descriptions": [
-          "Updates the safe's collateralAmount and borrowedAmount based on cumulativeCollateralPerUnitCollateral and cumulativeDebtPerUnitCollateral. The updates reflect accumulated changes since the last snapshot.",
-          "Increases the safe's weight by topupRate.",
-          "Increases the safe's feePaid by fee."
+          "Updates the safe's collateralAmount and borrowedAmount based on cumulative collateral and debt per unit collateral if the liquidation snapshot is outdated, reflecting any inactive debt and collateral accrual.",
+          "Increases the safe's weight by the topupRate.",
+          "Increases the safe's feePaid by the calculated fee."
         ]
       },
       {
-        "category": "Token Transfer",
+        "category": "Token Transfers",
         "state_update_descriptions": [
-          "Transfers fee amount of SBD tokens from the msg.sender to the contract.",
-          "Refunds undistributed fee (refundFee) back to the user, if any."
+          "Transfers SBD tokens from the user to the contract to pay the fee.",
+          "Potentially refunds undistributed fee back to the user."
         ]
       },
       {
         "category": "Redemption Queue",
         "state_update_descriptions": [
-          "Updates the position of the safe in the redemption queue based on the new weight (safe.weight) and nearestSpotInRedemptionQueue."
-        ]
-      },
-      {
-        "category": "Total Debt",
-        "state_update_descriptions": [
-          "Updates the total debt of the protocol based on debtIncrease, reflecting any increase in borrowed amount due to cumulative effects.",
-          "PROTOCOL_MODE is updated from BOOTSTRAP to NORMAL if totalDebt exceeds BOOTSTRAP_MODE_DEBT_THRESHOLD"
+          "Updates the safe's position in the redemption queue based on its new weight."
         ]
       },
       {
         "category": "Fee Distribution",
         "state_update_descriptions": [
           "Distributes the fee to SBR stakers and the stability pool.",
-          "Mints SBD tokens if mint parameter in distributeFees is set to true and burns tokens if there is refund."
+          "Potentially mints or burns SBD tokens related to fee distribution."
+        ]
+      },
+      {
+        "category": "Total Debt",
+        "state_update_descriptions": [
+          "Updates the total debt of the protocol, potentially transitioning the protocol mode from BOOTSTRAP to NORMAL if the debt exceeds the BOOTSTRAP_MODE_DEBT_THRESHOLD."
         ]
       },
       {
         "category": "Liquidation Snapshot",
         "state_update_descriptions": [
-          "Updates liquidation snapshot for collateralPerCollateralSnapshot and debtPerCollateralSnapshot to cumulativeCollateralPerUnitCollateral and cumulativeDebtPerUnitCollateral respectively."
+          "Updates liquidation snapshot's debtPerCollateralSnapshot and collateralPerCollateralSnapshot"
         ]
       },
       {
         "category": "Total Collateral",
         "state_update_descriptions": [
-          "Updates the total collateral of the protocol based on collateralIncrease."
+          "Updates totalCollateral"
         ]
       }
     ],
     "post_execution_contract_state_validation_rules": [
       {
-        "category": "Safe",
+        "category": "Safe State",
         "rule_descriptions": [
-          "safe.weight should be increased by topupRate compared to its previous value.",
-          "safe.feePaid should be increased by fee compared to its previous value.",
-          "Safe's collateralAmount and borrowedAmount should be updated based on cumulativeCollateralPerUnitCollateral and cumulativeDebtPerUnitCollateral. Verify these values accurately reflect accumulated changes."
+          "safe.weight should be increased by topupRate.",
+          "safe.feePaid should be increased by (topupRate * safe.borrowedAmount) / BASIS_POINTS_DIVISOR.",
+          "safe.borrowedAmount should be updated correctly based on cumulativeDebtPerUnitCollateral and liquidationSnapshots.",
+          "safe.collateralAmount should be updated correctly based on cumulativeCollateralPerUnitCollateral and liquidationSnapshots."
         ]
       },
       {
-        "category": "Token Balance",
+        "category": "Token Balances",
         "rule_descriptions": [
-          "The contract's SBD token balance should increase by `fee - refundFee` (or fee if there is no refund).",
-          "The user's SBD token balance should decrease by `fee - refundFee`.",
-          "Verify that the StabilityPool's and DFIREStaking's SBD token balances have been updated correctly according to the distributed fees.",
-          "If refundFee > 0, verify that the user's SBD token balance has increased by refundFee."
+          "User's SBD token balance should decrease by the fee amount (minus any refund).",
+          "Contract's SBD token balance should increase by the fee amount (minus any distribution to stability pool or dfire staking and any refund)."
         ]
       },
       {
         "category": "Redemption Queue",
         "rule_descriptions": [
-          "The safe should be correctly positioned in the redemption queue based on its updated weight.",
-          "The previous and next nodes of the safe in the redemption queue should be updated accordingly."
+          "The doubly linked list representing the redemption queue should be correctly updated.",
+          "safeId should exist inside the safesOrderedForRedemption."
         ]
       },
       {
         "category": "Total Debt",
         "rule_descriptions": [
-          "Total debt should be updated correctly based on the collateral and debt updates.",
-          "The PROTOCOL_MODE should reflect the correct state based on the total debt (BOOTSTRAP or NORMAL)."
-        ]
-      },
-      {
-        "category": "Events",
-        "rule_descriptions": [
-          "A FeeTopup event should be emitted with the correct parameters (safeId, topupRate, fee, safe.weight).",
-          "A RedemptionQueueUpdated event should be emitted with the updated safe weight and previous node in the queue.",
-          "A FeeRefund event should be emitted if there is a refund, with the correct refund amount.",
-          "A SafeUpdated event should be emitted if the safe's collateral or debt is updated."
+          "Total debt should reflect any increases due to safe updates.",
+          "PROTOCOL_MODE should be NORMAL if totalDebt > BOOTSTRAP_MODE_DEBT_THRESHOLD, otherwise it should remain unchanged."
         ]
       },
       {
         "category": "Liquidation Snapshot",
         "rule_descriptions": [
-          "liquidationSnapshots[safeId].collateralPerCollateralSnapshot should be equal to cumulativeCollateralPerUnitCollateral.",
-          "liquidationSnapshots[safeId].debtPerCollateralSnapshot should be equal to cumulativeDebtPerUnitCollateral."
+          "liquidationSnapshots[safeId].debtPerCollateralSnapshot should equal cumulativeDebtPerUnitCollateral.",
+          "liquidationSnapshots[safeId].collateralPerCollateralSnapshot should equal cumulativeCollateralPerUnitCollateral."
         ]
       },
       {
         "category": "Total Collateral",
         "rule_descriptions": [
-          "Total Collateral should be updated correctly based on the collateral updates."
+          "totalCollateral value should reflect collateral increase."
         ]
       }
     ]
@@ -131,25 +122,81 @@
         "contract_name": "StableBaseCDP",
         "state_updated": [
           {
-            "state_variable_name": "safes",
-            "type": "mapping",
-            "what_does_it_track": "Tracks the collateral amount, borrowed amount, weight, total borrowed amount and fee paid for each safe.",
-            "why_is_is_important": "It's important for tracking the accumulated fee for a given safe and its weight in the redemption queue.",
-            "when_is_it_updated": "When the `feeTopup` function is called.",
-            "how_to_validate_state_update": "Check the `safes` mapping for the given `safeId` and verify that the `weight` has increased by `topupRate` and `feePaid` increased by `fee`.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Updates the `weight` and `feePaid` for a given `safeId`.",
-            "conditions": []
+            "state_variable_name": "safes[safeId].weight",
+            "type": "uint256",
+            "what_does_it_track": "The relative priority of a safe for redemption.",
+            "why_is_is_important": "Determines the order in which safes are redeemed, incentivizing users to pay fees to improve their position in the queue.  Higher weight increases redemption priority, influencing potential liquidation order and creating incentives for maintaining collateralization ratios. Weight affects redemption queue placement, influencing liquidation risk and redemption opportunities. Impacts overall system stability by managing redemption flow based on fee payments and safe prioritization.  Directly affects user incentives and risk management strategies within the protocol by adjusting redemption priority through fee top-ups.  Weight ensures fairness and efficient operation of the redemption mechanism by dynamically adjusting redemption order based on fee contributions and individual safe characteristics. Impacts liquidation risk and redemption opportunities within the system. Influences overall system stability by managing redemption flow based on fee payments and safe prioritization.  Weight updates affect redemption queue placement, liquidation risk, and redemption opportunities, aligning user incentives with system stability. Ensures fairness and efficient operation of the redemption mechanism by dynamically adjusting redemption order based on fee contributions and individual safe characteristics. Affects liquidation risk and redemption opportunities, aligning user incentives with system stability. Dynamically adjusts redemption order based on fee contributions and individual safe characteristics, aligning user incentives with system stability. Influences individual safe risk profiles and system-wide stability by prioritizing safes with higher fee contributions. Provides a mechanism for users to actively manage their risk and incentivize participation in maintaining system health.  Ensures safes with higher fees receive preferential treatment in redemptions, impacting user incentives and system stability.",
+            "when_is_it_updated": "When the fee is topped up, increasing the weight.",
+            "how_to_validate_state_update": "Compare the new value of safe.weight to the old value after adding topupRate.  Compare the new value of safe.feePaid to the old value after adding fee.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Increases the weight of the safe in the redemption queue by topupRate.",
+            "conditions": [
+              "balance >= fee",
+              "topupRate > 0"
+            ]
           },
           {
-            "state_variable_name": "safes",
-            "type": "mapping",
-            "what_does_it_track": "Tracks the collateral amount, borrowed amount, weight, total borrowed amount and fee paid for each safe.",
-            "why_is_is_important": "It's important for tracking changes in the safe's collateral and debt due to protocol-wide updates.",
-            "when_is_it_updated": "When the `_updateSafe` function is called.",
-            "how_to_validate_state_update": "Check if `liquidationSnapshots[_safeId].collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral`. If true, calculate the debt and collateral increase and then verify `_safe.borrowedAmount`, `_safe.totalBorrowedAmount` and `_safe.collateralAmount` values.",
+            "state_variable_name": "safes[safeId].feePaid",
+            "type": "uint256",
+            "what_does_it_track": "The cumulative amount of fees paid for a specific safe.",
+            "why_is_is_important": "Tracks the total fees paid by a safe, influencing redemption priority and reflecting user engagement. It also ensures accurate fee accounting for distribution and potential refunds.",
+            "when_is_it_updated": "When the fee is topped up.",
+            "how_to_validate_state_update": "Compare the new value of safe.feePaid to the old value after adding fee.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the borrowedAmount and collateralAmount based on cumulative values.",
+            "summary_of_update": "Increases the amount of fees paid by the safe.",
+            "conditions": [
+              "balance >= fee",
+              "topupRate > 0"
+            ]
+          },
+          {
+            "state_variable_name": "safes[safeId].borrowedAmount",
+            "type": "uint256",
+            "what_does_it_track": "The outstanding debt of a specific safe.",
+            "why_is_is_important": "Reflects the real-time debt of the safe, impacting liquidation risk and overall system solvency.",
+            "when_is_it_updated": "When cumulative debt per unit collateral changes.",
+            "how_to_validate_state_update": "Check SafeUpdated event.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates the borrowed amount of a safe based on cumulative debt and collateral changes.",
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "safes[safeId].totalBorrowedAmount",
+            "type": "uint256",
+            "what_does_it_track": "The total debt that has ever been borrowed from a specific safe.",
+            "why_is_is_important": "Tracks the total debt of the safe, impacting liquidation risk and overall system solvency.",
+            "when_is_it_updated": "When cumulative debt per unit collateral changes.",
+            "how_to_validate_state_update": "Check SafeUpdated event.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates the total borrowed amount of a safe based on cumulative debt and collateral changes.",
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "safes[safeId].collateralAmount",
+            "type": "uint256",
+            "what_does_it_track": "The amount of collateral deposited in a safe.",
+            "why_is_is_important": "Determines the collateralization ratio of the safe, directly impacting liquidation risk.",
+            "when_is_it_updated": "When cumulative collateral per unit collateral changes.",
+            "how_to_validate_state_update": "Check SafeUpdated event.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates the collateral amount of a safe based on cumulative debt and collateral changes.",
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "totalCollateral",
+            "type": "uint256",
+            "what_does_it_track": "The total amount of collateral in the system.",
+            "why_is_is_important": "Reflects the overall health of the system and its ability to cover outstanding debt. Vital for calculating global collateralization ratios.",
+            "when_is_it_updated": "When cumulative collateral per unit collateral changes.",
+            "how_to_validate_state_update": "Check SafeUpdated event.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates the total collateral in the system based on cumulative debt and collateral changes.",
             "conditions": [
               "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
             ]
@@ -157,26 +204,51 @@
           {
             "state_variable_name": "PROTOCOL_MODE",
             "type": "enum",
-            "what_does_it_track": "Tracks the current operating mode of the protocol (BOOTSTRAP or NORMAL).",
-            "why_is_is_important": "It's important for controlling protocol behavior based on the total debt level.",
-            "when_is_it_updated": "When the `_updateTotalDebt` function is called and debt exceeds the threshold.",
-            "how_to_validate_state_update": "Verify that when the condition `debt > BOOTSTRAP_MODE_DEBT_THRESHOLD && PROTOCOL_MODE == SBStructs.Mode.BOOTSTRAP` is met, `PROTOCOL_MODE` changes from `SBStructs.Mode.BOOTSTRAP` to `SBStructs.Mode.NORMAL`.",
+            "what_does_it_track": "The current operational mode of the protocol (BOOTSTRAP or NORMAL).",
+            "why_is_is_important": "Affects protocol behavior and risk parameters, especially during initial phases.",
+            "when_is_it_updated": "When totalDebt crosses the BOOTSTRAP_MODE_DEBT_THRESHOLD.",
+            "how_to_validate_state_update": "Check the PROTOCOL_MODE variable.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the protocol mode from BOOTSTRAP to NORMAL when total debt exceeds a threshold.",
+            "summary_of_update": "Potentially changes the protocol mode from BOOTSTRAP to NORMAL if the total debt exceeds a threshold.",
             "conditions": [
-              "debt > BOOTSTRAP_MODE_DEBT_THRESHOLD && PROTOCOL_MODE == SBStructs.Mode.BOOTSTRAP"
+              "debt > BOOTSTRAP_MODE_DEBT_THRESHOLD",
+              "PROTOCOL_MODE == SBStructs.Mode.BOOTSTRAP"
             ]
           },
           {
             "state_variable_name": "totalDebt",
             "type": "uint256",
             "what_does_it_track": "The total outstanding debt in the system.",
-            "why_is_is_important": "It's important for tracking the overall health and risk of the protocol.",
-            "when_is_it_updated": "When the `_updateTotalDebt` function is called.",
-            "how_to_validate_state_update": "Check the value of `totalDebt` after the execution of `_updateTotalDebt` to ensure it reflects the addition or subtraction of `delta` from `currentDebt`.",
+            "why_is_is_important": "Reflects the overall system solvency and risk. Used in system-wide calculations.",
+            "when_is_it_updated": "When the debt is updated.",
+            "how_to_validate_state_update": "Check SafeUpdated event.",
             "has_conditional_updates": false,
-            "summary_of_update": "Updates the total debt of the protocol.",
+            "summary_of_update": "Updates the total debt in the system.",
             "conditions": []
+          },
+          {
+            "state_variable_name": "safesOrderedForRedemption",
+            "type": "contract",
+            "what_does_it_track": "The ordered list of safes for redemption.",
+            "why_is_is_important": "Determines the order in which safes are redeemed, impacting liquidation risk and overall system stability.",
+            "when_is_it_updated": "When the fee is topped up.",
+            "how_to_validate_state_update": "Check RedemptionQueueUpdated event and DoublyLinkedList state.",
+            "has_conditional_updates": false,
+            "summary_of_update": "The position of the safe is updated in the redemption queue based on its new weight.",
+            "conditions": []
+          },
+          {
+            "state_variable_name": "sbdToken",
+            "type": "contract",
+            "what_does_it_track": "sbdToken contract",
+            "why_is_is_important": "Refunds undistributed fee back to the user.",
+            "when_is_it_updated": "When there is fee to refund to user.",
+            "how_to_validate_state_update": "Check FeeRefund event.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Refunds undistributed fee back to the user.",
+            "conditions": [
+              "canRefund > 0"
+            ]
           }
         ]
       },
@@ -184,63 +256,69 @@
         "contract_name": "DFIDToken",
         "state_updated": [
           {
-            "state_variable_name": "_balances",
-            "type": "mapping",
-            "what_does_it_track": "Tracks the balance of SBD tokens for each address.",
-            "why_is_is_important": "It's important for tracking the amount of SBD tokens held by each address.",
-            "when_is_it_updated": "When the `transferFrom` function is called in `feeTopup`.",
-            "how_to_validate_state_update": "Verify that the balance of the `StableBaseCDP` contract increases by `fee` and the balance of `msg.sender` decreases by `fee` using `balanceOf(address)` function.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Transfers `fee` amount of SBD tokens from `msg.sender` to the contract.",
-            "conditions": []
-          },
-          {
-            "state_variable_name": "_balances",
-            "type": "mapping",
-            "what_does_it_track": "Tracks the balance of SBD tokens for each address.",
-            "why_is_is_important": "It's important for tracking the amount of SBD tokens held by each address.",
-            "when_is_it_updated": "When a refund is issued in the `feeTopup` function.",
-            "how_to_validate_state_update": "If `refundFee > 0`, verify that `msg.sender` balance increases by `refundFee` using `balanceOf(address)` function.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Transfers `refundFee` amount of SBD tokens to `msg.sender` if `refundFee > 0`.",
-            "conditions": []
-          },
-          {
-            "state_variable_name": "_totalSupply",
+            "state_variable_name": "_balances[msg.sender]",
             "type": "uint256",
-            "what_does_it_track": "Tracks the total supply of SBD tokens.",
-            "why_is_is_important": "It's important for tracking the overall supply of SBD tokens.",
-            "when_is_it_updated": "When the `distributeFees` function is called and `mint` is true.",
-            "how_to_validate_state_update": "If mint is true, verify that the contract balance increases by `fee` using `balanceOf` and that `totalSupply` increases by `fee`.",
+            "what_does_it_track": "SBD balance of user.",
+            "why_is_is_important": "Tracks user's SBD balance.",
+            "when_is_it_updated": "When fee is paid.",
+            "how_to_validate_state_update": "Check Transfer event.",
             "has_conditional_updates": true,
-            "summary_of_update": "Mints SBD tokens to the contract if `mint` is true.",
+            "summary_of_update": "Reduces the SBD balance of the message sender by the fee amount.",
             "conditions": [
-              "mint is true"
+              "balance >= fee"
             ]
           },
           {
-            "state_variable_name": "_totalSupply",
+            "state_variable_name": "_balances[address(this)]",
             "type": "uint256",
-            "what_does_it_track": "Tracks the total supply of SBD tokens.",
-            "why_is_is_important": "It's important for tracking the overall supply of SBD tokens.",
-            "when_is_it_updated": "When the `distributeFees` function is called, `canRefund` is greater than 0 and `mint` is true.",
-            "how_to_validate_state_update": "If `canRefund > 0` and `mint` is true, verify that contract balance decreases by `canRefund` and `totalSupply` decreases by `canRefund`.",
+            "what_does_it_track": "The SBD balance of this contract.",
+            "why_is_is_important": "Tracks SBD balance.",
+            "when_is_it_updated": "When the fee is paid.",
+            "how_to_validate_state_update": "Check Transfer event.",
             "has_conditional_updates": true,
-            "summary_of_update": "Burns SBD tokens from the contract if `canRefund > 0` and `mint` is true.",
+            "summary_of_update": "Increases the SBD balance of the contract by the fee amount.",
             "conditions": [
-              "canRefund > 0 && mint is true"
+              "balance >= fee"
             ]
           },
           {
-            "state_variable_name": "totalBurned",
+            "state_variable_name": "totalSupply",
             "type": "uint256",
-            "what_does_it_track": "Tracks the total amount of burned tokens",
-            "why_is_is_important": "It helps to track the total amount of burned tokens.",
-            "when_is_it_updated": "When burn function is called.",
-            "how_to_validate_state_update": "Verify that totalBurned increases by `amount` when `_burn` is called.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Increment the total amount of tokens burned.",
-            "conditions": []
+            "what_does_it_track": "The total supply of the SBD token.",
+            "why_is_is_important": "Total supply of the token.",
+            "when_is_it_updated": "When burning SBD token.",
+            "how_to_validate_state_update": "Check Burn event.",
+            "has_conditional_updates": true,
+            "summary_of_update": "The total supply of SBD token decreases when undistributed fees are burned.",
+            "conditions": [
+              "canRefund > 0"
+            ]
+          },
+          {
+            "state_variable_name": "_balances[address(this)]",
+            "type": "uint256",
+            "what_does_it_track": "The SBD balance of this contract.",
+            "why_is_is_important": "Tracks SBD balance.",
+            "when_is_it_updated": "When burning SBD token.",
+            "how_to_validate_state_update": "Check Burn event.",
+            "has_conditional_updates": true,
+            "summary_of_update": "The contract's SBD balance decreases when undistributed fees are burned.",
+            "conditions": [
+              "canRefund > 0"
+            ]
+          },
+          {
+            "state_variable_name": "_balances[msg.sender]",
+            "type": "uint256",
+            "what_does_it_track": "SBD balance of user.",
+            "why_is_is_important": "Tracks user's SBD balance.",
+            "when_is_it_updated": "When fee is refunded.",
+            "how_to_validate_state_update": "Check Transfer event.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Increases the SBD balance of the msg.sender when fee is refunded.",
+            "conditions": [
+              "canRefund > 0"
+            ]
           }
         ]
       },
@@ -250,37 +328,65 @@
           {
             "state_variable_name": "nodes",
             "type": "mapping",
-            "what_does_it_track": "Stores nodes of the doubly linked list, each representing a safe's position in the queue.",
-            "why_is_is_important": "Maintains the order of safes for redemption based on their weight.",
-            "when_is_it_updated": "When the `upsert` function is called from `feeTopup`.",
-            "how_to_validate_state_update": "If the condition is met, verify that a new node is inserted into the linked list, and the head and tail pointers are updated accordingly. Inspect the `nodes` mapping to confirm the new node's `value`, `prev`, and `next` values.",
+            "what_does_it_track": "The structure of the doubly linked list representing the redemption queue.",
+            "why_is_is_important": "Maintains the correct ordering of safes for redemption, ensuring fairness and efficiency.",
+            "when_is_it_updated": "When the fee is topped up and the safe's weight changes.",
+            "how_to_validate_state_update": "Check the nodes mapping for changes in the linked list structure.",
+            "has_conditional_updates": false,
+            "summary_of_update": "Updates the linked list node structure to reflect the safe's new position in the redemption queue based on the topped-up fee. If the safe's ID is not present, then insert it. If the safe's ID is present, then update it. The nodes maintains value, previous, and next node ids.",
+            "conditions": []
+          },
+          {
+            "state_variable_name": "head",
+            "type": "uint256",
+            "what_does_it_track": "Head of the linked list.",
+            "why_is_is_important": "Maintains the head of the doubly linked list.",
+            "when_is_it_updated": "When the linked list is empty.",
+            "how_to_validate_state_update": "Check the head variable.",
             "has_conditional_updates": true,
-            "summary_of_update": "Inserts a new node or updates an existing node in the redemption queue based on its `weight`.",
+            "summary_of_update": "If linked list is empty, update the head to safe id.",
             "conditions": [
-              "nodes[id].value == 0 && nodes[id].next == 0 && nodes[id].prev == 0"
+              "head == 0"
+            ]
+          },
+          {
+            "state_variable_name": "tail",
+            "type": "uint256",
+            "what_does_it_track": "Tail of the linked list.",
+            "why_is_is_important": "Maintains the tail of the doubly linked list.",
+            "when_is_it_updated": "When the linked list is empty.",
+            "how_to_validate_state_update": "Check the tail variable.",
+            "has_conditional_updates": true,
+            "summary_of_update": "If linked list is empty, update the tail to safe id.",
+            "conditions": [
+              "head == 0"
             ]
           },
           {
             "state_variable_name": "head",
             "type": "uint256",
-            "what_does_it_track": "Tracks the first node in the linked list.",
-            "why_is_is_important": "Points to the first element.",
-            "when_is_it_updated": "When a new node is inserted from `upsert`.",
-            "how_to_validate_state_update": "Verify that the head pointer is updated when a new node is inserted at the beginning of the list.Inspect the `head` variable.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Updates head if the new node becomes the first node in the list.",
-            "conditions": []
+            "what_does_it_track": "Head of the linked list.",
+            "why_is_is_important": "Maintains the head of the doubly linked list.",
+            "when_is_it_updated": "When the first node is removed.",
+            "how_to_validate_state_update": "Check the head variable.",
+            "has_conditional_updates": true,
+            "summary_of_update": "If the node is the first, update the head to node.next.",
+            "conditions": [
+              "node.prev == 0"
+            ]
           },
           {
             "state_variable_name": "tail",
             "type": "uint256",
-            "what_does_it_track": "Tracks the last node in the linked list.",
-            "why_is_is_important": "Points to the last element.",
-            "when_is_it_updated": "When a new node is inserted from `upsert`.",
-            "how_to_validate_state_update": "Verify that the tail pointer is updated when a new node is inserted at the end of the list. Inspect the `tail` variable.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Updates tail if the new node becomes the last node in the list.",
-            "conditions": []
+            "what_does_it_track": "Tail of the linked list.",
+            "why_is_is_important": "Maintains the tail of the doubly linked list.",
+            "when_is_it_updated": "When the last node is removed.",
+            "how_to_validate_state_update": "Check the tail variable.",
+            "has_conditional_updates": true,
+            "summary_of_update": "If the node is the last, update the tail to node.prev.",
+            "conditions": [
+              "node.next == 0"
+            ]
           }
         ]
       },
@@ -290,14 +396,15 @@
           {
             "state_variable_name": "totalRewardPerToken",
             "type": "uint256",
-            "what_does_it_track": "Tracks the total reward per token in the staking pool.",
-            "why_is_is_important": "It's important for calculating rewards for stakers.",
-            "when_is_it_updated": "When the `addReward` function is called in `distributeFees` and `totalStake > 0`.",
-            "how_to_validate_state_update": "If `totalStake > 0`, verify that `totalRewardPerToken` increases by `(_amount * PRECISION) / _totalStake`. Check the contract's balance has increased by `_amount` and the sender's balance has decreased by the same amount.",
+            "what_does_it_track": "The cumulative reward per token for SBR stakers.",
+            "why_is_is_important": "Incentivizes SBR staking by providing rewards, contributing to protocol stability.",
+            "when_is_it_updated": "When the fee is topped up and distributed to SBR stakers.",
+            "how_to_validate_state_update": "Check RewardAdded event.",
             "has_conditional_updates": true,
-            "summary_of_update": "Increases the total reward per token for the staking pool if there are staked tokens.",
+            "summary_of_update": "Increases the total reward per token, distributing a portion of the fee to SBR stakers.",
             "conditions": [
-              "totalStake > 0"
+              "totalStake > 0",
+              "sbrStakersFee > 0"
             ]
           }
         ]
@@ -308,40 +415,14 @@
           {
             "state_variable_name": "totalRewardPerToken",
             "type": "uint256",
-            "what_does_it_track": "Tracks the total reward per token in the stability pool.",
-            "why_is_is_important": "It's important for calculating rewards for stakers.",
-            "when_is_it_updated": "When the `addReward` function is called in `distributeFees` and `totalStakedRaw > 0`.",
-            "how_to_validate_state_update": "If `totalStakedRaw > 0`, verify that `totalRewardPerToken` increases. Also check if SBR rewards are added.",
+            "what_does_it_track": "The cumulative reward per token for Stability Pool stakers.",
+            "why_is_is_important": "Incentivizes staking in the Stability Pool, providing liquidity for liquidations and contributing to protocol stability.",
+            "when_is_it_updated": "When the fee is topped up and distributed to the Stability Pool.",
+            "how_to_validate_state_update": "Check RewardAdded event.",
             "has_conditional_updates": true,
-            "summary_of_update": "Increases the total reward per token in the stability pool if there are staked tokens.",
+            "summary_of_update": "Increases the total reward per token in the Stability Pool, distributing a portion of the fee to stakers.",
             "conditions": [
-              "totalStakedRaw > 0"
-            ]
-          },
-          {
-            "state_variable_name": "totalSbrRewardPerToken",
-            "type": "uint256",
-            "what_does_it_track": "Tracks total SBR rewards per token",
-            "why_is_is_important": "Help to keep track on total sbr reward per token for reward distribution",
-            "when_is_it_updated": "when `_addSBRRewards` is called and `sbrRewardDistributionStatus == SBRRewardDistribution.STARTED`.",
-            "how_to_validate_state_update": "Verify `totalSbrRewardPerToken` increases by `((_sbrReward * stakeScalingFactor * precision) / totalStakedRaw) / precision` when sbrRewardDistributionStatus is STARTED.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates total SBR rewards per token in stability pool when distribution is started.",
-            "conditions": [
-              "sbrRewardDistributionStatus == SBRRewardDistribution.STARTED"
-            ]
-          },
-          {
-            "state_variable_name": "sbrRewardDistributionStatus",
-            "type": "enum",
-            "what_does_it_track": "tracks the sbr distribution reward status.",
-            "why_is_is_important": "Help to distribute reward properly.",
-            "when_is_it_updated": "when `_addSBRRewards` is called and `sbrRewardDistributionStatus == SBRRewardDistribution.NOT_STARTED`.",
-            "how_to_validate_state_update": "Verify that `lastSBRRewardDistributedTime`, `sbrRewardDistributionEndTime` and `sbrRewardDistributionStatus` are updated correctly when `sbrRewardDistributionStatus == SBRRewardDistribution.NOT_STARTED`",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates SBR reward distribution status to STARTED and initializes distribution parameters",
-            "conditions": [
-              "sbrRewardDistributionStatus == SBRRewardDistribution.NOT_STARTED"
+              "stabilityPoolFee > 0"
             ]
           }
         ]
@@ -433,7 +514,12 @@
         "contract_name": "DFIDToken",
         "code_snippet": "function balanceOf(address account) external view returns (uint256);\nfunction transferFrom(address from, address to, uint256 value) external returns (bool);\nfunction mint(\n        address to,\n        uint256 amount\n    ) external onlyOwner returns (bool) {\n        _mint(to, amount);\n        return true;\n    }\nfunction _mint(address account, uint256 value) internal {\n        if (account == address(0)) {\n            revert ERC20InvalidReceiver(address(0));\n        }\n        _update(address(0), account, value);\n    }\nfunction _update(address from, address to, uint256 value) internal virtual {\n        if (from == address(0)) {\n            // Overflow check required: The rest of the code assumes that totalSupply never overflows\n            _totalSupply += value;\n        } else {\n            uint256 fromBalance = _balances[from];\n            if (fromBalance < value) {\n                revert ERC20InsufficientBalance(from, fromBalance, value);\n            }\n            unchecked {\n                // Overflow not possible: value <= fromBalance <= totalSupply.\n                _balances[from] = fromBalance - value;\n            }\n        }\n\n        if (to == address(0)) {\n            unchecked {\n                // Overflow not possible: value <= totalSupply or value <= fromBalance <= totalSupply.\n                _totalSupply -= value;\n            }\n        } else {\n            unchecked {\n                // Overflow not possible: balance + value is at most totalSupply, which we know fits into a uint256.\n                _balances[to] += value;\n            }\n        }\n\n        emit Transfer(from, to, value);\n    }\nfunction burn(\n        address from,\n        uint256 amount\n    ) external onlyOwner returns (bool) {\n        require(from != address(0), \"Invalid address\");\n        require(amount > 0, \"Amount must be greater than 0\");\n        require(balanceOf(from) >= amount, \"Insufficient balance\");\n\n        _burn(from, amount); // Using OpenZeppelin's internal _burn function\n\n        totalBurned += amount;\n\n        emit Burn(from, amount);\n        return true;\n    }\nfunction _burn(address account, uint256 value) internal {\n        if (account == address(0)) {\n            revert ERC20InvalidSender(address(0));\n        }\n        _update(account, address(0), value);\n    }\nfunction transfer(address to, uint256 value) external returns (bool);",
         "references": {
-          "references": []
+          "references": [
+            {
+              "state_variable_name": "_stableBaseCDP",
+              "contract_name": "stableBaseCDP"
+            }
+          ]
         },
         "constants": []
       },
@@ -441,7 +527,20 @@
         "contract_name": "OrderedDoublyLinkedList",
         "code_snippet": "function upsert(\n        uint256 id,\n        uint256 value,\n        uint256 _nearestSpot\n    ) external override onlyOwner returns (Node memory) {\n        if (\n            nodes[id].value == 0 && nodes[id].next == 0 && nodes[id].prev == 0\n        ) {\n            return _insert(id, value, _nearestSpot);\n        } else {\n            return _update(id, value, _nearestSpot);\n        }\n    }\nfunction _insert(\n        uint256 id,\n        uint256 value,\n        uint256 _nearestSpot\n    ) internal returns (Node memory) {\n        Node memory node = Node(value, 0, 0);\n        return _insert(id, node, _nearestSpot);\n    }\nfunction _insert(\n        uint256 id,\n        Node memory node,\n        uint256 _nearestSpot\n    ) internal returns (Node memory) {\n        uint256 _head = head;\n        if (_head == 0) {\n            head = id;\n            tail = id;\n        } else {\n            uint256 _tail = tail;\n            if (_nearestSpot == 0) {\n                _nearestSpot = _head;\n            }\n\n            if (\n                nodes[_nearestSpot].prev == 0 &&\n                nodes[_nearestSpot].next == 0 &&\n                nodes[_nearestSpot].value == 0\n            ) {\n                _nearestSpot = head;\n                //nearest = nodes[_nearestSpot];\n            }\n            // nearest: 7, node:10: 7, 7, 9, 11, 11\n            // nearest: 9, node: 7: 7, 7, 9, 11, 11\n            // nearest: 9, node: 12: 7, 7, 9, 11, 11\n\n            while (\n                _nearestSpot != _tail && nodes[_nearestSpot].value < node.value\n            ) {\n                _nearestSpot = nodes[_nearestSpot].next;\n                //nearest = nodes[_nearestSpot];\n            }\n            // nearest: 11, node:10: 7, 7, 9, 11, 11\n            // nearest: 9, node:7: 7, 7, 9, 11, 11\n            // nearest: 11(last), node: 12: 7, 7, 9, 11, 11\n\n            while (\n                _nearestSpot != _head && nodes[_nearestSpot].value >= node.value\n            ) {\n                _nearestSpot = nodes[_nearestSpot].prev;\n                //nearest = nodes[_nearestSpot];\n            }\n            // nearest: 7, node: 7: 7, 7, 9, 11, 11\n\n            if (_nearestSpot == _head) {\n                if (nodes[_nearestSpot].value >= node.value) {\n                    node.next = _nearestSpot;\n                    nodes[_nearestSpot].prev = id;\n                    head = id;\n                } else {\n                    node.prev = _nearestSpot;\n                    node.next = nodes[_nearestSpot].next;\n                    nodes[_nearestSpot].next = id;\n                    if (node.next != 0) {\n                        nodes[node.next].prev = id;\n                    } else {\n                        tail = id;\n                    }\n                }\n            } else if (_nearestSpot == _tail) {\n                // nearest: 11(last), node: 12: 7, 7, 9, 11, 11\n                if (nodes[_nearestSpot].value < node.value) {\n                    node.prev = _nearestSpot;\n                    nodes[_nearestSpot].next = id;\n                    tail = id;\n                } else {\n                    node.prev = nodes[_nearestSpot].prev;\n                    node.next = _nearestSpot;\n                    nodes[_nearestSpot].prev = id;\n                    if (node.prev != 0) {\n                        nodes[node.prev].next = id;\n                    } else {\n                        head = id;\n                    }\n                }\n            } else {\n                // nearest: 9, node: 10: 7, 7, 9, 11, 11\n                node.prev = _nearestSpot;\n                node.next = nodes[_nearestSpot].next;\n                nodes[_nearestSpot].next = id;\n                nodes[node.next].prev = id;\n            }\n        }\n        nodes[id] = node;\n        return node;\n    }\nfunction _update(\n        uint256 id,\n        uint256 value,\n        uint256 _nearestSpot\n    ) internal returns (Node memory) {\n        Node memory node = _remove(id);\n        node.value = value;\n        node.prev = 0;\n        node.next = 0;\n        return _insert(id, node, _nearestSpot);\n    }\nfunction _remove(uint256 id) internal returns (Node memory) {\n        Node memory node = nodes[id];\n        if (node.prev == 0) {\n            head = node.next;\n            nodes[node.next].prev = 0;\n        } else {\n            nodes[node.prev].next = node.next;\n            nodes[node.next].prev = node.prev;\n        }\n        if (node.next == 0) {\n            tail = node.prev;\n            nodes[node.prev].next = 0;\n        } else {\n            nodes[node.next].prev = node.prev;\n            nodes[node.prev].next = node.next;\n        }\n        delete nodes[id];\n        return node;\n    }",
         "references": {
-          "references": []
+          "references": [
+            {
+              "state_variable_name": "head",
+              "contract_name": "OrderedDoublyLinkedList"
+            },
+            {
+              "state_variable_name": "tail",
+              "contract_name": "OrderedDoublyLinkedList"
+            },
+            {
+              "state_variable_name": "_stableBaseCDP",
+              "contract_name": "OrderedDoublyLinkedList"
+            }
+          ]
         },
         "constants": []
       },
