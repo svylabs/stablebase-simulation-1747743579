@@ -1,134 +1,20 @@
 {
   "attributes": [
     {
-      "name": "BASIS_POINTS_DIVISOR",
+      "name": "BasisPointsDivisor",
       "type": "uint256",
       "contract_function": "BASIS_POINTS_DIVISOR",
       "parameters": []
     },
     {
-      "name": "collateralLoss",
+      "name": "CollateralLoss",
       "type": "uint256",
       "contract_function": "collateralLoss",
       "parameters": []
     },
     {
-      "name": "lastSBRRewardDistributedTime",
-      "type": "uint256",
-      "contract_function": "lastSBRRewardDistributedTime",
-      "parameters": []
-    },
-    {
-      "name": "minimumScalingFactor",
-      "type": "uint256",
-      "contract_function": "minimumScalingFactor",
-      "parameters": []
-    },
-    {
-      "name": "precision",
-      "type": "uint256",
-      "contract_function": "precision",
-      "parameters": []
-    },
-    {
-      "name": "rewardLoss",
-      "type": "uint256",
-      "contract_function": "rewardLoss",
-      "parameters": []
-    },
-    {
-      "name": "rewardSenderActive",
-      "type": "bool",
-      "contract_function": "rewardSenderActive",
-      "parameters": []
-    },
-    {
-      "name": "sbrDistributionRate",
-      "type": "uint256",
-      "contract_function": "sbrDistributionRate",
-      "parameters": []
-    },
-    {
-      "name": "sbrRewardDistributionEndTime",
-      "type": "uint256",
-      "contract_function": "sbrRewardDistributionEndTime",
-      "parameters": []
-    },
-    {
-      "name": "sbrRewardDistributionStatus",
-      "type": "string",
-      "contract_function": "sbrRewardDistributionStatus",
-      "parameters": []
-    },
-    {
-      "name": "sbrRewardLoss",
-      "type": "uint256",
-      "contract_function": "sbrRewardLoss",
-      "parameters": []
-    },
-    {
-      "name": "stakeResetCount",
-      "type": "uint256",
-      "contract_function": "stakeResetCount",
-      "parameters": []
-    },
-    {
-      "name": "stakeScalingFactor",
-      "type": "uint256",
-      "contract_function": "stakeScalingFactor",
-      "parameters": []
-    },
-    {
-      "name": "totalCollateralPerToken",
-      "type": "uint256",
-      "contract_function": "totalCollateralPerToken",
-      "parameters": []
-    },
-    {
-      "name": "totalRewardPerToken",
-      "type": "uint256",
-      "contract_function": "totalRewardPerToken",
-      "parameters": []
-    },
-    {
-      "name": "totalSbrRewardPerToken",
-      "type": "uint256",
-      "contract_function": "totalSbrRewardPerToken",
-      "parameters": []
-    },
-    {
-      "name": "totalStakedRaw",
-      "type": "uint256",
-      "contract_function": "totalStakedRaw",
-      "parameters": []
-    },
-    {
-      "name": "sbrRewardSnapshots",
-      "type": "mapping",
-      "contract_function": "sbrRewardSnapshots",
-      "parameters": [
-        {
-          "name": "_user",
-          "type": "address",
-          "reference": "accountAddress"
-        }
-      ]
-    },
-    {
-      "name": "stakeResetSnapshots",
-      "type": "mapping",
-      "contract_function": "stakeResetSnapshots",
-      "parameters": [
-        {
-          "name": "_stakeResetCount",
-          "type": "uint256",
-          "reference": "stakeResetCount"
-        }
-      ]
-    },
-    {
-      "name": "userInfos",
-      "type": "mapping",
+      "name": "UserInfo",
+      "type": "tuple",
       "contract_function": "getUser",
       "parameters": [
         {
@@ -139,8 +25,134 @@
       ]
     },
     {
-      "name": "pendingCollaterals",
-      "type": "mapping",
+      "name": "IsLiquidationPossible",
+      "type": "bool",
+      "contract_function": "isLiquidationPossible",
+      "parameters": [
+        {
+          "name": "amount",
+          "type": "uint256",
+          "reference": "amount"
+        }
+      ]
+    },
+    {
+      "name": "LastSBRRewardDistributedTime",
+      "type": "uint256",
+      "contract_function": "lastSBRRewardDistributedTime",
+      "parameters": []
+    },
+    {
+      "name": "MinimumScalingFactor",
+      "type": "uint256",
+      "contract_function": "minimumScalingFactor",
+      "parameters": []
+    },
+    {
+      "name": "Precision",
+      "type": "uint256",
+      "contract_function": "precision",
+      "parameters": []
+    },
+    {
+      "name": "RewardLoss",
+      "type": "uint256",
+      "contract_function": "rewardLoss",
+      "parameters": []
+    },
+    {
+      "name": "RewardSenderActive",
+      "type": "bool",
+      "contract_function": "rewardSenderActive",
+      "parameters": []
+    },
+    {
+      "name": "SbrDistributionRate",
+      "type": "uint256",
+      "contract_function": "sbrDistributionRate",
+      "parameters": []
+    },
+    {
+      "name": "SbrRewardDistributionEndTime",
+      "type": "uint256",
+      "contract_function": "sbrRewardDistributionEndTime",
+      "parameters": []
+    },
+    {
+      "name": "SbrRewardDistributionStatus",
+      "type": "uint8",
+      "contract_function": "sbrRewardDistributionStatus",
+      "parameters": []
+    },
+    {
+      "name": "SbrRewardLoss",
+      "type": "uint256",
+      "contract_function": "sbrRewardLoss",
+      "parameters": []
+    },
+    {
+      "name": "SbrRewardSnapshots",
+      "type": "tuple",
+      "contract_function": "sbrRewardSnapshots",
+      "parameters": [
+        {
+          "name": "",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
+    },
+    {
+      "name": "StakeResetCount",
+      "type": "uint256",
+      "contract_function": "stakeResetCount",
+      "parameters": []
+    },
+    {
+      "name": "StakeResetSnapshots",
+      "type": "tuple",
+      "contract_function": "stakeResetSnapshots",
+      "parameters": [
+        {
+          "name": "",
+          "type": "uint256",
+          "reference": "stakeResetCount"
+        }
+      ]
+    },
+    {
+      "name": "StakeScalingFactor",
+      "type": "uint256",
+      "contract_function": "stakeScalingFactor",
+      "parameters": []
+    },
+    {
+      "name": "TotalCollateralPerToken",
+      "type": "uint256",
+      "contract_function": "totalCollateralPerToken",
+      "parameters": []
+    },
+    {
+      "name": "TotalRewardPerToken",
+      "type": "uint256",
+      "contract_function": "totalRewardPerToken",
+      "parameters": []
+    },
+    {
+      "name": "TotalSbrRewardPerToken",
+      "type": "uint256",
+      "contract_function": "totalSbrRewardPerToken",
+      "parameters": []
+    },
+    {
+      "name": "TotalStakedRaw",
+      "type": "uint256",
+      "contract_function": "totalStakedRaw",
+      "parameters": []
+    },
+    {
+      "name": "UserPendingCollateral",
+      "type": "uint256",
       "contract_function": "userPendingCollateral",
       "parameters": [
         {
@@ -151,8 +163,8 @@
       ]
     },
     {
-      "name": "pendingRewards",
-      "type": "mapping",
+      "name": "UserPendingReward",
+      "type": "uint256",
       "contract_function": "userPendingReward",
       "parameters": [
         {
@@ -163,8 +175,8 @@
       ]
     },
     {
-      "name": "pendingRewardAndCollaterals",
-      "type": "mapping",
+      "name": "UserPendingRewardAndCollateral",
+      "type": "tuple",
       "contract_function": "userPendingRewardAndCollateral",
       "parameters": [
         {
@@ -173,10 +185,22 @@
           "reference": "accountAddress"
         }
       ]
+    },
+    {
+      "name": "Users",
+      "type": "tuple",
+      "contract_function": "users",
+      "parameters": [
+        {
+          "name": "",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface StabilityPoolSnapshot {\n  BASIS_POINTS_DIVISOR: bigint;\n  collateralLoss: bigint;\n  lastSBRRewardDistributedTime: bigint;\n  minimumScalingFactor: bigint;\n  precision: bigint;\n  rewardLoss: bigint;\n  rewardSenderActive: boolean;\n  sbrDistributionRate: bigint;\n  sbrRewardDistributionEndTime: bigint;\n  sbrRewardDistributionStatus: string;\n  sbrRewardLoss: bigint;\n  stakeResetCount: bigint;\n  stakeScalingFactor: bigint;\n  totalCollateralPerToken: bigint;\n  totalRewardPerToken: bigint;\n  totalSbrRewardPerToken: bigint;\n  totalStakedRaw: bigint;\n  sbrRewardSnapshots: { [accountAddress: string]: { rewardSnapshot: bigint; status: number } };\n  stakeResetSnapshots: { [stakeResetCount: string]: { scalingFactor: bigint; totalRewardPerToken: bigint; totalCollateralPerToken: bigint; totalSBRRewardPerToken: bigint } };\n  userInfos: { [accountAddress: string]: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint; cumulativeProductScalingFactor: bigint; stakeResetCount: bigint } };\n  pendingCollaterals: { [accountAddress: string]: bigint };\n  pendingRewards: { [accountAddress: string]: bigint };\n  pendingRewardAndCollaterals: { [accountAddress: string]: {pendingReward: bigint, pendingCollateral: bigint, total: bigint} };\n}\n",
+    "contract_snapshot_interface_code": "interface StabilityPoolSnapshot {\n  basisPointsDivisor: bigint;\n  collateralLoss: bigint;\n  lastSBRRewardDistributedTime: bigint;\n  minimumScalingFactor: bigint;\n  precision: bigint;\n  rewardLoss: bigint;\n  rewardSenderActive: boolean;\n  sbrDistributionRate: bigint;\n  sbrRewardDistributionEndTime: bigint;\n  sbrRewardDistributionStatus: number;\n  sbrRewardLoss: bigint;\n  stakeResetCount: bigint;\n  stakeScalingFactor: bigint;\n  totalCollateralPerToken: bigint;\n  totalRewardPerToken: bigint;\n  totalSbrRewardPerToken: bigint;\n  totalStakedRaw: bigint;\n  users: { [accountAddress: string]: UserInfo };\n  sbrRewardSnapshots: { [accountAddress: string]: SBRRewardSnapshot };\n  stakeResetSnapshots: { [stakeResetCount: number]: StakeResetSnapshot };\n  userPendingCollateral: { [accountAddress: string]: bigint };\n  userPendingReward: { [accountAddress: string]: bigint };\n  userPendingRewardAndCollateral: { [accountAddress: string]: [bigint, bigint, bigint] };\n}\n\ninterface UserInfo {\n  stake: bigint;\n  rewardSnapshot: bigint;\n  collateralSnapshot: bigint;\n  cumulativeProductScalingFactor: bigint;\n  stakeResetCount: bigint;\n}\n\ninterface SBRRewardSnapshot {\n  rewardSnapshot: bigint;\n  status: number; // enum StabilityPool.SBRRewardDistribution\n}\n\ninterface StakeResetSnapshot {\n  scalingFactor: bigint;\n  totalRewardPerToken: bigint;\n  totalCollateralPerToken: bigint;\n  totalSBRRewardPerToken: bigint;\n}",
     "interface_name": "StabilityPoolSnapshot"
   }
 }
