@@ -1,14 +1,7 @@
 import { Action, Actor, Snapshot } from "@svylabs/ilumina";
-import type RunContext, { ExecutionReceipt } from "@svylabs/ilumina";
+import type { RunContext, ExecutionReceipt } from "@svylabs/ilumina";
 import { ethers } from "ethers";
-import { expect } from 'chai';
-
-enum SBRRewardDistribution {
-    NOT_STARTED,
-    STARTED,
-    ENDED,
-    CLAIMED
-}
+import { expect } from "chai";
 
 export class ClaimAction extends Action {
   contract: ethers.Contract;
@@ -24,13 +17,13 @@ export class ClaimAction extends Action {
     currentSnapshot: Snapshot
   ): Promise<[boolean, any, Record<string, any>]> {
     const stabilityPoolSnapshot = currentSnapshot.contractSnapshot.stabilityPool;
-    const userAddress = actor.account.address;
+    const user = stabilityPoolSnapshot.users[actor.account.address];
 
-    if (!stabilityPoolSnapshot.userInfos[userAddress] || stabilityPoolSnapshot.userInfos[userAddress].stake === BigInt(0)) {
+    if (!user || user.stake <= BigInt(0)) {
       return [false, {}, {}];
     }
 
-    // No parameters needed for claim function
+    // No parameters to initialize for claim()
     return [true, [], {}];
   }
 
@@ -39,7 +32,7 @@ export class ClaimAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot,
     actionParams: any
-  ): Promise<Record<string, any> | void> {
+  ): Promise<ExecutionReceipt> {
     const tx = await this.contract.connect(actor.account.value).claim();
     const receipt = await tx.wait();
     return { receipt };
@@ -53,167 +46,135 @@ export class ClaimAction extends Action {
     actionParams: any,
     executionReceipt: ExecutionReceipt
   ): Promise<boolean> {
-    const userAddress = actor.account.address;
-    const previousStabilityPool = previousSnapshot.contractSnapshot.stabilityPool;
-    const newStabilityPool = newSnapshot.contractSnapshot.stabilityPool;
+    const previousStabilityPoolSnapshot = previousSnapshot.contractSnapshot.stabilityPool;
+    const newStabilityPoolSnapshot = newSnapshot.contractSnapshot.stabilityPool;
+    const dfidTokenAddress = (context.contracts.dfidToken as ethers.Contract).target;
+    const dfireTokenAddress = (context.contracts.dfireToken as ethers.Contract).target;
 
-    const previousDFIDToken = previousSnapshot.contractSnapshot.dfidToken;
-    const newDFIDToken = newSnapshot.contractSnapshot.dfidToken;
+    const previousDFIDTokenSnapshot = previousSnapshot.contractSnapshot.dfidToken;
+    const newDFIDTokenSnapshot = newSnapshot.contractSnapshot.dfidToken;
+    const previousDFIRETokenSnapshot = previousSnapshot.contractSnapshot.dfireToken;
+    const newDFIRETokenSnapshot = newSnapshot.contractSnapshot.dfireToken;
 
-    const previousDFIREToken = previousSnapshot.contractSnapshot.dfireToken;
-    const newDFIREToken = newSnapshot.contractSnapshot.dfireToken;
+    const previousUserAccountSnapshot = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+    const newUserAccountSnapshot = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
 
-    const previousAccountSnapshot = previousSnapshot.accountSnapshot;
-    const newAccountSnapshot = newSnapshot.accountSnapshot;
+    const previousUser = previousStabilityPoolSnapshot.users[actor.account.address];
+    const newUser = newStabilityPoolSnapshot.users[actor.account.address];
 
-    const previousETHBalance = previousAccountSnapshot[userAddress] || BigInt(0);
-    const newETHBalance = newAccountSnapshot[userAddress] || BigInt(0);
+    const previousSbrRewardSnapshot = previousStabilityPoolSnapshot.sbrRewardSnapshots[actor.account.address];
+    const newSbrRewardSnapshot = newStabilityPoolSnapshot.sbrRewardSnapshots[actor.account.address];
 
-    const previousUserInfo = previousStabilityPool.userInfos[userAddress];
-    const newUserInfo = newStabilityPool.userInfos[userAddress];
+    // User Balances
+    const previousPendingRewardAndCollateral = previousStabilityPoolSnapshot.userPendingRewardAndCollateral[actor.account.address] || [BigInt(0), BigInt(0), BigInt(0)];
+    const pendingReward = previousPendingRewardAndCollateral[0];
+    const pendingCollateral = previousPendingRewardAndCollateral[1];
+    const pendingSbrRewards = previousPendingRewardAndCollateral[2];
 
-    const BASIS_POINTS_DIVISOR = newStabilityPool.BASIS_POINTS_DIVISOR;
-
-    // Validate stake, rewardSnapshot, collateralSnapshot, cumulativeProductScalingFactor, and stakeResetCount
-    if (previousUserInfo && previousUserInfo.stake > BigInt(0)) {
-      expect(newUserInfo.rewardSnapshot).to.equal(newStabilityPool.totalRewardPerToken, "rewardSnapshot should equal totalRewardPerToken");
-      expect(newUserInfo.collateralSnapshot).to.equal(newStabilityPool.totalCollateralPerToken, "collateralSnapshot should equal totalCollateralPerToken");
-      expect(newUserInfo.cumulativeProductScalingFactor).to.equal(newStabilityPool.stakeScalingFactor, "cumulativeProductScalingFactor should equal stakeScalingFactor");
-      expect(newUserInfo.stakeResetCount).to.equal(newStabilityPool.stakeResetCount, "stakeResetCount should equal stakeResetCount");
-    }
-
-    // Validate SBR reward snapshots and status
-    const previousSBRSnapshot = previousStabilityPool.sbrRewardSnapshots[userAddress];
-        const newSBRSnapshot = newStabilityPool.sbrRewardSnapshots[userAddress];
-
-        if (newStabilityPool.sbrRewardDistributionStatus !== "ENDED") {
-            expect(newSBRSnapshot.rewardSnapshot).to.equal(newStabilityPool.totalSbrRewardPerToken, "sbrRewardSnapshots[msg.sender].rewardSnapshot should equal totalSbrRewardPerToken");
-        } else {
-            expect(newSBRSnapshot.status).to.equal(SBRRewardDistribution.CLAIMED, "sbrRewardSnapshots[msg.sender].status should be CLAIMED");
-        }
-
-    // Calculate pending rewards and collateral
-    let pendingReward = BigInt(0);
-    let pendingCollateral = BigInt(0);
-    let pendingSbrRewards = BigInt(0);
     let rewardFee = BigInt(0);
-    let collateralFee = BigInt(0);
-    let sbrFee = BigInt(0);
-    const frontendAddress = ethers.ZeroAddress; // Assuming no frontend
-    let fee = BigInt(0);
-
-        //Parameter generation based on snapshot data
-        if (previousStabilityPool.totalStakedRaw > 0) {
-           fee = BigInt(context.prng.next()) % (BASIS_POINTS_DIVISOR + BigInt(1)); // Ensure fee is within BASIS_POINTS_DIVISOR
-        }
-
-    if (previousUserInfo && previousUserInfo.cumulativeProductScalingFactor !== BigInt(0)) {
-      const stakeResetCount = newStabilityPool.stakeResetCount;
-      const userStakeResetCount = previousUserInfo.stakeResetCount;
-
-      let pendingRewardVal: bigint;
-      let pendingCollateralVal: bigint;
-      let pendingSbrRewardsVal: bigint;
-
-      const calculateSbrRewards = newStabilityPool.sbrRewardSnapshots[userAddress]?.status !== SBRRewardDistribution.CLAIMED;
-
-      if (userStakeResetCount === stakeResetCount) {
-        pendingRewardVal = (((newStabilityPool.totalRewardPerToken - previousUserInfo.rewardSnapshot) * previousUserInfo.stake) * newStabilityPool.precision) / previousUserInfo.cumulativeProductScalingFactor / newStabilityPool.precision;
-        pendingCollateralVal = (((newStabilityPool.totalCollateralPerToken - previousUserInfo.collateralSnapshot) * previousUserInfo.stake) * newStabilityPool.precision) / previousUserInfo.cumulativeProductScalingFactor / newStabilityPool.precision;
-
-        if (calculateSbrRewards) {
-          pendingSbrRewardsVal = (((newStabilityPool.totalSbrRewardPerToken - (previousSBRSnapshot?.rewardSnapshot || BigInt(0))) * previousUserInfo.stake) * newStabilityPool.precision) / previousUserInfo.cumulativeProductScalingFactor / newStabilityPool.precision;
-        }
-      } else {
-        const snapshot = newStabilityPool.stakeResetSnapshots[userStakeResetCount];
-        pendingRewardVal = (((snapshot.totalRewardPerToken - previousUserInfo.rewardSnapshot) * previousUserInfo.stake) * newStabilityPool.precision) / previousUserInfo.cumulativeProductScalingFactor / newStabilityPool.precision;
-        pendingCollateralVal = (((snapshot.totalCollateralPerToken - previousUserInfo.collateralSnapshot) * previousUserInfo.stake) * newStabilityPool.precision) / previousUserInfo.cumulativeProductScalingFactor / newStabilityPool.precision;
-
-        if (calculateSbrRewards) {
-          pendingSbrRewardsVal = (((snapshot.totalSBRRewardPerToken - (previousSBRSnapshot?.rewardSnapshot || BigInt(0))) * previousUserInfo.stake) * newStabilityPool.precision) / previousUserInfo.cumulativeProductScalingFactor / newStabilityPool.precision;
-        }
-
-        const userStake = (previousUserInfo.stake * snapshot.scalingFactor * newStabilityPool.precision) / previousUserInfo.cumulativeProductScalingFactor / newStabilityPool.precision;
-
-        if (userStakeResetCount + 1 !== stakeResetCount) {
-          const snapshot2 = newStabilityPool.stakeResetSnapshots[userStakeResetCount + 1];
-          pendingRewardVal += (snapshot2.totalRewardPerToken * userStake) / newStabilityPool.precision;
-          pendingCollateralVal += (snapshot2.totalCollateralPerToken * userStake) / newStabilityPool.precision;
-          if (calculateSbrRewards) {
-            pendingSbrRewardsVal += (snapshot2.totalSBRRewardPerToken * userStake) / newStabilityPool.precision;
-          }
-        } else {
-          pendingRewardVal += (newStabilityPool.totalRewardPerToken * userStake) / newStabilityPool.precision;
-          pendingCollateralVal += (newStabilityPool.totalCollateralPerToken * userStake) / newStabilityPool.precision;
-          if (calculateSbrRewards) {
-            pendingSbrRewardsVal += (newStabilityPool.totalSbrRewardPerToken * userStake) / newStabilityPool.precision;
-          }
-        }
-      }
-
-      pendingReward = pendingRewardVal > BigInt(0) ? pendingRewardVal : BigInt(0); // Avoid negative pendingReward
-      pendingCollateral = pendingCollateralVal > BigInt(0) ? pendingCollateralVal : BigInt(0);
-      pendingSbrRewards = pendingSbrRewardsVal > BigInt(0) ? pendingSbrRewardsVal : BigInt(0);
-
-            rewardFee = (fee * pendingReward) / BASIS_POINTS_DIVISOR;
-            collateralFee = (fee * pendingCollateral) / BASIS_POINTS_DIVISOR;
-            sbrFee = (fee * pendingSbrRewards) / BASIS_POINTS_DIVISOR;
+    if (pendingReward > BigInt(0)) {
+      rewardFee = (pendingReward * BigInt(0)) / previousStabilityPoolSnapshot.basisPointsDivisor; //fee is 0 for simplicity
     }
 
-        const expectedDFIDTokenBalanceChange = pendingReward - rewardFee;
-        if (expectedDFIDTokenBalanceChange > BigInt(0)) {
-            expect(newDFIDToken.balances[userAddress] - previousDFIDToken.balances[userAddress]).to.equal(expectedDFIDTokenBalanceChange, "User's DFIDToken balance should increase by the reward amount");
+    let collateralFee = BigInt(0);
+    if (pendingCollateral > BigInt(0)) {
+      collateralFee = (pendingCollateral * BigInt(0)) / previousStabilityPoolSnapshot.basisPointsDivisor; //fee is 0 for simplicity
+    }
 
-            if (fee > BigInt(0)) {
-                const expectedFeeBalance = rewardFee;
-                expect(newDFIDToken.balances[frontendAddress] - previousDFIDToken.balances[frontendAddress]).to.equal(expectedFeeBalance, "Frontend's DFIDToken balance should increase by the reward fee amount");
-            }
-        }
+    let sbrFee = BigInt(0);
+    if (pendingSbrRewards > BigInt(0)) {
+      sbrFee = (pendingSbrRewards * BigInt(0)) / previousStabilityPoolSnapshot.basisPointsDivisor; //fee is 0 for simplicity
+    }
 
-        const expectedETHBalanceChange = pendingCollateral - collateralFee;
-        if (expectedETHBalanceChange > BigInt(0)) {
-            expect(newETHBalance - previousETHBalance).to.equal(expectedETHBalanceChange, "User's ETH balance should increase by the collateral amount");
+    const expectedDFIDTokenBalanceChange = pendingReward - rewardFee;
+    const expectedETHBalanceChange = pendingCollateral - collateralFee;
+    const expectedDFIRETokenBalanceChange = pendingSbrRewards - sbrFee;
 
-            if (fee > BigInt(0)) {
-                // Assuming frontendAddress exists and has an ETH balance
-                const previousFrontendETHBalance = previousAccountSnapshot[frontendAddress] || BigInt(0);
-                const expectedFrontendETHBalanceChange = collateralFee;
-                //expect((newAccountSnapshot[frontendAddress] || BigInt(0)) - previousFrontendETHBalance).to.equal(expectedFrontendETHBalanceChange, "Frontend's ETH balance should increase by the collateral fee amount");
-            }
-        }
+    expect(
+      (newDFIDTokenSnapshot.balances[actor.account.address] || BigInt(0)) - (previousDFIDTokenSnapshot.balances[actor.account.address] || BigInt(0))
+    ).to.equal(expectedDFIDTokenBalanceChange, "User's staking token balance should increase by the pending reward amount, minus the frontend fee.");
+    expect(newUserAccountSnapshot - previousUserAccountSnapshot).to.equal(
+      expectedETHBalanceChange, "User's ETH balance should increase by the pending collateral amount, minus the frontend fee.");
+    expect(
+      (newDFIRETokenSnapshot.tokenBalances[actor.account.address] || BigInt(0)) - (previousDFIRETokenSnapshot.tokenBalances[actor.account.address] || BigInt(0))
+    ).to.equal(expectedDFIRETokenBalanceChange, "User's SBR token balance should increase by the pending SBR reward amount, minus the frontend fee.");
 
-        const expectedSBRBalanceChange = pendingSbrRewards - sbrFee;
-        if (expectedSBRBalanceChange > BigInt(0)) {
-            expect(newDFIREToken.balances[userAddress] - previousDFIREToken.balances[userAddress]).to.equal(expectedSBRBalanceChange, "User's DFIREToken balance should increase by the SBR reward amount");
+    if (previousUser && newUser) {
+      const stakeScalingFactor = newStabilityPoolSnapshot.stakeScalingFactor;
+      const precision = previousStabilityPoolSnapshot.precision;
+      const cumulativeProductScalingFactor = previousUser.cumulativeProductScalingFactor;
+      const expectedStake = (((previousUser.stake * stakeScalingFactor) * precision) / cumulativeProductScalingFactor) / precision;
+      expect(newUser.stake).to.equal(expectedStake, "User's stake should be updated to reflect current stake scaling factor.");
+    }
 
-            if (fee > BigInt(0)) {
-                 const expectedFeeBalance = sbrFee;
-                expect(newDFIREToken.balances[frontendAddress] - previousDFIREToken.balances[frontendAddress]).to.equal(expectedFeeBalance, "Frontend's DFIREToken balance should increase by the SBR reward fee amount");
-            }
-        }
+    // Contract State
+    const expectedStabilityPoolDFIDTokenBalanceChange = -expectedDFIDTokenBalanceChange;
+    const expectedStabilityPoolETHBalanceChange = -expectedETHBalanceChange;
 
-        // Validate user stake update
-        if (previousUserInfo && previousUserInfo.cumulativeProductScalingFactor !== BigInt(0)) {
-            let expectedStake: bigint;
+    expect(
+      ((newDFIDTokenSnapshot.balances[(context.contracts.stabilityPool as ethers.Contract).target] || BigInt(0)) - (previousDFIDTokenSnapshot.balances[(context.contracts.stabilityPool as ethers.Contract).target] || BigInt(0)))
+    ).to.equal(expectedStabilityPoolDFIDTokenBalanceChange, "stakingToken's balance in StabilityPool should decrease by the amount of rewards claimed (minus fees).");
+    expect(
+      (newSnapshot.accountSnapshot[(context.contracts.stabilityPool as ethers.Contract).target] || BigInt(0)) - (previousSnapshot.accountSnapshot[(context.contracts.stabilityPool as ethers.Contract).target] || BigInt(0))
+    ).to.equal(expectedStabilityPoolETHBalanceChange, "StabilityPool's ETH balance should decrease by the amount of collateral claimed (minus fees).");
 
-            if (previousUserInfo.stakeResetCount == newStabilityPool.stakeResetCount) {
-                expectedStake = (((previousUserInfo.stake * newStabilityPool.stakeScalingFactor) * newStabilityPool.precision) /
-                    previousUserInfo.cumulativeProductScalingFactor) / newStabilityPool.precision;
-            } else {
-                const snapshot = newStabilityPool.stakeResetSnapshots[previousUserInfo.stakeResetCount];
-                expectedStake = ((previousUserInfo.stake * snapshot.scalingFactor * newStabilityPool.precision) /
-                    previousUserInfo.cumulativeProductScalingFactor) / newStabilityPool.precision;
+    if (newUser && previousUser) {
+      expect(newUser.rewardSnapshot).to.equal(
+        newStabilityPoolSnapshot.totalRewardPerToken, 'Verify that `users[msg.sender].rewardSnapshot` equals `totalRewardPerToken`.'
+      );
+      expect(newUser.collateralSnapshot).to.equal(
+        newStabilityPoolSnapshot.totalCollateralPerToken, 'Verify that `users[msg.sender].collateralSnapshot` equals `totalCollateralPerToken`.'
+      );
+    }
 
-                if (previousUserInfo.stakeResetCount + 1 != newStabilityPool.stakeResetCount) {
-                    const snapshot2 = newStabilityPool.stakeResetSnapshots[previousUserInfo.stakeResetCount + 1];
-                    expectedStake = (expectedStake * snapshot2.scalingFactor) / newStabilityPool.precision;
-                } else {
-                    expectedStake = (expectedStake * newStabilityPool.stakeScalingFactor) / newStabilityPool.precision;
-                }
-            }
+    // Validate sbrRewardDistributionStatus change
+    if (previousStabilityPoolSnapshot.sbrRewardDistributionStatus !== newStabilityPoolSnapshot.sbrRewardDistributionStatus) {
+      if (newStabilityPoolSnapshot.sbrRewardDistributionStatus === 2) {
+        expect(newStabilityPoolSnapshot.sbrRewardDistributionStatus).to.equal(2, 'sbrRewardDistributionStatus should be ENDED.');
+      } else if (newStabilityPoolSnapshot.sbrRewardDistributionStatus === 1 && previousStabilityPoolSnapshot.sbrRewardDistributionStatus === 0) {
+        //Started from Not Started
+        expect(newStabilityPoolSnapshot.lastSBRRewardDistributedTime).to.equal(executionReceipt.receipt.blockNumber, "lastSBRRewardDistributedTime should be updated to the current block timestamp.");
+      }
+    }
 
-            expect(newUserInfo.stake).to.equal(expectedStake, "User's stake should be updated correctly based on scaling factors");
-        }
+    if (previousStabilityPoolSnapshot.sbrRewardDistributionStatus !== 2) {
+      expect(newSbrRewardSnapshot.rewardSnapshot).to.equal(
+        newStabilityPoolSnapshot.totalSbrRewardPerToken, 'Verify that `sbrRewardSnapshots[msg.sender].rewardSnapshot` equals `totalSbrRewardPerToken`.'
+      );
+    } else if (previousSbrRewardSnapshot && previousSbrRewardSnapshot.status !== 2) {
+      expect(newSbrRewardSnapshot.status).to.equal(2, 'Verify that `sbrRewardSnapshots[msg.sender].status` equals `CLAIMED`.');
+    }
+
+    // Event Emission
+    const rewardClaimedEvent = executionReceipt.receipt.logs.find(
+      (log) =>
+        log.address === (context.contracts.stabilityPool as ethers.Contract).target &&
+        log.topics[0] === ethers.id("RewardClaimed(address,uint256,uint256,uint256,uint256)")
+    );
+
+    expect(rewardClaimedEvent).to.not.be.undefined;
+    const rewardClaimedEventValues = ethers. AbiCoder.defaultAbiCoder().decode( [ "address", "uint256", "uint256", "uint256", "uint256" ], ethers.getBytes(rewardClaimedEvent.data)) 
+    expect(rewardClaimedEventValues[0]).to.equal(actor.account.address, "RewardClaimed event should have correct user address");
+
+    if (pendingSbrRewards > 0) {
+      const dFireRewardClaimedEvent = executionReceipt.receipt.logs.find(
+        (log) =>
+          log.address === (context.contracts.stabilityPool as ethers.Contract).target &&
+          log.topics[0] === ethers.id("DFireRewardClaimed(address,uint256,uint256)")
+      );
+      expect(dFireRewardClaimedEvent).to.not.be.undefined;
+          const dFireRewardClaimedEventValues = ethers. AbiCoder.defaultAbiCoder().decode( [ "address", "uint256", "uint256" ], ethers.getBytes(dFireRewardClaimedEvent.data));
+          expect(dFireRewardClaimedEventValues[0]).to.equal(actor.account.address, "DFireRewardClaimed event should have correct user address");
+    }
+
+    if (newStabilityPoolSnapshot.lastSBRRewardDistributedTime > previousStabilityPoolSnapshot.lastSBRRewardDistributedTime) {
+      const sBRRewardsAddedEvent = executionReceipt.receipt.logs.find(
+        (log) =>
+          log.address === (context.contracts.stabilityPool as ethers.Contract).target &&
+          log.topics[0] === ethers.id("SBRRewardsAdded(uint256,uint256,uint256,uint256)")
+      );
+      expect(sBRRewardsAddedEvent).to.not.be.undefined;
+    }
 
     return true;
   }
