@@ -43,7 +43,7 @@
       "parameters": []
     },
     {
-      "name": "accountBalances",
+      "name": "accountBalance",
       "type": "uint256",
       "contract_function": "balanceOf",
       "parameters": [
@@ -51,6 +51,28 @@
           "name": "owner",
           "type": "address",
           "reference": "accountAddress"
+        }
+      ]
+    },
+    {
+      "name": "redemptionAmountsAndFee",
+      "type": "tuple",
+      "contract_function": "calculateRedemptionAmountsAndFee",
+      "parameters": [
+        {
+          "name": "safe",
+          "type": "IStableBase.Safe",
+          "reference": "safe"
+        },
+        {
+          "name": "amountToRedeem",
+          "type": "uint256",
+          "reference": "amountToRedeem"
+        },
+        {
+          "name": "collateralPrice",
+          "type": "uint256",
+          "reference": "collateralPrice"
         }
       ]
     },
@@ -77,18 +99,6 @@
       "type": "uint256",
       "contract_function": "debtLoss",
       "parameters": []
-    },
-    {
-      "name": "approvedAddresses",
-      "type": "address",
-      "contract_function": "getApproved",
-      "parameters": [
-        {
-          "name": "tokenId",
-          "type": "uint256",
-          "reference": "Safe ID"
-        }
-      ]
     },
     {
       "name": "inactiveDebtAndCollateral",
@@ -138,12 +148,18 @@
       "parameters": []
     },
     {
-      "name": "safeOwners",
-      "type": "address",
-      "contract_function": "ownerOf",
+      "name": "contractName",
+      "type": "string",
+      "contract_function": "name",
+      "parameters": []
+    },
+    {
+      "name": "safeInfo",
+      "type": "tuple",
+      "contract_function": "safes",
       "parameters": [
         {
-          "name": "tokenId",
+          "name": "",
           "type": "uint256",
           "reference": "Safe ID"
         }
@@ -162,7 +178,7 @@
       "parameters": []
     },
     {
-      "name": "supportsInterface",
+      "name": "interfaceSupport",
       "type": "bool",
       "contract_function": "supportsInterface",
       "parameters": [
@@ -174,16 +190,10 @@
       ]
     },
     {
-      "name": "tokenURIs",
+      "name": "contractSymbol",
       "type": "string",
-      "contract_function": "tokenURI",
-      "parameters": [
-        {
-          "name": "tokenId",
-          "type": "uint256",
-          "reference": "Safe ID"
-        }
-      ]
+      "contract_function": "symbol",
+      "parameters": []
     },
     {
       "name": "totalCollateral",
@@ -196,22 +206,10 @@
       "type": "uint256",
       "contract_function": "totalDebt",
       "parameters": []
-    },
-    {
-      "name": "safeInfo",
-      "type": "tuple",
-      "contract_function": "safes",
-      "parameters": [
-        {
-          "name": "",
-          "type": "uint256",
-          "reference": "Safe ID"
-        }
-      ]
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface StableBaseCDPSnapshot {\n  bootstrapModeDebtThreshold: bigint;\n  extraGasCompensation: bigint;\n  minimumDebt: bigint;\n  protocolMode: number;\n  redemptionBaseFee: bigint;\n  redemptionLiquidationFee: bigint;\n  sbrFeeReward: bigint;\n  accountBalances: { [accountAddress: string]: bigint };\n  collateralLoss: bigint;\n  cumulativeCollateralPerUnitCollateral: bigint;\n  cumulativeDebtPerUnitCollateral: bigint;\n  debtLoss: bigint;\n  approvedAddresses: { [safeId: number]: string };\n  inactiveDebtAndCollateral: { [safeId: number]: { debt: bigint; collateral: bigint } };\n  isApprovedForAll: { [ownerAddress: string]: { [operatorAddress: string]: boolean } };\n  liquidationSnapshots: { [safeId: number]: { collateralPerCollateralSnapshot: bigint; debtPerCollateralSnapshot: bigint } };\n  mode: number;\n  safeOwners: { [safeId: number]: string };\n  sbrStakingPoolCanReceiveRewards: boolean;\n  stabilityPoolCanReceiveRewards: boolean;\n  totalCollateral: bigint;\n  totalDebt: bigint;\n  safes: { [safeId: number]: Safe };\n  tokenURIs: { [safeId: number]: string };\n}\n\ninterface Safe {\n  collateralAmount: bigint;\n  borrowedAmount: bigint;\n  weight: bigint;\n  totalBorrowedAmount: bigint;\n  feePaid: bigint;\n}\n",
+    "contract_snapshot_interface_code": "interface StableBaseCDPSnapshot {\n  bootstrapModeDebtThreshold: bigint;\n  extraGasCompensation: bigint;\n  minimumDebt: bigint;\n  protocolMode: number;\n  redemptionBaseFee: bigint;\n  redemptionLiquidationFee: bigint;\n  sbrFeeReward: bigint;\n  collateralLoss: bigint;\n  cumulativeCollateralPerUnitCollateral: bigint;\n  cumulativeDebtPerUnitCollateral: bigint;\n  debtLoss: bigint;\n  mode: number;\n  contractName: string;\n  sbrStakingPoolCanReceiveRewards: boolean;\n  stabilityPoolCanReceiveRewards: boolean;\n  contractSymbol: string;\n  totalCollateral: bigint;\n  totalDebt: bigint;\n  accountBalance: bigint;\n  interfaceSupport: boolean;\n}\n\ninterface SafeInfo {\n    collateralAmount: bigint;\n    borrowedAmount: bigint;\n    weight: bigint;\n    totalBorrowedAmount: bigint;\n    feePaid: bigint;\n}\n\ninterface LiquidationSnapshot {\n    collateralPerCollateralSnapshot: bigint;\n    debtPerCollateralSnapshot: bigint;\n}\n\ninterface RedemptionAmountsAndFee {\n    borrowMode: boolean;\n    _collateralToRedeem: bigint;\n    _amountToRedeem: bigint;\n    _amountToRefund: bigint;\n    _ownerFee: bigint;\n    _redeemerFee: bigint;\n}\n\ninterface InactiveDebtAndCollateral {\n    inactiveDebt: bigint;\n    inactiveCollateral: bigint;\n}\n\n",
     "interface_name": "StableBaseCDPSnapshot"
   }
 }
