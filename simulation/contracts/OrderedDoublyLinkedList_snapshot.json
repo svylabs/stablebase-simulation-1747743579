@@ -1,61 +1,49 @@
 {
   "attributes": [
     {
-      "name": "head",
+      "name": "LinkedList Head",
       "type": "uint256",
       "contract_function": "getHead",
       "parameters": []
     },
     {
-      "name": "tail",
+      "name": "LinkedList Tail",
       "type": "uint256",
       "contract_function": "getTail",
       "parameters": []
     },
     {
-      "name": "node",
-      "type": "Node",
+      "name": "Node Details",
+      "type": "tuple",
       "contract_function": "getNode",
       "parameters": [
         {
           "name": "id",
           "type": "uint256",
-          "reference": "_safeId"
+          "reference": "Safe ID"
         }
       ]
     },
     {
-      "name": "nodes",
-      "type": "NodesReturn",
+      "name": "Nodes Batch",
+      "type": "tuple[50]",
       "contract_function": "getNodes",
       "parameters": [
         {
           "name": "beginAt",
           "type": "uint256",
-          "reference": "_safeId"
+          "reference": "Safe ID"
         },
         {
           "name": "total",
           "type": "uint256",
-          "reference": "_safeId"
-        }
-      ]
-    },
-    {
-      "name": "nodesMapping",
-      "type": "Node",
-      "contract_function": "nodes",
-      "parameters": [
-        {
-          "name": "",
-          "type": "uint256",
-          "reference": "_safeId"
+          "reference": "Safe ID"
         }
       ]
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface OrderedDoublyLinkedListState {\n  head: bigint;\n  tail: bigint;\n  nodes: { [key: string]: Node };\n}\n\ninterface Node {\n  value: bigint;\n  prev: bigint;\n  next: bigint;\n}\n\ninterface NodeReturn {\n  value: bigint;\n  prev: bigint;\n  next: bigint;\n}\n\ninterface NodesReturn {\n  n: NodeReturn[];\n  totalFound: bigint;\n}",
-    "interface_name": "OrderedDoublyLinkedListState"
+    "contract_snapshot_interface_code": "interface Node {\n  value: bigint;\n  prev: bigint;\n  next: bigint;\n}\n\ninterface OrderedDoublyLinkedListSnapshot {\n  head: bigint;\n  tail: bigint;\n  nodes: { [safeId: string]: Node };\n  nodesBatch: {n: Node[], totalFound: bigint}\n}\n",
+    "interface_name": "OrderedDoublyLinkedListSnapshot"
   }
 }
