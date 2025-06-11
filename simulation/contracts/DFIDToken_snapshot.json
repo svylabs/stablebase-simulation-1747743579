@@ -1,37 +1,7 @@
 {
   "attributes": [
     {
-      "name": "name",
-      "type": "string",
-      "contract_function": "name",
-      "parameters": []
-    },
-    {
-      "name": "symbol",
-      "type": "string",
-      "contract_function": "symbol",
-      "parameters": []
-    },
-    {
-      "name": "decimals",
-      "type": "uint8",
-      "contract_function": "decimals",
-      "parameters": []
-    },
-    {
-      "name": "totalSupply",
-      "type": "uint256",
-      "contract_function": "totalSupply",
-      "parameters": []
-    },
-    {
-      "name": "totalBurned",
-      "type": "uint256",
-      "contract_function": "totalBurned",
-      "parameters": []
-    },
-    {
-      "name": "allowances",
+      "name": "Allowance",
       "type": "uint256",
       "contract_function": "allowance",
       "parameters": [
@@ -48,7 +18,7 @@
       ]
     },
     {
-      "name": "balances",
+      "name": "Balance",
       "type": "uint256",
       "contract_function": "balanceOf",
       "parameters": [
@@ -60,14 +30,44 @@
       ]
     },
     {
-      "name": "owner",
+      "name": "Decimals",
+      "type": "uint8",
+      "contract_function": "decimals",
+      "parameters": []
+    },
+    {
+      "name": "Name",
+      "type": "string",
+      "contract_function": "name",
+      "parameters": []
+    },
+    {
+      "name": "Owner",
       "type": "address",
       "contract_function": "owner",
+      "parameters": []
+    },
+    {
+      "name": "Symbol",
+      "type": "string",
+      "contract_function": "symbol",
+      "parameters": []
+    },
+    {
+      "name": "TotalBurned",
+      "type": "uint256",
+      "contract_function": "totalBurned",
+      "parameters": []
+    },
+    {
+      "name": "TotalSupply",
+      "type": "uint256",
+      "contract_function": "totalSupply",
       "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface DFIDTokenState {\n  name: string;\n  symbol: string;\n  decimals: number;\n  totalSupply: bigint;\n  totalBurned: bigint;\n  allowances: { [accountAddress: string]: { [accountAddress: string]: bigint } };\n  balances: { [accountAddress: string]: bigint };\n  owner: string;\n}",
-    "interface_name": "DFIDTokenState"
+    "contract_snapshot_interface_code": "interface DFIDTokenSnapshot {\n  allowances: { [owner: string]: { [spender: string]: bigint } };\n  balances: { [account: string]: bigint };\n  decimals: bigint;\n  name: string;\n  owner: string;\n  symbol: string;\n  totalBurned: bigint;\n  totalSupply: bigint;\n}",
+    "interface_name": "DFIDTokenSnapshot"
   }
 }
