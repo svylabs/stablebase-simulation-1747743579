@@ -3,8 +3,8 @@ import type { RunContext, ExecutionReceipt } from "@svylabs/ilumina";
 import { ethers } from "ethers";
 import { expect } from 'chai';
 
-export class OpenSafeAction extends Action {
-  private contract: ethers.Contract;
+export class OpensafeAction extends Action {
+  contract: ethers.Contract;
 
   constructor(contract: ethers.Contract) {
     super("OpenSafeAction");
@@ -16,38 +16,61 @@ export class OpenSafeAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot
   ): Promise<[boolean, any, Record<string, any>]> {
-    const stableBaseCDPSnapshot: any = currentSnapshot.contractSnapshot.stableBaseCDP;
+    const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
     const accountBalance = currentSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-    const _safeId = BigInt(Math.floor(context.prng.next() % 100000) + 1); // Generate a random safeId
-    let _amount = BigInt(Math.floor(context.prng.next() % 100) + 1); // Generate a random amount, but make sure its less than accountBalance
 
-    // make sure that amount is less than accountBalance
-    if (_amount > accountBalance) {
-        _amount = accountBalance > 0n ? accountBalance : 1n;
+    // Generate parameters
+    let _safeId: bigint;
+    let _amount: bigint;
+    let canExecute = false;
+
+    // Find a unique safeId.  This is a naive approach, and could be improved
+    // in a real implementation.
+    let safeIdCounter = 1;
+    while (true) {
+      _safeId = BigInt(safeIdCounter);
+      const safeExists = currentSnapshot.contractSnapshot.stableBaseCDP.safes?.[_safeId.toString()];
+
+      if (!safeExists) {
+        break;
+      }
+      safeIdCounter++;
     }
 
-    if (stableBaseCDPSnapshot.safes[_safeId] !== undefined) {
-        // Safe id already exists
+    _amount = BigInt(context.prng.next()) % (accountBalance / BigInt(2)) + BigInt(1);
+
+    if (_amount > accountBalance) {
         return [false, {}, {}];
     }
 
-    //check the balance of account and see if it can afford this, otherwise reduce the amount.
-    if (accountBalance < _amount) {
-        if (accountBalance == 0n) {
-          return [false, {}, {}];
+    // Check if the safe already exists
+    try {
+        const safe = await this.contract.safes(_safeId);
+        if (safe.collateralAmount > 0) {
+            return [false, {}, {}];
         }
-        _amount = accountBalance; //set to max amount that the account can afford.
+    } catch (error) {
+       //if the safe does not exists in the blockchain, continue with execution
     }
 
-    const canExecute = _amount > 0n && stableBaseCDPSnapshot.safes[_safeId] === undefined;
+    // Check if the owner already exists
+    try {
+        const owner = await this.contract._ownerOf(_safeId);
+        if (owner !== ethers.ZeroAddress) {
+            return [false, {}, {}];
+        }
+    } catch (error) {
+         //if the owner does not exists in the blockchain, continue with execution
+    }
 
+    canExecute = true;    
     const actionParams = {
       _safeId: _safeId,
-      _amount: _amount
+      _amount: _amount,
     };
 
     const newIdentifiers = {
-      safeId: _safeId.toString()
+      safeId: _safeId.toString(),
     };
 
     return [canExecute, actionParams, newIdentifiers];
@@ -59,12 +82,9 @@ export class OpenSafeAction extends Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<ExecutionReceipt> {
-    const {
-      _safeId,
-      _amount
-    } = actionParams;
-
-    const tx = await this.contract.connect(actor.account.value).openSafe(_safeId, _amount, { value: _amount });
+    const tx = await this.contract
+      .connect(actor.account.value)
+      .openSafe(actionParams._safeId, actionParams._amount, { value: actionParams._amount });
     const receipt = await tx.wait();
     return { receipt };
   }
@@ -77,40 +97,46 @@ export class OpenSafeAction extends Action {
     actionParams: any,
     executionReceipt: ExecutionReceipt
   ): Promise<boolean> {
-    const {
-      _safeId,
-      _amount
-    } = actionParams;
+    const _safeId = actionParams._safeId;
+    const _amount = actionParams._amount;
 
-    const stableBaseCDPPrevious: any = previousSnapshot.contractSnapshot.stableBaseCDP;
-    const stableBaseCDPNew: any = newSnapshot.contractSnapshot.stableBaseCDP;
-    const accountPreviousBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-    const accountNewBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+    const previousStableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
+    const newStableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
+
+    const previousAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+    const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+
+    const previousTotalCollateral = previousStableBaseCDPSnapshot.totalCollateral || BigInt(0);
+    const newTotalCollateral = newStableBaseCDPSnapshot.totalCollateral || BigInt(0);
+
+    const previousTotalDebt = previousStableBaseCDPSnapshot.totalDebt || BigInt(0);
+    const newTotalDebt = newStableBaseCDPSnapshot.totalDebt || BigInt(0);
 
     // Safe Existence
-    expect(stableBaseCDPNew.safes[_safeId].collateralAmount).to.equal(_amount, "safes[_safeId].collateralAmount should be equal to _amount");
-    expect(stableBaseCDPNew.safes[_safeId].borrowedAmount).to.equal(0n, "safes[_safeId].borrowedAmount should be equal to 0");
-    expect(stableBaseCDPNew.safes[_safeId].weight).to.equal(0n, "safes[_safeId].weight should be equal to 0");
-    expect(stableBaseCDPNew.safes[_safeId].totalBorrowedAmount).to.equal(0n, "safes[_safeId].totalBorrowedAmount should be equal to 0");
-    expect(stableBaseCDPNew.safes[_safeId].feePaid).to.equal(0n, "safes[_safeId].feePaid should be equal to 0");
+    expect(newStableBaseCDPSnapshot.safes[_safeId.toString()].collateralAmount).to.equal(_amount);
+    expect(newStableBaseCDPSnapshot.safes[_safeId.toString()].borrowedAmount).to.equal(BigInt(0));
+    expect(newStableBaseCDPSnapshot.safes[_safeId.toString()].weight).to.equal(BigInt(0));
+    expect(newStableBaseCDPSnapshot.safes[_safeId.toString()].totalBorrowedAmount).to.equal(BigInt(0));
+    expect(newStableBaseCDPSnapshot.safes[_safeId.toString()].feePaid).to.equal(BigInt(0));
 
-    // NFT Ownership - accessing safeOwners instead of _ownerOf since _ownerOf is internal
-    expect(stableBaseCDPNew.safeOwners[_safeId]).to.equal(actor.account.address, "_ownerOf(_safeId) should be equal to msg.sender");
-
-    //  NFT balance validation: token balances are tracked inside the contract
-    const previousTokenBalance = stableBaseCDPPrevious.accountBalances[actor.account.address] || BigInt(0);
-    const newTokenBalance = stableBaseCDPNew.accountBalances[actor.account.address] || BigInt(0);
-    expect(newTokenBalance - previousTokenBalance).to.equal(1n, "NFT balance should increase by 1");
+    // NFT Ownership
+    expect(await this.contract._ownerOf(_safeId)).to.equal(actor.account.address);
+    const previousBalance = previousSnapshot.contractSnapshot.stableBaseCDP._balances?.[actor.account.address] || BigInt(0);
+    const newBalance = newSnapshot.contractSnapshot.stableBaseCDP._balances?.[actor.account.address] || BigInt(0);
+    expect(newBalance - previousBalance).to.equal(BigInt(1));
 
     // Collateral Value
-    expect(stableBaseCDPNew.totalCollateral - stableBaseCDPPrevious.totalCollateral).to.equal(_amount, "totalCollateral should be increased by _amount");
+    expect(newTotalCollateral - previousTotalCollateral).to.equal(_amount);
 
     // Liquidation Snapshot
-    expect(stableBaseCDPNew.liquidationSnapshots[_safeId].debtPerCollateralSnapshot).to.equal(stableBaseCDPPrevious.cumulativeDebtPerUnitCollateral, "liquidationSnapshots[_safeId].debtPerCollateralSnapshot should be equal to cumulativeDebtPerUnitCollateral before the function call");
-    expect(stableBaseCDPNew.liquidationSnapshots[_safeId].collateralPerCollateralSnapshot).to.equal(stableBaseCDPPrevious.cumulativeCollateralPerUnitCollateral, "liquidationSnapshots[_safeId].collateralPerCollateralSnapshot should be equal to cumulativeCollateralPerUnitCollateral before the function call");
+    expect(newStableBaseCDPSnapshot.liquidationSnapshots[_safeId.toString()].debtPerCollateralSnapshot).to.equal(previousStableBaseCDPSnapshot.cumulativeDebtPerUnitCollateral);
+    expect(newStableBaseCDPSnapshot.liquidationSnapshots[_safeId.toString()].collateralPerCollateralSnapshot).to.equal(previousStableBaseCDPSnapshot.cumulativeCollateralPerUnitCollateral);
 
-     // Account balance validation: account balance should be decremented by the _amount
-     expect(accountNewBalance - accountPreviousBalance).to.equal(-_amount, 'Account balance should decrease by amount');
+    // Account balance validation
+    expect(previousAccountBalance - newAccountBalance).to.equal(_amount);
+
+    // Total collateral and debt validation
+    expect(newTotalCollateral).to.equal(previousTotalCollateral + _amount);
 
     return true;
   }
