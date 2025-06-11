@@ -1,18 +1,84 @@
 {
   "missing_validations": [
-    "Line 185 (validation): Add a check to ensure `safeId > 0`. This prevents potential issues with zero-address safes.",
-    "Line 190 (validation): Validate that the caller is still the owner of the `safeId` after the call to `_updateSafe`. A malicious user could transfer the safe mid-execution.",
-    "Line 187 (validation): Add validation to ensure `borrowedAmount > 0`. Fee topups are unnecessary if there is no debt.",
-    "Line 188 (validation): While `topupRate > 0` is validated, a maximum value for `topupRate` is not.  A large `topupRate` could lead to unexpected fee calculations or queue positioning. Consider adding a reasonable upper bound validation to limit it.",
-    "Add a validation that the contract has enough balance to refund `refundFee` before attempting the transfer at line 210.  This prevents the transaction from reverting if the contract runs out of funds."
+    "Missing validation for `safeId` existence within the `validate` function. It's crucial to ensure the safe exists in both previous and new snapshots before accessing its properties.",
+    "Missing validation for `nearestSpotInRedemptionQueue`. The code initializes this parameter to 0 but doesn't validate how `nearestSpotInRedemptionQueue` affects queue updates.",
+    "Missing validation to confirm that fee distribution occurred as expected, including checks for StabilityPool and DFIREStaking contract balance changes.",
+    "Missing validation for potential fee refunds, including checking for the `FeeRefund` event and validating the refund amount.",
+    "The implementation does not take into account MINIMUM_DEBT checks which could affect safeId positions in liquidation and redemption queues."
   ],
-  "errors_in_execute": [],
+  "reviews": [
+    {
+      "line_number": 85,
+      "description": "The calculation of `fee` on line 85 uses integer division, potentially leading to precision loss.",
+      "function_affected": "validate",
+      "category": "implementation_error",
+      "suggested_fix": "Assess the impact of integer division on the fee calculation and add a tolerance when comparing calculated fees with on-chain values."
+    },
+    {
+      "line_number": 148,
+      "description": "The check for `PROTOCOL_MODE` transition on lines 147-152 relies on `bootstrapModeDebtThreshold`, which isn't consistently updated. `PROTOCOL_MODE` transitions should only be checked when `totalDebt` increases.",
+      "function_affected": "validate",
+      "category": "implementation_error",
+      "suggested_fix": "Update the snapshot structure or action context to reflect changes in `bootstrapModeDebtThreshold`. Only check `PROTOCOL_MODE` transitions when `totalDebt` increases."
+    },
+    {
+      "line_number": 83,
+      "description": "The `_updateSafe` function updates `borrowedAmount` based on `cumulativeDebtPerUnitCollateral`. Validation should confirm `newSafe.borrowedAmount` is updated correctly if `liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral`.",
+      "function_affected": "validate",
+      "category": "implementation_missing",
+      "suggested_fix": "Add conditional validation logic to check if `liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral`. If true, validate that `newSafe.borrowedAmount` is updated based on `cumulativeDebtPerUnitCollateral` changes."
+    },
+    {
+      "line_number": 131,
+      "description": "There's no validation for the `RedemptionQueueUpdated` event's `prev` parameter. The value should align with the expected previous node ID in the redemption queue.",
+      "function_affected": "validate",
+      "category": "implementation_missing",
+      "suggested_fix": "Enhance validation for the `RedemptionQueueUpdated` event to verify that `parsedEvent.args.prev` matches the expected previous node ID in the redemption queue, using the linked list structure from the new snapshot."
+    },
+    {
+      "line_number": 141,
+      "description": "The code lacks validation of parameters in the `FeeDistributed` event. `feePaid`, `sbrStakersFee`, `stabilityPoolFee`, and `canRefund` should align with expected values.",
+      "function_affected": "validate",
+      "category": "implementation_missing",
+      "suggested_fix": "Add validation logic to parse the `FeeDistributed` event and verify `feePaid`, `sbrStakersFee`, `stabilityPoolFee`, and `canRefund` against expected values. Also, check StabilityPool and DFIREStaking balance changes."
+    },
+    {
+      "line_number": 59,
+      "description": "The implementation doesn't handle potential reverts in external calls like `sbdToken.transferFrom`, which can occur due to insufficient allowance.",
+      "function_affected": "execute",
+      "category": "implementation_missing",
+      "suggested_fix": "Implement a try/catch block around transaction execution and add validation logic to handle scenarios where the transfer fails. Alternatively, ensure sufficient allowance is set during initialization."
+    },
+    {
+      "line_number": 83,
+      "description": "The implementation does not account for MINIMUM_DEBT checks that could affect safeId in liquidation and redemption queues.",
+      "function_affected": "validate",
+      "category": "implementation_missing",
+      "suggested_fix": "Add validation that checks the MINIMUM_DEBT constraints with respect to safe.borrowedAmount, and assert proper queue updates based on those constraints."
+    },
+    {
+      "line_number": 79,
+      "description": "Missing validation for `safeId` existence within the `validate` function.",
+      "function_affected": "validate",
+      "category": "implementation_missing",
+      "suggested_fix": "Before accessing `stableBaseCDPPrevious.safes[safeId.toString()]` and `stableBaseCDPNew.safes[safeId.toString()]`, add a check to ensure `safeId` exists as a key in both `stableBaseCDPPrevious.safes` and `stableBaseCDPNew.safes`. Fail or return early if it doesn't exist."
+    },
+    {
+      "line_number": 44,
+      "description": "Missing validation for how `nearestSpotInRedemptionQueue` affects queue updates.",
+      "function_affected": "validate",
+      "category": "implementation_missing",
+      "suggested_fix": "If `nearestSpotInRedemptionQueue != 0`, query the snapshots to determine the expected state of the redemption queue and ensure the `RedemptionQueueUpdated` event reflects this change."
+    },
+    {
+      "line_number": 97,
+      "description": "Missing validation for potential fee refunds.",
+      "function_affected": "validate",
+      "category": "implementation_missing",
+      "suggested_fix": "Check for the existence of a `FeeRefund` event. If it exists, validate the `refundFee` parameter against the expected refund amount and verify that the actor's balance is credited and the contract's balance is debited."
+    }
+  ],
   "overall_assessment": [
-    "The `feeTopup` function appears to follow a logical flow: update safe state, validate inputs, calculate and transfer fees, update the redemption queue, distribute fees, and emit events.",
-    "The use of `_updateSafe` at the beginning is good for ensuring the safe's state is current before any calculations or modifications.",
-    "The fee calculation `(topupRate * safe.borrowedAmount) / BASIS_POINTS_DIVISOR` seems correct, but should be checked for potential overflow issues with very large values of `topupRate` and `borrowedAmount`.",
-    "The use of `nearestSpotInRedemptionQueue` as a hint for the queue insertion is a good optimization, but the logic within the `OrderedDoublyLinkedList` contract should be carefully reviewed to ensure it handles this hint correctly in all cases.",
-    "The fee distribution logic and potential refund mechanism add complexity.  It's important to ensure that the fee distribution is fair and doesn't lead to unexpected behavior or loss of funds.",
-    "The event emissions at the end of the function provide good visibility into the actions taken."
+    "The implementation covers basic validations and state updates related to fee topup, but requires more robust validation in key areas like safe existence, redemption queue updates, fee distribution, and refund scenarios. MINIMUM_DEBT constraints should also be considered."
   ]
 }
