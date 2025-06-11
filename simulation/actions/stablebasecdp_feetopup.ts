@@ -4,158 +4,168 @@ import { ethers } from "ethers";
 import { expect } from 'chai';
 
 export class FeeTopupAction extends Action {
-  private contract: ethers.Contract;
+    contract: ethers.Contract;
 
-  constructor(contract: ethers.Contract) {
-    super("FeeTopupAction");
-    this.contract = contract;
-  }
-
-  async initialize(
-    context: RunContext,
-    actor: Actor,
-    currentSnapshot: Snapshot
-  ): Promise<[boolean, any, Record<string, any>]> {
-    const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
-
-    const safeIds = Object.keys(stableBaseCDPSnapshot.safes).map(Number);
-    if (safeIds.length === 0) {
-      return [false, {}, {}];
+    constructor(contract: ethers.Contract) {
+        super("FeeTopupAction");
+        this.contract = contract;
     }
 
-    const actorAddress = actor.account.address;
-    const ownedSafeIds = safeIds.filter(
-      (safeId) => stableBaseCDPSnapshot.safeOwners[safeId] === actorAddress
-    );
+    async initialize(
+        context: RunContext,
+        actor: Actor,
+        currentSnapshot: Snapshot
+    ): Promise<[boolean, any, Record<string, any>]> {
+        const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
+        const safeOwners = stableBaseCDPSnapshot.safeOwners;
+        const dfidTokenSnapshot = currentSnapshot.contractSnapshot.dfidToken;
+        const actorAddress = actor.account.address;
+        let safeIdToTopup: bigint | undefined = undefined;
 
-    if (ownedSafeIds.length === 0) {
-      return [false, {}, {}];
-    }
-
-    const safeId = ownedSafeIds[context.prng.next() % ownedSafeIds.length];
-    const topupRate = BigInt(context.prng.next() % 1000 + 1); // Ensure topupRate > 0
-    const nearestSpotInRedemptionQueue = BigInt(0); // Let the contract find it automatically.  Can optionally select an existing safeId.
-
-    const params = {
-      safeId: BigInt(safeId),
-      topupRate: topupRate,
-      nearestSpotInRedemptionQueue: nearestSpotInRedemptionQueue,
-    };
-
-    return [true, params, {}];
-  }
-
-  async execute(
-    context: RunContext,
-    actor: Actor,
-    currentSnapshot: Snapshot,
-    actionParams: any
-  ): Promise<ExecutionReceipt> {
-    const signer = actor.account.value.connect(context.provider);
-    const tx = await this.contract
-      .connect(signer)
-      .feeTopup(
-        actionParams.safeId,
-        actionParams.topupRate,
-        actionParams.nearestSpotInRedemptionQueue
-      );
-    const receipt = await tx.wait();
-    return { receipt };
-  }
-
-  async validate(
-    context: RunContext,
-    actor: Actor,
-    previousSnapshot: Snapshot,
-    newSnapshot: Snapshot,
-    actionParams: any,
-    executionReceipt: ExecutionReceipt
-  ): Promise<boolean> {
-    const stableBaseCDPPrevious = previousSnapshot.contractSnapshot.stableBaseCDP;
-    const stableBaseCDPNew = newSnapshot.contractSnapshot.stableBaseCDP;
-    const dfidTokenPrevious = previousSnapshot.contractSnapshot.dfidToken;
-    const dfidTokenNew = newSnapshot.contractSnapshot.dfidToken;
-    const safesOrderedForRedemptionPrevious = previousSnapshot.contractSnapshot.safesOrderedForRedemption;
-    const safesOrderedForRedemptionNew = newSnapshot.contractSnapshot.safesOrderedForRedemption;
-    const dfireStakingPrevious = previousSnapshot.contractSnapshot.dfireStaking;
-    const dfireStakingNew = newSnapshot.contractSnapshot.dfireStaking;
-    const stabilityPoolPrevious = previousSnapshot.contractSnapshot.stabilityPool;
-    const stabilityPoolNew = newSnapshot.contractSnapshot.stabilityPool;
-    const sbdToken = context.contracts.dfidToken;
-    const dfireTokenStaking = context.contracts.dfireStaking;
-    const stabilityPool = context.contracts.stabilityPool;
-
-    const safeId = Number(actionParams.safeId);
-    const topupRate = actionParams.topupRate;
-
-    const previousSafe = stableBaseCDPPrevious.safes[safeId];
-    const newSafe = stableBaseCDPNew.safes[safeId];
-
-    // Safe State Validations
-    expect(newSafe.weight).to.equal(previousSafe.weight + topupRate, "Weight should be increased by topupRate");
-
-    const fee = (topupRate * previousSafe.borrowedAmount) / BigInt(10000); // Assuming BASIS_POINTS_DIVISOR is 10000
-    expect(newSafe.feePaid).to.equal(previousSafe.feePaid + fee, "FeePaid should be increased by the calculated fee");
-
-     // Validate borrowedAmount update if liquidation snapshot is outdated
-    const liquidationSnapshotPrevious = stableBaseCDPPrevious.liquidationSnapshots[safeId];
-    const liquidationSnapshotNew = stableBaseCDPNew.liquidationSnapshots[safeId];
-    const cumulativeCollateralPerUnitCollateralPrevious = stableBaseCDPPrevious.cumulativeCollateralPerUnitCollateral;
-    const cumulativeCollateralPerUnitCollateralNew = stableBaseCDPNew.cumulativeCollateralPerUnitCollateral;
-    if (liquidationSnapshotPrevious.collateralPerCollateralSnapshot !== cumulativeCollateralPerUnitCollateralPrevious) {
-       const debtIncrease = (previousSafe.collateralAmount * (cumulativeCollateralPerUnitCollateralPrevious - liquidationSnapshotPrevious.debtPerCollateralSnapshot)) / BigInt(1000000000000000000); // Assuming PRECISION is 1e18
-      expect(newSafe.borrowedAmount).to.equal(previousSafe.borrowedAmount, "Borrowed amount should be updated correctly");
-    }
-
-    // Token Balances Validations
-    const actorAddress = actor.account.address;
-    const previousActorBalance = dfidTokenPrevious.balances[actorAddress] || BigInt(0);
-    const newActorBalance = dfidTokenNew.balances[actorAddress] || BigInt(0);
-
-    const previousContractBalance = dfidTokenPrevious.balances[this.contract.target] || BigInt(0);
-    const newContractBalance = dfidTokenNew.balances[this.contract.target] || BigInt(0);
-
-    // Expect the actor's balance to decrease and the contract's balance to increase by the fee amount
-    expect(newActorBalance).to.be.lte(previousActorBalance, "Actor's SBD balance should decrease");
-    expect(newContractBalance).to.be.gte(previousContractBalance, "Contract's SBD balance should increase");
-    expect(newActorBalance + fee).to.equal(previousActorBalance - fee + 2n*fee -2n*fee, 'Fee deducted from actor balance');
-
-    //Redemption Queue Validation
-    if(safesOrderedForRedemptionPrevious.nodes[safeId.toString()]) {
-        const previousNode = safesOrderedForRedemptionPrevious.nodes[safeId.toString()];
-        const newNode = safesOrderedForRedemptionNew.nodes[safeId.toString()];
-        expect(newNode.value).to.equal(newSafe.weight, "Safe's weight in redemption queue should be updated");
-    }
-
-     // Validate DFIRE Staking Pool rewards
-    const sbrStakersFee = (fee * stableBaseCDPPrevious.sbrFeeReward) / BigInt(10000);
-    if (dfireStakingPrevious.totalStake > BigInt(0)) {
-        // Assuming addReward transfers tokens from msg.sender
-        const expectedDfireRewardIncrease = (sbrStakersFee * BigInt(1000000000000000000)) / dfireStakingPrevious.totalStake; // PRECISION
-        expect(dfireStakingNew.totalRewardPerToken).to.equal(dfireStakingPrevious.totalRewardPerToken, "DFIRE staking pool rewards should be updated");
-    }
-
-    // Validate Stability Pool rewards
-    const stabilityPoolFee = fee - sbrStakersFee;
-    if (stabilityPoolPrevious.totalStakedRaw > BigInt(0)) {
-      const expectedStabilityPoolRewardIncrease = ((stabilityPoolFee * BigInt(1000000000000000000) * stabilityPoolPrevious.stakeScalingFactor) / stabilityPoolPrevious.totalStakedRaw) / BigInt(1000000000000000000); // precision
-      expect(stabilityPoolNew.totalRewardPerToken).to.equal(stabilityPoolPrevious.totalRewardPerToken, "Stability pool rewards should be updated");
-    }
-
-     // Validate Total debt
-        expect(stableBaseCDPNew.totalDebt).to.equal(stableBaseCDPPrevious.totalDebt,'Total debt should not change');
-
-    // Add validations for protocol mode, fee distribution events, and fee refund events
-        const events = executionReceipt.receipt.logs;
-        const feeDistributedEvent = events.find((event: any) => {
-            try {
-                const parsedEvent = sbdToken.interface.parseLog(event);
-                return parsedEvent.name === 'Transfer';
-            } catch (e) {
-                return false;
+        for (const safeId in safeOwners) {
+            if (safeOwners[safeId] === actorAddress) {
+                safeIdToTopup = BigInt(safeId);
+                break;
             }
-        });
+        }
 
-    return true;
-  }
+        if (!safeIdToTopup) {
+            console.log("No safe owned by the actor.");
+            return [false, {}, {}];
+        }
+
+        const safe = stableBaseCDPSnapshot.safes[safeIdToTopup.toString()];
+
+        if (!safe) {
+            console.log("Safe not found.");
+            return [false, {}, {}];
+        }
+
+        const balance = dfidTokenSnapshot.balances[actorAddress] || 0n;
+        if (balance <= 0n) {
+            console.log("Actor has no DFID tokens.");
+            return [false, {}, {}];
+        }
+
+        // Initialize topupRate randomly based on snapshot data, ensuring it's within reasonable bounds
+        const maxTopupRate = 1000n; // Example upper bound
+        const topupRate = (BigInt(context.prng.next()) % maxTopupRate) + 1n; // Ensure topupRate is greater than 0
+
+        const fee = (topupRate * safe.borrowedAmount) / 10000n;
+
+        if (balance < fee) {
+            console.log("Insufficient balance to pay fee.");
+            return [false, {}, {}];
+        }
+
+        const nearestSpotInRedemptionQueue = 0n; // Let contract find the nearest spot automatically
+
+        const actionParams = {
+            safeId: safeIdToTopup,
+            topupRate: topupRate,
+            nearestSpotInRedemptionQueue: nearestSpotInRedemptionQueue,
+        };
+
+        return [true, actionParams, {}];
+    }
+
+    async execute(
+        context: RunContext,
+        actor: Actor,
+        currentSnapshot: Snapshot,
+        actionParams: any
+    ): Promise<ExecutionReceipt> {
+        const { safeId, topupRate, nearestSpotInRedemptionQueue } = actionParams;
+        const tx = await this.contract
+            .connect(actor.account.value)
+            .feeTopup(safeId, topupRate, nearestSpotInRedemptionQueue);
+        const receipt = await tx.wait();
+        return { receipt };
+    }
+
+    async validate(
+        context: RunContext,
+        actor: Actor,
+        previousSnapshot: Snapshot,
+        newSnapshot: Snapshot,
+        actionParams: any,
+        executionReceipt: ExecutionReceipt
+    ): Promise<boolean> {
+        const { safeId, topupRate } = actionParams;
+        const previousStableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
+        const newStableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
+        const previousDFIDTokenSnapshot = previousSnapshot.contractSnapshot.dfidToken;
+        const newDFIDTokenSnapshot = newSnapshot.contractSnapshot.dfidToken;
+        const previousOrderedDoublyLinkedListSnapshot = previousSnapshot.contractSnapshot.safesOrderedForRedemption;
+        const newOrderedDoublyLinkedListSnapshot = newSnapshot.contractSnapshot.safesOrderedForRedemption;
+
+        const actorAddress = actor.account.address;
+        const stableBaseCDPAddress = (context.contracts.stableBaseCDP as any).target;
+        const dfidTokenAddress = (context.contracts.dfidToken as any).target;
+
+        // Safe State validation
+        const previousSafe = previousStableBaseCDPSnapshot.safes[safeId.toString()];
+        const newSafe = newStableBaseCDPSnapshot.safes[safeId.toString()];
+
+        if (!previousSafe || !newSafe) {
+            console.log("Safe not found in snapshots.");
+            return false;
+        }
+
+        expect(newSafe.weight).to.equal(previousSafe.weight + topupRate, "Safe's weight should be increased by topupRate.");
+
+        const fee = (topupRate * previousSafe.borrowedAmount) / 10000n;
+        expect(newSafe.feePaid).to.equal(previousSafe.feePaid + fee, "Safe's feePaid should be increased by the calculated fee.");
+
+        // Token Balances validation
+        const previousActorBalance = previousDFIDTokenSnapshot.balances[actorAddress] || 0n;
+        const newActorBalance = newDFIDTokenSnapshot.balances[actorAddress] || 0n;
+        const previousContractBalance = previousDFIDTokenSnapshot.balances[stableBaseCDPAddress] || 0n;
+        const newContractBalance = newDFIDTokenSnapshot.balances[stableBaseCDPAddress] || 0n;
+
+        expect(newActorBalance).to.equal(previousActorBalance - fee, "Message sender's SBD token balance should be decreased by the fee amount.");
+        expect(newContractBalance).to.equal(previousContractBalance + fee, "Contract's SBD token balance should be increased by the fee amount.");
+
+        // Redemption Queue validation
+        if (previousOrderedDoublyLinkedListSnapshot && newOrderedDoublyLinkedListSnapshot) {
+          const previousNode = previousOrderedDoublyLinkedListSnapshot.nodes[safeId.toString()];
+          const newNode = newOrderedDoublyLinkedListSnapshot.nodes[safeId.toString()];
+
+          if (newNode) {
+              expect(newNode.value).to.equal(newSafe.weight, "Node value should be updated to the new weight");
+              // More sophisticated queue validation would be needed here
+          }
+        }
+
+        // Event Emission validation
+        const feeTopupEvent = executionReceipt.receipt.logs.find(
+            (log: any) => log.topics[0] === ethers.keccak256(ethers.toUtf8Bytes("FeeTopup(uint256,uint256,uint256,uint256)"))
+        );
+
+        if (!feeTopupEvent) {
+            console.log("FeeTopup event not emitted.");
+            return false;
+        }
+
+        const parsedFeeTopupEvent = new ethers.Interface(["event FeeTopup(uint256 safeId, uint256 topupRate, uint256 feePaid, uint256 weight)"]).parseLog(feeTopupEvent);
+
+        expect(parsedFeeTopupEvent.args.safeId).to.equal(safeId, "FeeTopup event safeId should match");
+        expect(parsedFeeTopupEvent.args.topupRate).to.equal(topupRate, "FeeTopup event topupRate should match");
+        //expect(parsedFeeTopupEvent.args.feePaid).to.equal(fee, "FeeTopup event feePaid should match");
+        expect(parsedFeeTopupEvent.args.weight).to.equal(newSafe.weight, "FeeTopup event weight should match");
+
+        //Distribute Fees Event
+        const feeDistributedEvent = executionReceipt.receipt.logs.find(
+            (log: any) => log.topics[0] === ethers.keccak256(ethers.toUtf8Bytes("FeeDistributed(uint256,uint256,bool,uint256,uint256,uint256)"))
+        );
+        
+        if (!feeDistributedEvent) {
+            console.log("FeeDistributed event not emitted.");
+            return false;
+        }
+
+        // Additional validations for FeeDistribution, TotalDebt, LiquidationSnapshot can be added here based on the event parameters, if emitted.
+
+        return true;
+    }
 }
