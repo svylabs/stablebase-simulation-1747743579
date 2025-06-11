@@ -1,55 +1,55 @@
 {
   "reviews": [
     {
-      "line_number": 39,
-      "description": "The initialization method lacks sufficient checks. Even if a safe is found for the actor, the safe might be in an invalid state to perform a fee topup. Specifically, there's no check to ensure that the safe's `borrowedAmount` is greater than zero, which is a prerequisite for a valid fee topup. Adding this check will prevent the action from proceeding in inappropriate scenarios.",
+      "line_number": 35,
+      "description": "The initialize method only checks if a safe owner exists but does not fetch the actual safe details from the snapshot.",
       "function_name": "initialize",
-      "suggested_fix": "Add a condition to check if `safe.borrowedAmount > 0` before proceeding with the action's initialization. If not, return `[false, {}, {}]` to prevent further execution. This ensures that the fee topup is only attempted on safes with outstanding debt."
+      "suggested_fix": "Instead of only relying on safeOwners, retrieve the complete safe object within the initialize method. This ensures all safe properties are readily available for parameter generation. Also, check if the safe exists before accessing its properties: `const safe = stableBaseCDPSnapshot.safes[safeId.toString()]; if (!safe) { ... }`. Add this check before line 35."
     },
     {
-      "line_number": 85,
-      "description": "The calculation of `fee` in the validation function (line 85) relies on integer division, which might lead to rounding errors. This can lead to discrepancies between expected and actual state, causing validation failures. To mitigate this, the validation logic should account for potential rounding differences.",
-      "function_name": "validate",
-      "suggested_fix": "When asserting the token balances and event parameters, incorporate a small tolerance (e.g., +/- 1) to accommodate potential rounding differences due to integer division. For example, use an assertion library that allows for approximate equality checks within a defined tolerance."
+      "line_number": 57,
+      "description": "The execute method directly calls the contract function without additional checks.",
+      "function_name": "execute",
+      "suggested_fix": "Consider adding a check in the execute method to ensure that the actor has sufficient balance to pay the fee before calling the contract function. This can prevent unnecessary transaction failures. It would be good to log relevant data for debugging/auditing. Insert the following code before line 57: `const safe = currentSnapshot.contractSnapshot.stableBaseCDP.safes[safeId.toString()]; const fee = (topupRate * safe.borrowedAmount) / BigInt(10000); const balance = await this.contract.sbdToken.balanceOf(actor.account.address); if (balance < fee) { console.log(\"Insufficient balance\"); return { receipt: null }; // Or throw an error }`"
     },
     {
-      "line_number": 92,
-      "description": "The validation logic retrieves previous and new snapshots of both `stableBaseCDP` and `dfidToken`. The subsequent validation logic relies on accessing balances within these snapshots using actor addresses. It is important to handle cases where actor or contract addresses might not have an existing balance recorded in the snapshot.",
+      "line_number": 81,
+      "description": "The validate method does not handle the scenario where the borrowedAmount is updated due to cumulative debt changes.",
       "function_name": "validate",
-      "suggested_fix": "Use the nullish coalescing operator (??) to provide a default value (BigInt(0)) when the balance is not found in the snapshot. For example: `const previousActorBalance = dfidTokenPrevious.balances[actorAddress] ?? BigInt(0);` This ensures that the validation logic gracefully handles cases where a balance might not be explicitly recorded in the snapshot."
+      "suggested_fix": "Include a check in the validate method to verify if the borrowedAmount has been updated according to the cumulative debt changes. This involves comparing the previous and new borrowedAmount, and considering the cumulativeDebtPerUnitCollateral. Get cumulativeDebtPerUnitCollateral from snapshots, then calculate the expected new borrowedAmount. Add this check before line 81. `const previousCumulativeDebtPerUnitCollateral = previousSnapshot.contractSnapshot.stableBaseCDP.cumulativeDebtPerUnitCollateral; const newCumulativeDebtPerUnitCollateral = newSnapshot.contractSnapshot.stableBaseCDP.cumulativeDebtPerUnitCollateral;` Calculate expectedBorrowedAmount and compare."
     },
     {
       "line_number": 97,
-      "description": "The validation function does not consider the case where a fee refund happens. This needs to be handled in token balances validation.",
+      "description": "The validate method does not validate for scenarios where a refund occurs.",
       "function_name": "validate",
-      "suggested_fix": "Modify the token balance validation to account for potential fee refunds. Retrieve the `FeeRefund` event from `executionReceipt.receipt.logs`. If the event is present, extract the `refundFee` from the event and adjust the expected balance changes accordingly. The actor's balance should be decreased by `fee - refundFee` and the contract's balance increased by `fee - refundFee`."
+      "suggested_fix": "Add logic to parse FeeRefund event and adjust balance validation accordingly. The actor's balance may not decrease by fee if a refund occurs. Parse logs, find FeeRefund(safeId, refundFee) event, then `expect(newActorBalance).to.equal(previousActorBalance - fee + refundFee, \"...\")`.  Insert this logic before line 97, after getting `newActorBalance` and `previousActorBalance`"
+    },
+    {
+      "line_number": 130,
+      "description": "The RedemptionQueueUpdated event validation only checks safeId and weight.",
+      "function_name": "validate",
+      "suggested_fix": "Add validation for the `prev` argument of the `RedemptionQueueUpdated` event to ensure the linked list is correctly updated:  `expect(parsedEvent.args.prev).to.equal(previousNodeId, \"...\");`  You'll need to get the previous node ID either from the previous snapshot or calculate it based on the linked list structure. Insert this validation after line 130. You may need to retrieve linked list from the snapshot to correctly validate"
+    },
+    {
+      "line_number": 140,
+      "description": "The FeeDistributed event is expected to always be emitted, without checks based on whether the SBR staking or stability pool fees were actually distributed.",
+      "function_name": "validate",
+      "suggested_fix": "Consider making the FeeDistributed event validation conditional based on the actual values of sbrStakersFee and stabilityPoolFee from previous and new snapshot. Only validate the event if fee distribution happened, check if `sbrStakersFee > 0 || stabilityPoolFee > 0`. Add a conditional check before line 140."
+    },
+    {
+      "line_number": 80,
+      "description": "Validate  safes[safeId].borrowedAmount state variable.",
+      "function_name": "validate",
+      "suggested_fix": "Add validation for `safes[safeId].borrowedAmount` using the `how_to_validate_state_update` information.  This will involve checking if liquidation snapshot is outdated, and then calculate the expected borrowedAmount based on cumulativeDebtPerUnitCollateral and collateralAmount.  `const liquidationSnapshot = stableBaseCDPPrevious.liquidationSnapshots[safeId.toString()]; if (liquidationSnapshot.collateralPerCollateralSnapshot != stableBaseCDPPrevious.cumulativeCollateralPerUnitCollateral) { ... calculate expected borrowedAmount and compare with newSafe.borrowedAmount } else { expect(newSafe.borrowedAmount).to.equal(previousSafe.borrowedAmount, \"...\")}`.  Add this validation before line 80."
     },
     {
       "line_number": 144,
-      "description": "The current validation for total debt only checks if new total debt is greater or equal to previous total debt. However, the `_updateSafe` function can both increase or decrease total debt. The validation should assert that totalDebt matches the expected value based on the debtIncrease/debtDecrease from `_updateSafe` function. This is especially important when the liquidation snapshot is outdated.",
+      "description": "The validation logic for total debt only validates that the new debt is greater than or equal to the previous debt. It should also validate when debtDecrease occurs",
       "function_name": "validate",
-      "suggested_fix": "Implement logic to determine if the liquidation snapshot is outdated by comparing `liquidationSnapshots[safeId].collateralPerCollateralSnapshot` with `cumulativeCollateralPerUnitCollateral`. If outdated, calculate the expected change in total debt based on the debtIncrease or debtDecrease within the `_updateSafe` function. Assert that the `newSnapshot.contractSnapshot.stableBaseCDP.totalDebt` reflects this calculated change relative to `previousSnapshot.contractSnapshot.stableBaseCDP.totalDebt`."
-    },
-    {
-      "line_number": 151,
-      "description": "The logic for validating protocol mode transition is incomplete. The current implementation only verifies the transition from BOOTSTRAP to NORMAL mode. There should be explicit verification that `PROTOCOL_MODE` remains as `NORMAL` when the condition is not met or when the initial mode was already `NORMAL`.",
-      "function_name": "validate",
-      "suggested_fix": "Add validation to check for `PROTOCOL_MODE` changes only if the previous mode was `BOOTSTRAP` and the debt exceeds `BOOTSTRAP_MODE_DEBT_THRESHOLD`. Explicitly verify that `PROTOCOL_MODE` remains as `NORMAL` when the condition is not met or when the initial mode was already `NORMAL`. This prevents unintended state changes."
-    },
-    {
-      "line_number": 72,
-      "description": "The code lacks validation for updates to the liquidation snapshot i.e. `liquidationSnapshots[safeId].debtPerCollateralSnapshot` and `liquidationSnapshots[safeId].collateralPerCollateralSnapshot`. If debt or collateral changes are made in `_updateSafe`, the validation logic should check that these snapshot values are also correctly updated in the `newSnapshot`.",
-      "function_name": "validate",
-      "suggested_fix": "Within the validation logic, check if `liquidationSnapshots[safeId].collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral`. If this condition is true (indicating a state update), validate that `newSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshots[safeId].debtPerCollateralSnapshot` and `newSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshots[safeId].collateralPerCollateralSnapshot` are updated to match the expected values (likely `cumulativeDebtPerUnitCollateral` and `cumulativeCollateralPerUnitCollateral` respectively)."
-    },
-    {
-      "line_number": 72,
-      "description": "The code is missing validation for the 'SafeUpdated' event emitted from the `_updateSafe` function.",
-      "function_name": "validate",
-      "suggested_fix": "Add validation logic to check that the 'SafeUpdated' event is emitted when `liquidationSnapshots[safeId].collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral`. Locate the event in `executionReceipt.receipt.logs` using the event signature `SafeUpdated(uint256,uint256,uint256,uint256,uint256,uint256,uint256)`. Parse the event and validate that the parameters (safeId, collateralAmount, borrowedAmount, collateralIncrease, debtIncrease, totalCollateral, totalDebt) match the expected values based on the state changes in `_updateSafe`."
+      "suggested_fix": "Update total debt validation logic to consider scenarios when debtDecrease occurs.  If debtIncrease did occur, validate `stableBaseCDPNew.totalDebt == stableBaseCDPPrevious.totalDebt + debtIncrease`. Consider adding a state variable debtDecrease, and then validate  `stableBaseCDPNew.totalDebt == stableBaseCDPPrevious.totalDebt + debtIncrease - debtDecrease`. Calculate debtIncrease using cumulativeDebtPerUnitCollateral difference, if applicable.  Add the check before line 144."
     }
   ],
   "overall_assessment": [
-    "The `FeeTopupAction` implementation has been reviewed and suggestions provided to improve its robustness and correctness. The focus areas are: initialization checks, handling of rounding errors, handling undefined balances, accounting for fee refunds, total debt validation, protocol mode validation, liquidation snapshot updates, and event validation."
+    "The action implementation appears well-structured and covers the key aspects of fee topup. However, there are areas where additional checks and validations could improve robustness and security. Specifically, the initialize method should fetch the safe object from the snapshot instead of just checking for the existence of the safeOwner. Also, the validate method can be improved by validating the state changes pertaining to borrowedAmount. The event validations look good, but could be more robust. Handling refund scenario will improve the validation."
   ]
 }
