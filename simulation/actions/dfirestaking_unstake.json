@@ -11,48 +11,41 @@
     "contract_name": "DFIREStaking",
     "function_name": "unstake",
     "pre_execution_parameter_generation_rules": [
-      "The _amount parameter must be greater than 0.",
-      "The _amount parameter must be less than or equal to the user's current stake (stakes[msg.sender].stake)."
+      "The _amount parameter must be greater than 0 to prevent errors during the transfer.",
+      "The _amount parameter must be less than or equal to the user's current stake to prevent insufficient balance errors."
     ],
     "on_execution_state_updates_made": [
       {
         "category": "User Stake",
         "state_update_descriptions": [
-          "Decreases the user's stake (stakes[msg.sender].stake) by the unstaked amount (_amount)."
+          "Decreases the user's stake by the unstaked amount.",
+          "Updates the user's reward snapshot to the current total reward per token.",
+          "Updates the user's collateral snapshot to the current total collateral per token."
         ]
       },
       {
         "category": "Total Stake",
         "state_update_descriptions": [
-          "Decreases the total stake (totalStake) by the unstaked amount (_amount)."
+          "Decreases the total stake by the unstaked amount."
         ]
       },
       {
-        "category": "Reward Claim",
+        "category": "Reward Distribution",
         "state_update_descriptions": [
-          "Updates the user's reward snapshot (stakes[msg.sender].rewardSnapshot) to the current total reward per token (totalRewardPerToken).",
-          "Transfers accrued reward tokens (rewardToken) to the user (msg.sender).",
-          "Updates the user's collateral reward snapshot (stakes[msg.sender].collateralSnapshot) to the current total collateral per token (totalCollateralPerToken).",
-          "Transfers accrued collateral reward (ETH) to the user (msg.sender)."
-        ]
-      },
-      {
-        "category": "Reward Sender Status",
-        "state_update_descriptions": [
-          "If rewardSenderActive is true and totalStake becomes 0, the contract calls setCanSBRStakingPoolReceiveRewards(false) on the stableBaseContract via the IRewardSender interface."
+          "Calculates and transfers accrued reward tokens to the user, based on the difference between the current totalRewardPerToken and the user's rewardSnapshot, multiplied by the user's stake divided by PRECISION.",
+          "Calculates and transfers accrued collateral reward (ETH) to the user, based on the difference between the current totalCollateralPerToken and the user's collateralSnapshot, multiplied by the user's stake divided by PRECISION."
         ]
       },
       {
         "category": "Token Transfer",
         "state_update_descriptions": [
-          "Transfers the unstaked tokens (stakingToken) from the contract to the user (msg.sender)."
+          "Transfers the unstaked tokens from the contract to the user, increasing the user's DFIREToken balance and decreasing the contract's DFIREToken balance."
         ]
       },
       {
-        "category": "Events",
+        "category": "Reward Sender",
         "state_update_descriptions": [
-          "Emits an Unstaked event with the user's address (msg.sender) and the unstaked amount (_amount).",
-          "Emits a Claimed event with the user's address (msg.sender), reward amount, and collateral reward amount."
+          "If rewardSenderActive is true and totalStake becomes 0, the RewardSender contract is notified to stop sending rewards, by calling setCanSBRStakingPoolReceiveRewards(false) on the stableBaseContract."
         ]
       }
     ],
@@ -60,27 +53,33 @@
       {
         "category": "User Stake",
         "rule_descriptions": [
-          "stakes[msg.sender].stake should be decreased by _amount compared to its initial value."
+          "The user's stake should be decreased by the unstaked amount.",
+          "The user's stake should not be negative; i.e., unstaking should not result in the user's stake becoming less than zero.",
+          "The user's rewardSnapshot should be equal to the totalRewardPerToken at the time of unstaking.",
+          "The user's collateralSnapshot should be equal to the totalCollateralPerToken at the time of unstaking."
         ]
       },
       {
         "category": "Total Stake",
         "rule_descriptions": [
-          "totalStake should be decreased by _amount compared to its initial value."
+          "The totalStake should be decreased by the unstaked amount.",
+          "The totalStake should not be negative."
         ]
       },
       {
-        "category": "Token Balance",
+        "category": "Token Balances",
         "rule_descriptions": [
-          "The user's (msg.sender) stakingToken balance should increase by _amount.",
-          "The contract's DFIREStaking stakingToken balance should decrease by _amount."
+          "The user's DFIREToken balance should increase by the unstaked amount.",
+          "The contract's DFIREToken balance should decrease by the unstaked amount.",
+          "The user's reward token (DFIDToken) balance should increase by the accrued reward amount.",
+          "The contract's reward token (DFIDToken) balance should decrease by the accrued reward amount."
         ]
       },
       {
-        "category": "Reward Snapshot",
+        "category": "Events",
         "rule_descriptions": [
-          "stakes[msg.sender].rewardSnapshot should be equal to totalRewardPerToken after the claim.",
-          "stakes[msg.sender].collateralSnapshot should be equal to totalCollateralPerToken after the claim."
+          "An Unstaked event should be emitted with the user's address and the unstaked amount.",
+          "A Claimed event should be emitted with the user's address, reward amount, and collateral reward amount."
         ]
       }
     ]
@@ -96,14 +95,14 @@
         "contract_name": "DFIREStaking",
         "state_updated": [
           {
-            "state_variable_name": "stakes",
-            "type": "mapping(address => Stake)",
-            "what_does_it_track": "Tracks the stake information for each user.",
-            "why_is_is_important": "Reflects the current amount staked by the user, which is crucial for reward calculations and overall staking management.",
+            "state_variable_name": "stakes[msg.sender].stake",
+            "type": "uint256",
+            "what_does_it_track": "Tracks the amount of tokens staked by a user.",
+            "why_is_is_important": "Reflects the actual amount staked by user and important for reward calculations and total stake tracking.",
             "when_is_it_updated": "When a user unstakes tokens.",
-            "how_to_validate_state_update": "Check if stakes[msg.sender].stake is decreased by _amount and totalStake is also decreased by _amount",
+            "how_to_validate_state_update": "Check the stakes mapping for the user's address. The stake should be decreased by _amount.",
             "has_conditional_updates": true,
-            "summary_of_update": "The stake amount for the user (msg.sender) is reduced by the _amount being unstaked.",
+            "summary_of_update": "Decreases the user's stake by the specified amount.",
             "conditions": [
               "_amount > 0",
               "_amount <= user.stake"
@@ -112,78 +111,83 @@
           {
             "state_variable_name": "totalStake",
             "type": "uint256",
-            "what_does_it_track": "Tracks the cumulative stake amount from all users.",
-            "why_is_is_important": "Used for calculating the reward distribution ratio and overall staking contract state.",
+            "what_does_it_track": "Tracks the total amount of tokens staked in the contract.",
+            "why_is_is_important": "Used to calculate rewards and determine if the reward sender should be active.",
             "when_is_it_updated": "When a user unstakes tokens.",
-            "how_to_validate_state_update": "Check if totalStake is decreased by _amount.",
+            "how_to_validate_state_update": "Check the totalStake variable. It should be decreased by _amount.",
             "has_conditional_updates": true,
-            "summary_of_update": "The total amount of tokens staked in the contract is reduced by the _amount being unstaked.",
+            "summary_of_update": "Decreases the total stake by the specified amount.",
             "conditions": [
               "_amount > 0",
               "_amount <= user.stake"
             ]
           },
           {
-            "state_variable_name": "stableBaseContract",
-            "type": "address",
-            "what_does_it_track": "Address of the stable base contract used for reward distribution.",
-            "why_is_is_important": "Manages the reward distribution mechanism and ensures rewards are not sent when there are no staked tokens.",
-            "when_is_it_updated": "When the total stake becomes zero and rewardSenderActive is true upon unstaking.",
-            "how_to_validate_state_update": "Check if IRewardSender(stableBaseContract).setCanSBRStakingPoolReceiveRewards is set to false when totalStake is zero and rewardSenderActive is true.",
+            "state_variable_name": "stableBaseContract.canSBRStakingPoolReceiveRewards",
+            "type": "bool",
+            "what_does_it_track": "Controls if the stable base contract can receive rewards.",
+            "why_is_is_important": "It is important to stop sending rewards to the stable base contract when there are no more tokens staked.",
+            "when_is_it_updated": "When the total stake becomes zero.",
+            "how_to_validate_state_update": "Check that the stableBaseContract's canSBRStakingPoolReceiveRewards is set to false.",
             "has_conditional_updates": true,
-            "summary_of_update": "Potentially interacts with another contract to disable reward distribution to the staking pool if all tokens are unstaked.",
+            "summary_of_update": "If rewardSenderActive is true and totalStake is zero, it calls setCanSBRStakingPoolReceiveRewards(false) on stableBaseContract.",
             "conditions": [
-              "rewardSenderActive == true",
-              "totalStake == 0"
+              "rewardSenderActive && totalStake == 0"
             ]
           },
           {
             "state_variable_name": "rewardToken",
             "type": "IERC20",
-            "what_does_it_track": "The contract address of the reward token (e.g., DFID).",
-            "why_is_is_important": "Facilitates reward distribution to stakers, incentivizing participation.",
-            "when_is_it_updated": "Whenever a user claims their reward during unstaking.",
-            "how_to_validate_state_update": "Check if rewardToken.transfer(msg.sender, reward) call is successful.",
+            "what_does_it_track": "Reward token contract.",
+            "why_is_is_important": "Sends reward tokens to the user.",
+            "when_is_it_updated": "When a user unstakes tokens and has claimable rewards.",
+            "how_to_validate_state_update": "Check that rewardToken.transfer to user address is successful.",
             "has_conditional_updates": true,
-            "summary_of_update": "Transfers accrued reward tokens to the user who is unstaking.",
+            "summary_of_update": "Transfers reward tokens to the user.",
             "conditions": [
-              "reward > 0"
+              "reward > 0",
+              "rewardToken != address(0)"
             ]
           },
           {
-            "state_variable_name": "N/A",
-            "type": "N/A",
-            "what_does_it_track": "N/A",
-            "why_is_is_important": "Facilitates collateral reward distribution to stakers, incentivizing participation.",
-            "when_is_it_updated": "Whenever a user claims their collateral reward during unstaking.",
-            "how_to_validate_state_update": "Check if msg.sender.call{value: collateralReward}(\"\") is successful.",
+            "state_variable_name": "collateralReward",
+            "type": "uint256",
+            "what_does_it_track": "Collateral reward amount",
+            "why_is_is_important": "Sends collateral reward to the user.",
+            "when_is_it_updated": "When a user unstakes tokens and has claimable collateral rewards.",
+            "how_to_validate_state_update": "Check that collateral reward amount has been sent to user",
             "has_conditional_updates": true,
-            "summary_of_update": "Transfers accrued collateral reward (ETH) to the user who is unstaking.",
+            "summary_of_update": "Sends collateral reward to the user.",
             "conditions": [
+              "collateralReward > 0",
               "collateralReward > 0"
             ]
           },
           {
-            "state_variable_name": "stakes",
-            "type": "mapping(address => Stake)",
-            "what_does_it_track": "Tracks the stake information for each user.",
-            "why_is_is_important": "Used in reward calculations to determine how much reward a user has earned.",
+            "state_variable_name": "stakes[msg.sender].rewardSnapshot",
+            "type": "uint256",
+            "what_does_it_track": "Tracks the reward per token at the time of staking/unstaking.",
+            "why_is_is_important": "Used to calculate the rewards earned by the user since the last stake/unstake action.",
             "when_is_it_updated": "When a user unstakes tokens.",
-            "how_to_validate_state_update": "Check if user.rewardSnapshot is updated to totalRewardPerToken.",
+            "how_to_validate_state_update": "Check that the rewardSnapshot is updated to totalRewardPerToken.",
             "has_conditional_updates": false,
-            "summary_of_update": "Updates the reward snapshot for the user when they unstake tokens, using totalRewardPerToken.",
-            "conditions": []
+            "summary_of_update": "Updates the reward snapshot for the user's stake.",
+            "conditions": [
+              "always"
+            ]
           },
           {
-            "state_variable_name": "stakes",
-            "type": "mapping(address => Stake)",
-            "what_does_it_track": "Tracks the stake information for each user.",
-            "why_is_is_important": "Used in collateral reward calculations to determine how much collateral reward a user has earned.",
-            "when_is_it_updated": "When a user unstakes tokens.",
-            "how_to_validate_state_update": "Check if user.collateralSnapshot is updated to totalCollateralPerToken.",
+            "state_variable_name": "stakes[msg.sender].collateralSnapshot",
+            "type": "uint256",
+            "what_does_it_track": "Tracks collateral per token at the time of staking/unstaking.",
+            "why_is_is_important": "Used to calculate collateral reward earned by user.",
+            "when_is_it_updated": "When a user unstakes tokens",
+            "how_to_validate_state_update": "Check collateralSnapshot updated to totalCollateralPerToken",
             "has_conditional_updates": false,
-            "summary_of_update": "Updates the collateral snapshot for the user when they unstake tokens, using totalCollateralPerToken.",
-            "conditions": []
+            "summary_of_update": "Update collateralSnapshot for user stake",
+            "conditions": [
+              "always"
+            ]
           }
         ]
       },
@@ -191,17 +195,18 @@
         "contract_name": "DFIREToken",
         "state_updated": [
           {
-            "state_variable_name": "N/A",
-            "type": "N/A",
-            "what_does_it_track": "N/A",
-            "why_is_is_important": "Returns the user's staked tokens, allowing them to use or trade their tokens.",
+            "state_variable_name": "stakingToken",
+            "type": "IERC20",
+            "what_does_it_track": "The staking token contract.",
+            "why_is_is_important": "It returns the staked tokens to the user.",
             "when_is_it_updated": "When a user unstakes tokens.",
-            "how_to_validate_state_update": "Verify that stakingToken.transfer(msg.sender, _amount) is called and that the transfer is successful. Check if the balance of DFIREToken for msg.sender increases by _amount.",
+            "how_to_validate_state_update": "Check that the user's balance increases by _amount using stakingToken.balanceOf(msg.sender).",
             "has_conditional_updates": true,
-            "summary_of_update": "Transfers the unstaked DFIRE tokens back to the user.",
+            "summary_of_update": "Transfers the unstaked tokens back to the user.",
             "conditions": [
               "_amount > 0",
-              "_amount <= user.stake"
+              "_amount <= user.stake",
+              "stakingToken != address(0)"
             ]
           }
         ]
@@ -228,91 +233,24 @@
               "contract_name": "StableBaseCDP"
             }
           ]
-        }
+        },
+        "constants": []
       },
       {
         "contract_name": "DFIDToken",
         "code_snippet": "function transfer(address to, uint256 value) external returns (bool);",
         "references": {
-          "references": [
-            {
-              "state_variable_name": "stableBaseCDP",
-              "contract_name": "DFIDToken"
-            },
-            {
-              "state_variable_name": "stabilityPool",
-              "contract_name": "DFIREToken"
-            },
-            {
-              "state_variable_name": "dfireToken",
-              "contract_name": "DFIREStaking"
-            },
-            {
-              "state_variable_name": "dfidToken",
-              "contract_name": "DFIREStaking"
-            },
-            {
-              "state_variable_name": "stableBaseCDP",
-              "contract_name": "DFIREStaking"
-            },
-            {
-              "state_variable_name": "dfidToken",
-              "contract_name": "StabilityPool"
-            },
-            {
-              "state_variable_name": "stableBaseCDP",
-              "contract_name": "StabilityPool"
-            },
-            {
-              "state_variable_name": "dfireToken",
-              "contract_name": "StabilityPool"
-            },
-            {
-              "state_variable_name": "dfidToken",
-              "contract_name": "StableBaseCDP"
-            },
-            {
-              "state_variable_name": "mockPriceOracle",
-              "contract_name": "StableBaseCDP"
-            },
-            {
-              "state_variable_name": "stabilityPool",
-              "contract_name": "StableBaseCDP"
-            },
-            {
-              "state_variable_name": "dfireStaking",
-              "contract_name": "StableBaseCDP"
-            },
-            {
-              "state_variable_name": "safesOrderedForLiquidation",
-              "contract_name": "StableBaseCDP"
-            },
-            {
-              "state_variable_name": "safesOrderedForRedemption",
-              "contract_name": "StableBaseCDP"
-            },
-            {
-              "state_variable_name": "stableBaseCDP",
-              "contract_name": "OrderedDoublyLinkedList"
-            },
-            {
-              "state_variable_name": "stableBaseCDP",
-              "contract_name": "OrderedDoublyLinkedList"
-            }
-          ]
-        }
+          "references": []
+        },
+        "constants": []
       },
       {
         "contract_name": "DFIREToken",
         "code_snippet": "function transfer(address to, uint256 value) external returns (bool);",
         "references": {
-          "references": [
-            {
-              "state_variable_name": "_stabilityPool",
-              "contract_name": "StabilityPool"
-            }
-          ]
-        }
+          "references": []
+        },
+        "constants": []
       }
     ]
   }
