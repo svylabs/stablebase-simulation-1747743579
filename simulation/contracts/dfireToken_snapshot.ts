@@ -7,110 +7,126 @@ import { DFIRETokenSnapshot } from './snapshot_interfaces';
 /**
  * Takes a snapshot of DFIREToken state
  * @param contract - ethers.Contract instance
- * @param actors - Array of Actor objects
+ * @param actors - Array of Actor instances
  * @returns Promise returning the interface DFIRETokenSnapshot
  */
 export async function takedfireTokenContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<DFIRETokenSnapshot> {
   try {
-    const allowanceAmounts: { [owner: string]: { [spender: string]: bigint } } = {};
-    const tokenBalances: { [account: string]: bigint } = {};
+    const allowances: { [owner: string]: { [spender: string]: bigint } } = {};
+    const balances: { [account: string]: bigint } = {};
 
-    // Fetch token balances for each actor
+    // Fetch allowances for each actor
     for (const actor of actors) {
       const accountAddress = actor.accountAddress;
-      try {
-        const balance = await contract.balanceOf(accountAddress);
-        tokenBalances[accountAddress] = BigInt(balance);
-      } catch (error: any) {
-        console.error(`Error fetching token balance for account ${accountAddress}: ${error.message}`);
-        // Consider how to handle errors, e.g., setting to 0 or throwing
-        tokenBalances[accountAddress] = BigInt(0);
+
+      if (!accountAddress) {
+        console.warn(`Actor ${actor.id} has no account address. Skipping allowances.`);
+        continue;
       }
 
-      // Fetch allowance amounts for each actor against every other actor
-      allowanceAmounts[accountAddress] = {};
-      for (const otherActor of actors) {
-        const spenderAddress = otherActor.accountAddress;
+      allowances[accountAddress] = {};
+
+      for (const actor2 of actors) {
+        const spenderAddress = actor2.accountAddress;
+
+        if (!spenderAddress) {
+          console.warn(`Actor ${actor2.id} has no account address. Skipping spender ${actor2.id} for allowance of ${actor.id}.`);
+          continue;
+        }
+
         try {
           const allowance = await contract.allowance(accountAddress, spenderAddress);
-          allowanceAmounts[accountAddress][spenderAddress] = BigInt(allowance);
+          allowances[accountAddress][spenderAddress] = BigInt(allowance.toString());
         } catch (error: any) {
-          console.error(`Error fetching allowance for ${accountAddress} -> ${spenderAddress}: ${error.message}`);
-          allowanceAmounts[accountAddress][spenderAddress] = BigInt(0);
+          console.error(`Error fetching allowance for owner ${accountAddress} and spender ${spenderAddress}:`, error);
+          throw new Error(`Failed to fetch allowance for owner ${accountAddress} and spender ${spenderAddress}: ${error.message}`);
         }
       }
     }
 
-    let decimalPlaces: bigint;
-    try {
-      const decimals = await contract.decimals();
-      decimalPlaces = BigInt(decimals);
-    } catch (error: any) {
-      console.error(`Error fetching decimals: ${error.message}`);
-      decimalPlaces = BigInt(0);
+    // Fetch balances for each actor
+    for (const actor of actors) {
+      const accountAddress = actor.accountAddress;
+
+      if (!accountAddress) {
+        console.warn(`Actor ${actor.id} has no account address. Skipping balance.`);
+        continue;
+      }
+
+      try {
+        const balance = await contract.balanceOf(accountAddress);
+        balances[accountAddress] = BigInt(balance.toString());
+      } catch (error: any) {
+        console.error(`Error fetching balance for account ${accountAddress}:`, error);
+        throw new Error(`Failed to fetch balance for account ${accountAddress}: ${error.message}`);
+      }
     }
 
-    let tokenName: string;
+    let decimals: bigint;
     try {
-      tokenName = await contract.name();
+      const decimalsResult = await contract.decimals();
+      decimals = BigInt(decimalsResult.toString());
     } catch (error: any) {
-      console.error(`Error fetching name: ${error.message}`);
-      tokenName = 'N/A';
+      console.error('Error fetching decimals:', error);
+      throw new Error(`Failed to fetch decimals: ${error.message}`);
     }
 
-    let tokenSymbol: string;
+    let name: string;
     try {
-      tokenSymbol = await contract.symbol();
+      name = await contract.name();
     } catch (error: any) {
-      console.error(`Error fetching symbol: ${error.message}`);
-      tokenSymbol = 'N/A';
+      console.error('Error fetching name:', error);
+      throw new Error(`Failed to fetch name: ${error.message}`);
     }
 
-    let burnedTokens: bigint;
+    let owner: string;
     try {
-      const burned = await contract.totalBurned();
-      burnedTokens = BigInt(burned);
+      owner = await contract.owner();
     } catch (error: any) {
-      console.error(`Error fetching totalBurned: ${error.message}`);
-      burnedTokens = BigInt(0);
+      console.error('Error fetching owner:', error);
+      throw new Error(`Failed to fetch owner: ${error.message}`);
     }
 
-    let totalTokens: bigint;
+    let symbol: string;
     try {
-      const total = await contract.totalSupply();
-      totalTokens = BigInt(total);
+      symbol = await contract.symbol();
     } catch (error: any) {
-      console.error(`Error fetching totalSupply: ${error.message}`);
-      totalTokens = BigInt(0);
+      console.error('Error fetching symbol:', error);
+      throw new Error(`Failed to fetch symbol: ${error.message}`);
     }
 
-    let ownerAddress: string;
+    let totalBurned: bigint;
     try {
-      ownerAddress = await contract.owner();
+      const totalBurnedResult = await contract.totalBurned();
+      totalBurned = BigInt(totalBurnedResult.toString());
     } catch (error: any) {
-      console.error(`Error fetching owner: ${error.message}`);
-      ownerAddress = ethers.constants.AddressZero;
+      console.error('Error fetching totalBurned:', error);
+      throw new Error(`Failed to fetch totalBurned: ${error.message}`);
     }
 
-    //Stability pool address is not on the contract, so it will need to be populated from the config
-    //Consider injecting the stabilityPoolAddress instead of hardcoding.
-    const stabilityPoolAddress: string = '0x0000000000000000000000000000000000000000';
+    let totalSupply: bigint;
+    try {
+      const totalSupplyResult = await contract.totalSupply();
+      totalSupply = BigInt(totalSupplyResult.toString());
+    } catch (error: any) {
+      console.error('Error fetching totalSupply:', error);
+      throw new Error(`Failed to fetch totalSupply: ${error.message}`);
+    }
 
     const snapshot: DFIRETokenSnapshot = {
-      allowanceAmounts,
-      tokenBalances,
-      decimalPlaces,
-      tokenName,
-      tokenSymbol,
-      burnedTokens,
-      totalTokens,
-      ownerAddress,
-      stabilityPoolAddress,
+      allowances,
+      balances,
+      decimals,
+      name,
+      owner,
+      symbol,
+      totalBurned,
+      totalSupply,
     };
 
     return snapshot;
   } catch (error: any) {
-    console.error(`Error taking DFIREToken contract snapshot: ${error.message}`);
-    throw error;
+    console.error('Error taking DFIREToken snapshot:', error);
+    throw new Error(`Failed to take DFIREToken snapshot: ${error.message}`);
   }
 }

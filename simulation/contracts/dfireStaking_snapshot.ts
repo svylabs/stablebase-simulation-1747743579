@@ -2,91 +2,53 @@
 
 import { ethers } from 'ethers';
 import { Actor } from '@svylabs/ilumina';
-import { DFIREStakingSnapshot } from './snapshot_interfaces';
+import { DFIREStakingSnapshot, StakeInfo } from './snapshot_interfaces';
 
 /**
  * Takes a snapshot of DFIREStaking state
  * @param contract - ethers.Contract instance
- * @param actors - Array of Actor objects
+ * @param actors - Array of Actor instances
  * @returns Promise returning the interface DFIREStakingSnapshot
  */
 export async function takedfireStakingContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<DFIREStakingSnapshot> {
-    try {
-        const precision = BigInt(await contract.PRECISION());
-        const rewardSenderActive = await contract.rewardSenderActive();
-        const totalCollateralPerToken = BigInt(await contract.totalCollateralPerToken());
-        const totalRewardPerToken = BigInt(await contract.totalRewardPerToken());
-        const totalStake = BigInt(await contract.totalStake());
+  try {
+    const precisionValue = await contract.PRECISION() as bigint;
+    const isRewardSenderActive = await contract.rewardSenderActive() as boolean;
+    const totalCollateralPerTokenValue = await contract.totalCollateralPerToken() as bigint;
+    const totalRewardPerTokenValue = await contract.totalRewardPerToken() as bigint;
+    const totalStakeValue = await contract.totalStake() as bigint;
 
-        const stakes: { [accountAddress: string]: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint } } = {};
-        const userStakeDetails: { [accountAddress: string]: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint } } = {};
-        const userPendingReward: { [accountAddress: string]: [bigint, bigint] } = {};
+    const stakes: { [accountAddress: string]: StakeInfo } = {};
 
-        for (const actor of actors) {
-            const accountAddress = actor.accountAddress;
-            const identifiers = actor.getIdentifiers();
-            const safeIds = identifiers['Safe ID'] as string[] | string | undefined;
+    for (const actor of actors) {
+      const accountAddress = actor.accountAddress;
+      if (!accountAddress) {
+        console.warn(`Actor ${actor.id} has no accountAddress. Skipping stake info fetch.`);
+        continue;
+      }
 
-            if (accountAddress) {
-                try {
-                    const stakeData = await contract.stakes(accountAddress);
-                    stakes[accountAddress] = {
-                        stake: BigInt(stakeData.stake),
-                        rewardSnapshot: BigInt(stakeData.rewardSnapshot),
-                        collateralSnapshot: BigInt(stakeData.collateralSnapshot)
-                    };
-                } catch (error: any) {
-                    console.error(`Error fetching stake for ${accountAddress}: ${error.message}`);
-                    stakes[accountAddress] = { stake: BigInt(0), rewardSnapshot: BigInt(0), collateralSnapshot: BigInt(0) };
-                }
-
-                try {
-                    const stakeDetails = await contract.getStake(accountAddress);
-                    userStakeDetails[accountAddress] = {
-                        stake: BigInt(stakeDetails.stake),
-                        rewardSnapshot: BigInt(stakeDetails.rewardSnapshot),
-                        collateralSnapshot: BigInt(stakeDetails.collateralSnapshot)
-                    };
-                } catch (error: any) {
-                    console.error(`Error fetching user stake details for ${accountAddress}: ${error.message}`);
-                    userStakeDetails[accountAddress] = { stake: BigInt(0), rewardSnapshot: BigInt(0), collateralSnapshot: BigInt(0) };
-                }
-
-                try {
-                    const pendingReward = await contract.userPendingReward(accountAddress);
-                    userPendingReward[accountAddress] = [BigInt(pendingReward[0]), BigInt(pendingReward[1])];
-                } catch (error: any) {
-                    console.error(`Error fetching user pending reward for ${accountAddress}: ${error.message}`);
-                    userPendingReward[accountAddress] = [BigInt(0), BigInt(0)];
-                }
-
-                // Example Usage of Safe ID if it exists and is an array
-                if (Array.isArray(safeIds)) {
-                    safeIds.forEach(safeId => {
-                        // Perform some action with each safeId.  This is a placeholder, replace with actual contract interaction if needed.
-                        console.log(`Processing Safe ID: ${safeId} for address: ${accountAddress}`);
-                    });
-                } else if (typeof safeIds === 'string') {
-                    // Perform some action with the safeId string. This is a placeholder, replace with actual contract interaction if needed.
-                    console.log(`Processing Safe ID: ${safeIds} for address: ${accountAddress}`);
-                }
-            } else {
-                console.warn("Actor does not have an account address.");
-            }
-        }
-
-        return {
-            precision,
-            rewardSenderActive,
-            stakes,
-            totalCollateralPerToken,
-            totalRewardPerToken,
-            totalStake,
-            userStakeDetails,
-            userPendingReward
+      try {
+        const [stake, rewardSnapshot, collateralSnapshot] = await contract.stakes(accountAddress) as [bigint, bigint, bigint];
+        stakes[accountAddress] = {
+          stake,
+          rewardSnapshot,
+          collateralSnapshot,
         };
-    } catch (error: any) {
-        console.error(`Error taking DFIREStaking contract snapshot: ${error.message}`);
-        throw error;
+      } catch (error: any) {
+        console.error(`Error fetching stake info for actor ${actor.id} with address ${accountAddress}: ${error.message}`);
+      }
     }
+
+    return {
+      precisionValue,
+      isRewardSenderActive,
+      stakes,
+      totalCollateralPerTokenValue,
+      totalRewardPerTokenValue,
+      totalStakeValue,
+    };
+  } catch (error: any) {
+    console.error(`Error taking DFIREStaking snapshot: ${error.message}`);
+    throw new Error(`Failed to snapshot DFIREStaking contract: ${error.message}`);
+  }
 }

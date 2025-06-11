@@ -3,7 +3,7 @@
 export interface DFIDTokenSnapshot {
   allowances: { [owner: string]: { [spender: string]: bigint } };
   balances: { [account: string]: bigint };
-  decimals: bigint;
+  decimals: number;
   name: string;
   owner: string;
   symbol: string;
@@ -12,33 +12,34 @@ export interface DFIDTokenSnapshot {
 }
 
 export interface DFIRETokenSnapshot {
-  allowanceAmounts: { [owner: string]: { [spender: string]: bigint } };
-  tokenBalances: { [account: string]: bigint };
-  decimalPlaces: bigint;
-  tokenName: string;
-  tokenSymbol: string;
-  burnedTokens: bigint;
-  totalTokens: bigint;
-  ownerAddress: string;
-  stabilityPoolAddress: string;
+  allowances: { [owner: string]: { [spender: string]: bigint } };
+  balances: { [account: string]: bigint };
+  decimals: bigint;
+  name: string;
+  owner: string;
+  symbol: string;
+  totalBurned: bigint;
+  totalSupply: bigint;
 }
 
 export interface DFIREStakingSnapshot {
-  precision: bigint;
-  rewardSenderActive: boolean;
-  stakes: { [accountAddress: string]: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint } };
-  totalCollateralPerToken: bigint;
-  totalRewardPerToken: bigint;
-  totalStake: bigint;
-  userStakeDetails: { [accountAddress: string]: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint } };
-  userPendingReward: { [accountAddress: string]: [bigint, bigint] };
+  precisionValue: bigint;
+  isRewardSenderActive: boolean;
+  stakes: { [accountAddress: string]: StakeInfo };
+  totalCollateralPerTokenValue: bigint;
+  totalRewardPerTokenValue: bigint;
+  totalStakeValue: bigint;
+}
+
+export interface StakeInfo {
+  stake: bigint;
+  rewardSnapshot: bigint;
+  collateralSnapshot: bigint;
 }
 
 export interface StabilityPoolSnapshot {
   basisPointsDivisor: bigint;
   collateralLoss: bigint;
-  lastSBRRewardDistributedTime: bigint;
-  minimumScalingFactor: bigint;
   precision: bigint;
   rewardLoss: bigint;
   rewardSenderActive: boolean;
@@ -54,10 +55,7 @@ export interface StabilityPoolSnapshot {
   totalStakedRaw: bigint;
   users: { [accountAddress: string]: UserInfo };
   sbrRewardSnapshots: { [accountAddress: string]: SBRRewardSnapshot };
-  stakeResetSnapshots: { [stakeResetCount: number]: StakeResetSnapshot };
-  userPendingCollateral: { [accountAddress: string]: bigint };
-  userPendingReward: { [accountAddress: string]: bigint };
-  userPendingRewardAndCollateral: { [accountAddress: string]: [bigint, bigint, bigint] };
+  stakeResetSnapshots: { [stakeResetCount: string]: StakeResetSnapshot };
 }
 
 export interface UserInfo {
@@ -70,7 +68,7 @@ export interface UserInfo {
 
 export interface SBRRewardSnapshot {
   rewardSnapshot: bigint;
-  status: number; // enum StabilityPool.SBRRewardDistribution
+  status: number;  // enum
 }
 
 export interface StakeResetSnapshot {
@@ -78,6 +76,16 @@ export interface StakeResetSnapshot {
   totalRewardPerToken: bigint;
   totalCollateralPerToken: bigint;
   totalSBRRewardPerToken: bigint;
+}
+
+export interface UserPendingRewardAndCollateralOutput {
+  pendingReward: bigint;
+  pendingCollateral: bigint;
+  total: bigint;
+}
+
+export interface IsLiquidationPossibleOutput {
+  possible: boolean;
 }
 
 export interface StableBaseCDPSnapshot {
@@ -88,31 +96,53 @@ export interface StableBaseCDPSnapshot {
   redemptionBaseFee: bigint;
   redemptionLiquidationFee: bigint;
   sbrFeeReward: bigint;
-  accountBalances: { [accountAddress: string]: bigint };
   collateralLoss: bigint;
   cumulativeCollateralPerUnitCollateral: bigint;
   cumulativeDebtPerUnitCollateral: bigint;
   debtLoss: bigint;
-  approvedAddresses: { [safeId: number]: string };
-  inactiveDebtAndCollateral: { [safeId: number]: { debt: bigint; collateral: bigint } };
-  isApprovedForAll: { [ownerAddress: string]: { [operatorAddress: string]: boolean } };
-  liquidationSnapshots: { [safeId: number]: { collateralPerCollateralSnapshot: bigint; debtPerCollateralSnapshot: bigint } };
   mode: number;
-  safeOwners: { [safeId: number]: string };
+  contractName: string;
   sbrStakingPoolCanReceiveRewards: boolean;
   stabilityPoolCanReceiveRewards: boolean;
+  contractSymbol: string;
   totalCollateral: bigint;
   totalDebt: bigint;
-  safes: { [safeId: number]: Safe };
-  tokenURIs: { [safeId: number]: string };
+  accountBalance: bigint;
+  interfaceSupport: boolean;
 }
 
-export interface Safe {
-  collateralAmount: bigint;
-  borrowedAmount: bigint;
-  weight: bigint;
-  totalBorrowedAmount: bigint;
-  feePaid: bigint;
+export interface SafeInfo {
+    collateralAmount: bigint;
+    borrowedAmount: bigint;
+    weight: bigint;
+    totalBorrowedAmount: bigint;
+    feePaid: bigint;
+}
+
+export interface LiquidationSnapshot {
+    collateralPerCollateralSnapshot: bigint;
+    debtPerCollateralSnapshot: bigint;
+}
+
+export interface RedemptionAmountsAndFee {
+    borrowMode: boolean;
+    _collateralToRedeem: bigint;
+    _amountToRedeem: bigint;
+    _amountToRefund: bigint;
+    _ownerFee: bigint;
+    _redeemerFee: bigint;
+}
+
+export interface InactiveDebtAndCollateral {
+    inactiveDebt: bigint;
+    inactiveCollateral: bigint;
+}
+
+export interface OrderedDoublyLinkedListSnapshot {
+  head: bigint;
+  tail: bigint;
+  nodes: { [key: bigint]: Node };
+  owner: string;
 }
 
 export interface Node {
@@ -121,17 +151,10 @@ export interface Node {
   next: bigint;
 }
 
-export interface OrderedDoublyLinkedListSnapshot {
-  head: bigint;
-  tail: bigint;
-  nodes: { [safeId: string]: Node };
-  nodesBatch: {n: Node[], totalFound: bigint}
-}
-
 export interface MockPriceOracleSnapshot {
   lastGoodPrice: bigint;
-  price: bigint;
-  fetchPrice: bigint;
-  owner: string;
+  currentPrice: bigint;
+  fetchedPrice: bigint;
+  ownerAddress: string;
 }
 
