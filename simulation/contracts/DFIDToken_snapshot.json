@@ -67,7 +67,7 @@
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface DFIDTokenSnapshot {\n  allowances: { [owner: string]: { [spender: string]: bigint } };\n  balances: { [account: string]: bigint };\n  decimals: bigint;\n  name: string;\n  owner: string;\n  symbol: string;\n  totalBurned: bigint;\n  totalSupply: bigint;\n}",
+    "contract_snapshot_interface_code": "interface DFIDTokenSnapshot {\n  allowances: { [owner: string]: { [spender: string]: bigint } };\n  balances: { [account: string]: bigint };\n  decimals: number;\n  name: string;\n  owner: string;\n  symbol: string;\n  totalBurned: bigint;\n  totalSupply: bigint;\n}",
     "interface_name": "DFIDTokenSnapshot"
   }
 }
