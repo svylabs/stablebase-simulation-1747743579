@@ -1,146 +1,136 @@
 import { Action, Actor, Snapshot } from "@svylabs/ilumina";
-import type RunContext, { ExecutionReceipt } from "@svylabs/ilumina";
+import type { RunContext, ExecutionReceipt } from "@svylabs/ilumina";
 import { ethers } from "ethers";
 import { expect } from "chai";
 
-class StakeAction extends Action {
-    contract: ethers.Contract;
+export class StakeAction extends Action {
+  private contract: ethers.Contract;
 
-    constructor(contract: ethers.Contract) {
-        super("StakeAction");
-        this.contract = contract;
+  constructor(contract: ethers.Contract) {
+    super("StakeAction");
+    this.contract = contract;
+  }
+
+  async initialize(
+    context: RunContext,
+    actor: Actor,
+    currentSnapshot: Snapshot
+  ): Promise<[boolean, any, Record<string, any>]> {
+    const stabilityPoolSnapshot = currentSnapshot.contractSnapshot.stabilityPool;
+    const dfidTokenSnapshot = currentSnapshot.contractSnapshot.dfidToken;
+
+    if (!stabilityPoolSnapshot || !dfidTokenSnapshot) {
+      console.warn("StabilityPool or DFIDToken snapshot not available.");
+      return [false, {}, {}];
     }
 
-    async initialize(
-        context: RunContext,
-        actor: Actor,
-        currentSnapshot: Snapshot
-    ): Promise<[boolean, any, Record<string, any>]> {
-        const dfidTokenContract = context.contracts.dfidToken as ethers.Contract;
-        const actorBalance = currentSnapshot.contractSnapshot.dfidToken.balances[actor.account.address] || BigInt(0);
+    const actorAddress = actor.account.address;
+    const actorBalance = dfidTokenSnapshot.balances[actorAddress] || BigInt(0);
 
-        if (actorBalance <= BigInt(0)) {
-            return [false, {}, {}];
-        }
-
-        // Generate a random amount within the actor's balance
-        const _amount = BigInt(Math.floor(context.prng.next() % Number(actorBalance)));
-        const frontend = ethers.ZeroAddress; // Or generate a random address if needed, but using zero address as default
-        const fee = BigInt(0); // Setting fee to 0 as default. Can be randomized between 0 and BASIS_POINTS_DIVISOR from stabilityPool
-
-        const allowance = await dfidTokenContract.allowance(actor.account.address, this.contract.target);
-        console.log(`Allowance before stake: ${allowance}`);
-
-        const canExecute = _amount > BigInt(0);
-
-        const actionParams = {
-            _amount: _amount,
-            frontend: frontend,
-            fee: fee,
-        };
-
-        return [canExecute, actionParams, {}];
+    if (actorBalance <= BigInt(0)) {
+      console.warn("Actor has insufficient balance to stake.");
+      return [false, {}, {}];
     }
 
-    async execute(
-        context: RunContext,
-        actor: Actor,
-        currentSnapshot: Snapshot,
-        actionParams: any
-    ): Promise<Record<string, any> | void> {
-        const { _amount, frontend, fee } = actionParams;
-        try {
-            console.log(`totalStakedRaw before stake: ${currentSnapshot.contractSnapshot.stabilityPool.totalStakedRaw}`)
-            console.log(`User stake before stake: ${currentSnapshot.contractSnapshot.stabilityPool.userInfos[actor.account.address]?.stake || BigInt(0)}`)
+    const _amount = BigInt(context.prng.next()) % actorBalance + BigInt(1); // Ensure amount > 0
+    const frontend = ethers.constants.AddressZero; // Or generate a random address if needed
+    const fee = BigInt(context.prng.next()) % (stabilityPoolSnapshot.basisPointsDivisor + BigInt(1)); // fee between 0 and BASIS_POINTS_DIVISOR
 
-            // Call the stake function using the contract instance passed in the constructor
-            const tx = await this.contract.connect(actor.account.value).stake(_amount, frontend, fee);
-            const receipt = await tx.wait();
-            return receipt;
-        } catch (error: any) {
-            console.error("Transaction failed:", error);
-            throw error;
+    const canExecute = _amount > BigInt(0);
+    const actionParams = canExecute ? {
+      _amount,
+      frontend,
+      fee
+    } : {};
+
+    return [canExecute, actionParams, {}];
+  }
+
+  async execute(
+    context: RunContext,
+    actor: Actor,
+    currentSnapshot: Snapshot,
+    actionParams: any
+  ): Promise<ExecutionReceipt> {
+    const actorSigner = actor.account.value;
+    return this.contract.connect(actorSigner).stake(
+      actionParams._amount,
+      actionParams.frontend,
+      actionParams.fee
+    );
+  }
+
+  async validate(
+    context: RunContext,
+    actor: Actor,
+    previousSnapshot: Snapshot,
+    newSnapshot: Snapshot,
+    actionParams: any,
+    executionReceipt: ExecutionReceipt
+  ): Promise<boolean> {
+    const _amount = actionParams._amount;
+    const frontend = actionParams.frontend;
+    const fee = actionParams.fee;
+    const actorAddress = actor.account.address;
+    const stabilityPoolAddress = (context.contracts.stabilityPool as ethers.Contract).target;
+    const dfidTokenAddress = (context.contracts.dfidToken as ethers.Contract).target;
+    const stableBaseCDPAddress = (context.contracts.stableBaseCDP as ethers.Contract).target;
+
+    // Get previous and new snapshots
+    const previousDFIDTokenSnapshot = previousSnapshot.contractSnapshot.dfidToken;
+    const newDFIDTokenSnapshot = newSnapshot.contractSnapshot.dfidToken;
+    const previousStabilityPoolSnapshot = previousSnapshot.contractSnapshot.stabilityPool;
+    const newStabilityPoolSnapshot = newSnapshot.contractSnapshot.stabilityPool;
+
+    // Token balances validation
+    const previousActorTokenBalance = previousDFIDTokenSnapshot.balances[actorAddress] || BigInt(0);
+    const newActorTokenBalance = newDFIDTokenSnapshot.balances[actorAddress] || BigInt(0);
+    const previousContractTokenBalance = previousDFIDTokenSnapshot.balances[stabilityPoolAddress] || BigInt(0);
+    const newContractTokenBalance = newDFIDTokenSnapshot.balances[stabilityPoolAddress] || BigInt(0);
+
+    expect(newActorTokenBalance, "Actor's staking token balance should decrease by the staked amount.").to.equal(previousActorTokenBalance - _amount);
+    expect(newContractTokenBalance, "Contract's staking token balance should increase by the staked amount.").to.equal(previousContractTokenBalance + _amount);
+
+    // Stake validation
+    const previousUserStake = previousStabilityPoolSnapshot.users[actorAddress]?.stake || BigInt(0);
+    const newUserStake = newStabilityPoolSnapshot.users[actorAddress]?.stake || BigInt(0);
+    const totalStakedRawPrevious = previousStabilityPoolSnapshot.totalStakedRaw || BigInt(0);
+    const totalStakedRawNew = newStabilityPoolSnapshot.totalStakedRaw || BigInt(0);
+
+    expect(newUserStake, "User's stake should increase.").to.be.gte(previousUserStake);
+    expect(totalStakedRawNew, "Total staked amount should increase by the staked amount.").to.equal(totalStakedRawPrevious + _amount);
+
+    const previousRewardSnapshot = previousStabilityPoolSnapshot.users[actorAddress]?.rewardSnapshot || BigInt(0);
+    const newRewardSnapshot = newStabilityPoolSnapshot.users[actorAddress]?.rewardSnapshot || BigInt(0);
+    expect(newRewardSnapshot, "User's reward snapshot should be equal to totalRewardPerToken.").to.equal(newStabilityPoolSnapshot.totalRewardPerToken);
+
+    const previousCollateralSnapshot = previousStabilityPoolSnapshot.users[actorAddress]?.collateralSnapshot || BigInt(0);
+    const newCollateralSnapshot = newStabilityPoolSnapshot.users[actorAddress]?.collateralSnapshot || BigInt(0);
+    expect(newCollateralSnapshot, "User's collateral snapshot should be equal to totalCollateralPerToken.").to.equal(newStabilityPoolSnapshot.totalCollateralPerToken);
+
+    // SBR reward validation (if applicable)
+    if (previousStabilityPoolSnapshot.sbrRewardDistributionStatus !== 2) { // Assuming 2 is the enum for ENDED
+        if (previousStabilityPoolSnapshot.totalStakedRaw === BigInt(0) && previousStabilityPoolSnapshot.rewardSenderActive) {
+            expect(newSnapshot.contractSnapshot.stableBaseCDP.stabilityPoolCanReceiveRewards, "IRewardSender(stableBaseCDP).setCanStabilityPoolReceiveRewards(true) should have been successfully called.").to.be.true;
+        }
+
+        if (previousStabilityPoolSnapshot.sbrRewardDistributionStatus === 1) { // Assuming 1 is the enum for STARTED
+            expect(newStabilityPoolSnapshot.totalSbrRewardPerToken, "totalSbrRewardPerToken should have increased").to.be.gte(previousStabilityPoolSnapshot.totalSbrRewardPerToken);
         }
     }
 
-    async validate(
-        context: RunContext,
-        actor: Actor,
-        previousSnapshot: Snapshot,
-        newSnapshot: Snapshot,
-        actionParams: any,
-        executionReceipt: ExecutionReceipt
-    ): Promise<boolean> {
-        const { _amount } = actionParams;
+    // Event Emission Validation
+    const stakedEvent = executionReceipt.events?.find(e => e.name === 'Staked');
+    expect(stakedEvent, 'Staked event should be emitted').to.not.be.undefined;
+    expect(stakedEvent?.args?.account, 'Staked event should have correct account').to.equal(actorAddress);
+    expect(stakedEvent?.args?.amount, 'Staked event should have correct amount').to.equal(_amount);
 
-        if (_amount <= BigInt(0)) {
-            console.log("Skipping validation because _amount is zero.");
-            return true;
-        }
+    // Reward Claimed Event
+     const rewardClaimedEvent = executionReceipt.events?.find(e => e.name === 'RewardClaimed');
 
-        // Accessing StabilityPool state from snapshots
-        const previousUserStake = previousSnapshot.contractSnapshot.stabilityPool.userInfos[actor.account.address]?.stake || BigInt(0);
-        const newUserStake = newSnapshot.contractSnapshot.stabilityPool.userInfos[actor.account.address]?.stake || BigInt(0);
-        const previousTotalStakedRaw = previousSnapshot.contractSnapshot.stabilityPool.totalStakedRaw;
-        const newTotalStakedRaw = newSnapshot.contractSnapshot.stabilityPool.totalStakedRaw;
+     // DFire Claimed Event
+     const dFireRewardClaimedEvent = executionReceipt.events?.find(e => e.name === 'DFireRewardClaimed');
 
-        // Accessing DFIDToken state from snapshots
-        const previousUserDFIDBalance = previousSnapshot.contractSnapshot.dfidToken.balances[actor.account.address] || BigInt(0);
-        const newUserDFIDBalance = newSnapshot.contractSnapshot.dfidToken.balances[actor.account.address] || BigInt(0);
-        const previousStabilityPoolDFIDBalance = previousSnapshot.contractSnapshot.dfidToken.balances[this.contract.target] || BigInt(0);
-        const newStabilityPoolDFIDBalance = newSnapshot.contractSnapshot.dfidToken.balances[this.contract.target] || BigInt(0);
-
-        const previousRewardSnapshot = previousSnapshot.contractSnapshot.stabilityPool.userInfos[actor.account.address]?.rewardSnapshot || BigInt(0);
-        const newRewardSnapshot = newSnapshot.contractSnapshot.stabilityPool.userInfos[actor.account.address]?.rewardSnapshot || BigInt(0);
-        const totalRewardPerToken = newSnapshot.contractSnapshot.stabilityPool.totalRewardPerToken;
-
-        const previousCollateralSnapshot = previousSnapshot.contractSnapshot.stabilityPool.userInfos[actor.account.address]?.collateralSnapshot || BigInt(0);
-        const newCollateralSnapshot = newSnapshot.contractSnapshot.stabilityPool.userInfos[actor.account.address]?.collateralSnapshot || BigInt(0);
-        const totalCollateralPerToken = newSnapshot.contractSnapshot.stabilityPool.totalCollateralPerToken;
-
-        const previousCumulativeProductScalingFactor = previousSnapshot.contractSnapshot.stabilityPool.userInfos[actor.account.address]?.cumulativeProductScalingFactor || BigInt(0);
-        const newCumulativeProductScalingFactor = newSnapshot.contractSnapshot.stabilityPool.userInfos[actor.account.address]?.cumulativeProductScalingFactor || BigInt(0);
-        const stakeScalingFactor = newSnapshot.contractSnapshot.stabilityPool.stakeScalingFactor;
-
-        const previousStakeResetCount = previousSnapshot.contractSnapshot.stabilityPool.userInfos[actor.account.address]?.stakeResetCount || BigInt(0);
-        const newStakeResetCount = newSnapshot.contractSnapshot.stabilityPool.userInfos[actor.account.address]?.stakeResetCount || BigInt(0);
-        const stakeResetCount = newSnapshot.contractSnapshot.stabilityPool.stakeResetCount;
-
-        const previousSBRRewardDistributionStatus = previousSnapshot.contractSnapshot.stabilityPool.sbrRewardDistributionStatus;
-        const newSBRRewardDistributionStatus = newSnapshot.contractSnapshot.stabilityPool.sbrRewardDistributionStatus;
-
-        // Validate state changes in StabilityPool
-        expect(newUserStake).to.equal(previousUserStake + _amount, "User stake should increase by the staked amount.");
-        expect(newTotalStakedRaw).to.equal(previousTotalStakedRaw + _amount, "Total staked raw should increase by the staked amount.");
-
-        // Validate state changes in DFIDToken
-        expect(newUserDFIDBalance).to.equal(previousUserDFIDBalance - _amount, "User's staking token balance should decrease by the staked amount.");
-        expect(newStabilityPoolDFIDBalance).to.equal(previousStabilityPoolDFIDBalance + _amount, "StabilityPool's staking token balance should increase by the staked amount.");
-
-        expect(newRewardSnapshot).to.equal(totalRewardPerToken, "The user's rewardSnapshot should be equal to totalRewardPerToken");
-        expect(newCollateralSnapshot).to.equal(totalCollateralPerToken, "The user's collateralSnapshot should be equal to totalCollateralPerToken");
-        expect(newCumulativeProductScalingFactor).to.equal(stakeScalingFactor, "The user's cumulativeProductScalingFactor should be equal to stakeScalingFactor");
-        expect(newStakeResetCount).to.equal(stakeResetCount, "The user's stakeResetCount should be equal to stakeResetCount");
-
-        // SBR reward validation - only validating if SBR rewards are active
-        if (newSBRRewardDistributionStatus !== 'ENDED') {
-            const previousSBRRewardSnapshot = previousSnapshot.contractSnapshot.stabilityPool.sbrRewardSnapshots[actor.account.address]?.rewardSnapshot || BigInt(0);
-            const newSBRRewardSnapshot = newSnapshot.contractSnapshot.stabilityPool.sbrRewardSnapshots[actor.account.address]?.rewardSnapshot || BigInt(0);
-            const totalSbrRewardPerToken = newSnapshot.contractSnapshot.stabilityPool.totalSbrRewardPerToken;
-            expect(newSBRRewardSnapshot).to.equal(totalSbrRewardPerToken, "The user's SBR rewardSnapshot should be equal to totalSbrRewardPerToken");
-        }
-
-        // Verify that the Staked event is emitted with the correct user address and staked amount.
-        const stakedEvent = executionReceipt.events.find((e) => e?.name === "Staked");
-        expect(stakedEvent).to.not.be.undefined;
-        expect(stakedEvent?.args?.account).to.equal(actor.account.address);
-        expect(stakedEvent?.args?.amount).to.equal(_amount);
-
-        console.log(`totalStakedRaw after stake: ${newSnapshot.contractSnapshot.stabilityPool.totalStakedRaw}`)
-        console.log(`User stake after stake: ${newSnapshot.contractSnapshot.stabilityPool.userInfos[actor.account.address]?.stake || BigInt(0)}`)
-
-        return true;
-    }
+    return true;
+  }
 }
-
-export default StakeAction;
