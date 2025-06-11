@@ -11,22 +11,23 @@
     "contract_name": "MockPriceOracle",
     "function_name": "setPrice",
     "pre_execution_parameter_generation_rules": [
-      "The `_price` parameter should be a uint256 representing the desired price. Ensure that the value is non-negative.",
-      "The `_price` parameter should be a reasonable uint256 value for the asset being priced to prevent unexpected behavior due to excessively large numbers."
+      "The `_price` parameter should be a uint256 representing the desired price.",
+      "The `_price` parameter can be any non-negative integer.",
+      "The sender must be the owner of the contract."
     ],
     "on_execution_state_updates_made": [
       {
-        "category": "Price",
+        "category": "Price Update",
         "state_update_descriptions": [
-          "The `price` variable is updated to `_price * 1e18`, where `_price` is the input uint256 value."
+          "The `price` variable is updated to `_price * 10^18`."
         ]
       }
     ],
     "post_execution_contract_state_validation_rules": [
       {
-        "category": "Price",
+        "category": "Price Validation",
         "rule_descriptions": [
-          "The `price` variable should be equal to the input `_price` multiplied by 1e18. Verify that `price == _price * 1e18`."
+          "The `price` variable should be equal to the provided `_price` multiplied by 10^18."
         ]
       }
     ]
@@ -44,14 +45,14 @@
           {
             "state_variable_name": "price",
             "type": "uint256",
-            "what_does_it_track": "Tracks the current price provided by the oracle.",
-            "why_is_is_important": "It is important because other contracts may depend on the price the oracle provides to make important decisions about the protocol.",
-            "when_is_it_updated": "It's updated when the `setPrice` function is called by the contract owner.",
-            "how_to_validate_state_update": "Check the value of the `price` state variable after the `setPrice` function is called. It should be equal to the input `_price` multiplied by 1e18.",
+            "what_does_it_track": "Tracks the current price.",
+            "why_is_is_important": "It represents the current price used by other contracts or functions to determine the value of an asset.",
+            "when_is_it_updated": "It is updated when the contract owner calls the 'setPrice' function.",
+            "how_to_validate_state_update": "Check the value of the 'price' state variable after the function execution. Ensure that the new value is equal to the '_price' parameter multiplied by 1e18.",
             "has_conditional_updates": true,
-            "summary_of_update": "The `price` state variable is updated to the new price set by the owner.",
+            "summary_of_update": "The 'price' state variable is updated with the new price provided as input, scaled by 1e18.",
             "conditions": [
-              "The function can only be executed by the owner."
+              "The function caller must be the owner of the contract, as enforced by the onlyOwner modifier"
             ]
           }
         ]
