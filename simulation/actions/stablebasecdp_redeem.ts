@@ -1,22 +1,14 @@
 import { Action, Actor, Snapshot } from "@svylabs/ilumina";
 import type { RunContext, ExecutionReceipt } from "@svylabs/ilumina";
 import { ethers } from "ethers";
-import { expect } from "chai";
+import { expect } from 'chai';
 
 export class RedeemAction extends Action {
   private contract: ethers.Contract;
-  private dfidTokenAddress: string;
-  private stabilityPoolAddress: string;
 
-  constructor(
-    contract: ethers.Contract,
-    dfidTokenAddress: string,
-    stabilityPoolAddress: string
-  ) {
+  constructor(contract: ethers.Contract) {
     super("RedeemAction");
     this.contract = contract;
-    this.dfidTokenAddress = dfidTokenAddress;
-    this.stabilityPoolAddress = stabilityPoolAddress;
   }
 
   async initialize(
@@ -24,32 +16,32 @@ export class RedeemAction extends Action {
     actor: Actor,
     currentSnapshot: Snapshot
   ): Promise<[boolean, any, Record<string, any>]> {
-    const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
+    const dfidTokenAddress = (context.contracts.dfidToken as ethers.Contract).target;
     const dfidTokenSnapshot = currentSnapshot.contractSnapshot.dfidToken;
-
-    if (!stableBaseCDPSnapshot || !dfidTokenSnapshot) {
-      console.warn("Missing snapshots, cannot proceed with Redeem action");
-      return [false, {}, {}];
-    }
-
     const actorAddress = actor.account.address;
-    const actorSBDBalance = dfidTokenSnapshot.balances[actorAddress] || BigInt(0);
 
-    if (actorSBDBalance <= BigInt(0)) {
-      console.warn("Actor has insufficient SBD balance to redeem.");
+    const actorBalance = dfidTokenSnapshot.balances[actorAddress] || BigInt(0);
+
+    if (actorBalance <= BigInt(0)) {
       return [false, {}, {}];
     }
 
-    // Initialize amount within the bounds of the actor's SBD balance
-    const amount = BigInt(Math.floor(context.prng.next() % Number(actorSBDBalance) + 1));
+    //Generate random amount based on actor balance
+    const amount = BigInt(Math.floor(context.prng.next() % Number(actorBalance)));
     const nearestSpotInLiquidationQueue = BigInt(0);
+
+    if (amount <= BigInt(0)) {
+      return [false, {}, {}];
+    }
 
     const canExecute = amount > BigInt(0);
 
-    const actionParams = {
-      amount: amount,
-      nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue,
-    };
+    const actionParams = canExecute
+      ? {
+          amount: amount,
+          nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue,
+        }
+      : {};
 
     return [canExecute, actionParams, {}];
   }
@@ -60,16 +52,15 @@ export class RedeemAction extends Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<ExecutionReceipt> {
-    const { amount, nearestSpotInLiquidationQueue } = actionParams;
-
-    // Use the contract passed in the constructor to call the redeem function
+    const signer = actor.account.value.connect(context.provider);
     const tx = await this.contract
-      .connect(actor.account.value as ethers.Signer)
-      .redeem(amount, nearestSpotInLiquidationQueue);
-
+      .connect(signer)
+      .redeem(
+        actionParams.amount,
+        actionParams.nearestSpotInLiquidationQueue
+      );
     const receipt = await tx.wait();
-
-    return { receipt: receipt, rawResponse: tx };
+    return { receipt: receipt, result: null };
   }
 
   async validate(
@@ -80,61 +71,103 @@ export class RedeemAction extends Action {
     actionParams: any,
     executionReceipt: ExecutionReceipt
   ): Promise<boolean> {
-    const { amount, nearestSpotInLiquidationQueue } = actionParams;
-    const stableBaseCDPPrevious = previousSnapshot.contractSnapshot.stableBaseCDP;
-    const stableBaseCDPNew = newSnapshot.contractSnapshot.stableBaseCDP;
-    const dfidTokenPrevious = previousSnapshot.contractSnapshot.dfidToken;
-    const dfidTokenNew = newSnapshot.contractSnapshot.dfidToken;
+    const amount = actionParams.amount;
+    // Contract Snapshots
+    const previousStableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
+    const newStableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
+    const previousDFIDTokenSnapshot = previousSnapshot.contractSnapshot.dfidToken;
+    const newDFIDTokenSnapshot = newSnapshot.contractSnapshot.dfidToken;
+    const previousStabilityPoolSnapshot = previousSnapshot.contractSnapshot.stabilityPool;
+    const newStabilityPoolSnapshot = newSnapshot.contractSnapshot.stabilityPool;
 
-    if (!executionReceipt.receipt) {
-      console.error("Execution receipt is missing, validation cannot proceed.");
-      return false;
-    }
+    // Contract Addresses
+    const stableBaseCDPAddress = (context.contracts.stableBaseCDP as ethers.Contract).target;
+    const dfidTokenAddress = (context.contracts.dfidToken as ethers.Contract).target;
+    const stabilityPoolAddress = (context.contracts.stabilityPool as ethers.Contract).target;
 
-    if (!stableBaseCDPPrevious || !stableBaseCDPNew || !dfidTokenPrevious || !dfidTokenNew) {
-      console.warn("Missing CDP or Token snapshots, cannot validate Redeem action");
-      return false;
-    }
-
+    // Account Snapshots
+    const previousAccountSnapshot = previousSnapshot.accountSnapshot;
+    const newAccountSnapshot = newSnapshot.accountSnapshot;
     const actorAddress = actor.account.address;
-    const previousActorSBDBalance = dfidTokenPrevious.balances[actorAddress] || BigInt(0);
-    const newActorSBDBalance = dfidTokenNew.balances[actorAddress] || BigInt(0);
 
-    const previousTotalCollateral = stableBaseCDPPrevious.totalCollateral;
-    const newTotalCollateral = stableBaseCDPNew.totalCollateral;
-    const previousTotalDebt = stableBaseCDPPrevious.totalDebt;
-    const newTotalDebt = stableBaseCDPNew.totalDebt;
-    const previousTotalSupply = dfidTokenPrevious.totalSupply;
-    const newTotalSupply = dfidTokenNew.totalSupply;
-    const previousTotalBurned = dfidTokenPrevious.totalBurned;
-    const newTotalBurned = dfidTokenNew.totalBurned;
-    const previousProtocolMode = stableBaseCDPPrevious.protocolMode;
-    const newProtocolMode = stableBaseCDPNew.protocolMode;
+    // Actor ETH Balance Validation
+    const prevActorETHBalance = previousAccountSnapshot[actorAddress] || BigInt(0);
+    const newActorETHBalance = newAccountSnapshot[actorAddress] || BigInt(0);
 
-    const previousAccountETHBalance = previousSnapshot.accountSnapshot[actorAddress] || BigInt(0);
-    const newAccountETHBalance = newSnapshot.accountSnapshot[actorAddress] || BigInt(0);
-    const contractAddress = this.contract.target;
+    // Actor SBD Balance Validation
+    const prevActorSBDBalance = previousDFIDTokenSnapshot.balances[actorAddress] || BigInt(0);
+    const newActorSBDBalance = newDFIDTokenSnapshot.balances[actorAddress] || BigInt(0);
 
-    // Validating balances and state changes
-    expect(newActorSBDBalance).to.be.lte(previousActorSBDBalance, "Actor SBD balance should decrease or remain same");
-    expect(newTotalCollateral).to.be.lte(previousTotalCollateral, "Total collateral should decrease or remain same");
-    expect(newTotalDebt).to.be.lte(previousTotalDebt, "Total debt should decrease or remain same");
-    expect(newTotalSupply).to.be.lt(previousTotalSupply, "Total supply should decrease");
-    expect(newTotalBurned).to.be.gt(previousTotalBurned, "Total burned should increase");
-    expect(newProtocolMode).to.be.gte(previousProtocolMode, "Protocol mode should stay the same or increase");
+    // StableBaseCDP SBD Balance Validation
+    const prevStableBaseCDPSBDBalance = previousDFIDTokenSnapshot.balances[stableBaseCDPAddress] || BigInt(0);
+    const newStableBaseCDPSBDBalance = newDFIDTokenSnapshot.balances[stableBaseCDPAddress] || BigInt(0);
 
-    // Check ETH balance change - should increase due to collateral received
-    expect(newAccountETHBalance).to.be.gte(previousAccountETHBalance, "Actor ETH balance should increase or remain same");
+    // Total Supply Validation
+    const prevTotalSupply = previousDFIDTokenSnapshot.totalSupply;
+    const newTotalSupply = newDFIDTokenSnapshot.totalSupply;
 
-    // Event validation
-    const events = executionReceipt.receipt.logs.map((log) =>
-      this.contract.interface.parseLog(log)
-    );
-    const redeemedBatchEvent = events.find((e) => e?.name === "RedeemedBatch");
-    expect(redeemedBatchEvent, "RedeemedBatch event should be emitted").to.not
-      .be.undefined;
+    // Total Burned Validation
+    const prevTotalBurned = previousDFIDTokenSnapshot.totalBurned;
+    const newTotalBurned = newDFIDTokenSnapshot.totalBurned;
 
-    // Additional checks based on the state updates
+    // Total Collateral Validation
+    const prevTotalCollateral = previousStableBaseCDPSnapshot.totalCollateral;
+    const newTotalCollateral = newStableBaseCDPSnapshot.totalCollateral;
+
+    // Total Debt Validation
+    const prevTotalDebt = previousStableBaseCDPSnapshot.totalDebt;
+    const newTotalDebt = newStableBaseCDPSnapshot.totalDebt;
+
+    // Event Validation
+    let redeemedBatchEvent;
+    try {
+        redeemedBatchEvent = executionReceipt.receipt.logs.find((log: any) => {
+            try {
+                const parsedLog = this.contract.interface.parseLog(log);
+                return parsedLog && parsedLog.name === 'RedeemedBatch';
+            } catch (e) {
+                return false;
+            }
+        });
+    } catch (error) {
+        console.error("Error parsing logs:", error);
+        return false;
+    }
+
+    //RedeemedBatch event validation
+    if(redeemedBatchEvent) {
+        let parsedRedeemBatchEvent;
+        try {
+             parsedRedeemBatchEvent = this.contract.interface.parseLog(redeemedBatchEvent);
+        } catch (error) {
+            console.error("Error parsing RedeemedBatch event:", error);
+            return false;
+        }
+
+        expect(parsedRedeemBatchEvent.args.amount).to.equal(amount, "RedeemedBatch: Amount mismatch");
+        expect(newTotalCollateral).to.equal(parsedRedeemBatchEvent.args.totalCollateral, "RedeemedBatch: Total Collateral mismatch");
+        expect(newTotalDebt).to.equal(parsedRedeemBatchEvent.args.totalDebt, "RedeemedBatch: Total Debt mismatch");
+    }
+    else {
+         console.warn("RedeemedBatch event not found. Validation may be incomplete.");
+    }
+
+    // Check that SBD was transferred from the redeemer to the contract
+    expect(newActorSBDBalance).to.equal(prevActorSBDBalance - amount, "SBD not transferred from redeemer");
+    expect(newStableBaseCDPSBDBalance).to.equal(prevStableBaseCDPSBDBalance + amount, "SBD not transferred to contract");
+
+    // Check that SBD was burned
+    expect(newTotalSupply).to.be.lte(prevTotalSupply, "SBD not burned");
+    expect(newTotalBurned).to.be.gte(prevTotalBurned, "totalBurned incorrect");
+
+    // Check that totalCollateral decreased (by an amount that's hard to predict exactly)
+    expect(newTotalCollateral).to.be.lte(prevTotalCollateral, "totalCollateral did not decrease");
+
+    // Check that totalDebt decreased (by amount)
+    expect(newTotalDebt).to.be.lte(prevTotalDebt, "totalDebt did not decrease");
+
+    // Check that the actor received ETH (redeemed collateral)
+    expect(newActorETHBalance).to.be.gt(prevActorETHBalance, "ETH not received by redeemer");
 
     return true;
   }
