@@ -11,28 +11,29 @@
     "contract_name": "MockPriceOracle",
     "function_name": "setPrice",
     "pre_execution_parameter_generation_rules": [
-      "The '_price' parameter should be a non-negative integer representing the desired price.",
-      "The transaction must be sent by the 'owner' of the 'MockPriceOracle' contract, as enforced by the 'onlyOwner' modifier."
+      "The '_price' parameter must be a non-negative integer representing the desired price, which will be adjusted by 1e18 internally by the contract.",
+      "The transaction must be sent from the address that currently owns the 'MockPriceOracle' contract."
     ],
     "on_execution_state_updates_made": [
       {
-        "category": "State Variable Updates",
+        "category": "Contract State Updates",
         "state_update_descriptions": [
-          "The 'price' state variable in the 'MockPriceOracle' contract will be updated to the provided '_price' value multiplied by 1e18."
+          "The 'price' state variable in the 'MockPriceOracle' contract is updated to the value of the '_price' parameter provided, after being multiplied by 1e18 to account for decimals."
         ]
       }
     ],
     "post_execution_contract_state_validation_rules": [
       {
-        "category": "State Variable Assertions",
+        "category": "Contract State Validation",
         "rule_descriptions": [
-          "Verify that the 'price' state variable in the 'MockPriceOracle' contract is equal to the input '_price' multiplied by 1e18."
+          "Verify that the 'price' state variable in the 'MockPriceOracle' contract, when queried via the 'price()' view function, returns a value equal to the '_price' parameter provided during the transaction, multiplied by 1e18."
         ]
       },
       {
-        "category": "Event Assertions",
+        "category": "Security and Access Control Validation",
         "rule_descriptions": [
-          "No specific events are emitted by the 'setPrice' function upon successful execution."
+          "Verify that the transaction successfully executes only when called by the current owner of the 'MockPriceOracle' contract.",
+          "Verify that if the transaction is attempted by an address that is not the owner, the transaction reverts with an 'OwnableUnauthorizedAccount' error."
         ]
       }
     ]
@@ -50,14 +51,14 @@
           {
             "state_variable_name": "price",
             "type": "uint256",
-            "what_does_it_track": "The current price reported by the oracle.",
-            "why_is_is_important": "This variable represents the core functionality of the price oracle, determining the price returned to consuming contracts. An incorrect or unauthorized update could lead to incorrect valuations.",
-            "when_is_it_updated": "When the 'setPrice' function is successfully called by the contract owner.",
-            "how_to_validate_state_update": "Verify that the 'price' state variable within the MockPriceOracle contract is updated to the new '_price' value multiplied by 1e18.",
+            "what_does_it_track": "The current mock price maintained by the oracle.",
+            "why_is_is_important": "This variable is crucial as it determines the price returned by the `fetchPrice` and `lastGoodPrice` view functions, directly affecting any external contracts or systems relying on this oracle's price feed.",
+            "when_is_it_updated": "The `price` state variable is updated whenever the `setPrice` function is called and successfully executed by the contract owner.",
+            "how_to_validate_state_update": "After the `setPrice` function is successfully executed, verify that the `price` state variable in the `MockPriceOracle` contract is equal to the `_price` input parameter multiplied by 1e18.",
             "has_conditional_updates": true,
-            "summary_of_update": "The 'price' state variable is updated to the value of '_price' provided as input, scaled by 1e18.",
+            "summary_of_update": "The `price` state variable is updated to the new `_price` value provided as an argument, scaled by 1e18.",
             "conditions": [
-              "The caller must be the owner of the contract."
+              "The caller of the function must be the owner of the contract (enforced by `onlyOwner` modifier)."
             ]
           }
         ]
