@@ -11,64 +11,76 @@
     "contract_name": "StableBaseCDP",
     "function_name": "closeSafe",
     "pre_execution_parameter_generation_rules": [
-      "The `safeId` must correspond to an existing Safe in the `safes` mapping.",
-      "The caller (`msg.sender`) must be the owner of the Safe with the given `safeId`.",
-      "The `borrowedAmount` of the Safe must be 0.  If not, the transaction will revert.",
-      "Ensure that the contract has enough balance to pay back the collateral to the safe owner. Otherwise, the transfer will fail."
+      "`safeId` must be the ID of an existing Safe (CDP) on the `StableBaseCDP` contract.",
+      "The transaction signer (`msg.sender`) must be the current owner of the Safe identified by `safeId`.",
+      "The Safe identified by `safeId` must have a `borrowedAmount` of 0 *after* any accrued debt and collateral updates are applied by the `_updateSafe` internal function (i.e., all debt must have been repaid prior to closing)."
     ],
     "on_execution_state_updates_made": [
       {
-        "category": "Safe Closure",
+        "category": "Safe State Updates",
         "state_update_descriptions": [
-          "Updates the safe's borrowed and collateral amounts based on cumulative debt and collateral per unit (using _updateSafe).",
-          "Removes the Safe from the `safes` mapping by deleting the entry at the given `safeId`.",
-          "Burns the NFT associated with the `safeId`."
+          "The `Safe` struct corresponding to `safeId` in the `safes` mapping will be updated via `_updateSafe` prior to closure. This update will account for accrued debt and collateral based on `cumulativeDebtPerUnitCollateral` and `cumulativeCollateralPerUnitCollateral`.",
+          "The `Safe` struct corresponding to `safeId` in the `safes` mapping will be deleted, effectively removing the CDP from the contract's active records."
         ]
       },
       {
-        "category": "System Debt and Collateral",
+        "category": "Liquidation Snapshot Updates",
         "state_update_descriptions": [
-          "Updates the `totalCollateral` by subtracting the collateral amount of the closed Safe.",
-          "Updates the `totalDebt` based on any debt increase calculated during the `_updateSafe` call.",
-          "Updates the liquidation snapshot for the safe, storing the current cumulative debt and collateral per unit for future calculations."
+          "The `liquidationSnapshots[safeId].collateralPerCollateralSnapshot` will be updated to `cumulativeCollateralPerUnitCollateral`.",
+          "The `liquidationSnapshots[safeId].debtPerCollateralSnapshot` will be updated to `cumulativeDebtPerUnitCollateral`."
         ]
       },
       {
-        "category": "NFT Ownership",
+        "category": "Total Protocol State Updates",
         "state_update_descriptions": [
-          "Transfers the NFT associated with the Safe to the zero address, effectively burning it.",
-          "Decrements the balance of the previous owner of the NFT."
+          "The `totalCollateral` will first be increased by any `collateralIncrease` calculated in `_updateSafe`, and then decreased by the final `safe.collateralAmount` immediately before deletion, reflecting the return of collateral to the owner.",
+          "The `totalDebt` will be increased by any `debtIncrease` calculated in `_updateSafe`."
+        ]
+      },
+      {
+        "category": "NFT Ownership and Approval Updates",
+        "state_update_descriptions": [
+          "The ownership of the NFT (representing the Safe) will be transferred from the current owner to `address(0)` (burned), making the token non-existent.",
+          "The balance of Safe NFTs for the previous owner of `safeId` will be decremented by 1.",
+          "Any existing token approval for `safeId` will be cleared (`_tokenApprovals[safeId]` set to `address(0)`)."
+        ]
+      },
+      {
+        "category": "Protocol Mode Update",
+        "state_update_descriptions": [
+          "If `PROTOCOL_MODE` is `BOOTSTRAP` and `totalDebt` (after internal updates) exceeds `BOOTSTRAP_MODE_DEBT_THRESHOLD`, `PROTOCOL_MODE` will switch to `NORMAL`."
         ]
       }
     ],
     "post_execution_contract_state_validation_rules": [
       {
-        "category": "Safe Closure",
+        "category": "Safe State Validation",
         "rule_descriptions": [
-          "Validate that `safes[safeId]` is deleted, meaning the Safe no longer exists in the mapping.",
-          "Validate that the NFT associated with `safeId` is burned, and its owner is the zero address (check using ownerOf(safeId))."
+          "Verify that querying `safes[safeId]` returns a struct with default values (e.g., all fields as 0), indicating the Safe has been removed.",
+          "Verify that calling `ownerOf(safeId)` on the `StableBaseCDP` contract returns `address(0)` (the zero address), confirming the Safe NFT has been burned.",
+          "Verify that `balanceOf(previousOwnerOfSafe)` for the `StableBaseCDP` contract has decreased by 1."
         ]
       },
       {
-        "category": "System Debt and Collateral",
+        "category": "Total Protocol State Validation",
         "rule_descriptions": [
-          "Validate that `totalCollateral` has been reduced by the collateral amount of the closed Safe.",
-          "Validate that `totalDebt` has been updated correctly, accounting for any debt increase during the `_updateSafe` call.",
-          "If the `PROTOCOL_MODE` was `BOOTSTRAP`, ensure that it has switched to `NORMAL` if `totalDebt` exceeds the `BOOTSTRAP_MODE_DEBT_THRESHOLD`."
+          "Verify that `totalCollateral` has decreased by `collateralAmount` of the closed safe (as reported in the `SafeClosed` event), relative to its state *after* the `_updateSafe` call but *before* the collateral deduction in `closeSafe`.",
+          "Verify that `totalDebt` matches the value emitted in the `SafeClosed` event, accounting for any `debtIncrease` from `_updateSafe`."
         ]
       },
       {
-        "category": "Event Emission",
+        "category": "Event Emission Validation",
         "rule_descriptions": [
-          "Validate that a `SafeClosed` event is emitted, containing the `safeId`, `collateralAmount`, updated `totalCollateral`, and updated `totalDebt`.",
-          "Validate that a `RemovedSafe` event is emitted, containing the `safeId` and the `Safe` struct data.",
-          "Validate that a `Transfer` event is emitted, indicating the NFT was transferred to the zero address."
+          "Verify that a `SafeUpdated` event was emitted if the `_updateSafe` function resulted in changes to the safe's collateral or debt.",
+          "Verify that a `RemovedSafe` event was emitted for the `safeId`.",
+          "Verify that a `Transfer` event was emitted with `from` as the previous owner of `safeId`, `to` as `address(0)`, and `tokenId` as `safeId`.",
+          "Verify that a `SafeClosed` event was emitted with the correct `safeId`, `refundedCollateral` (which is the `safe.collateralAmount` at the time of closure), and the final `totalCollateral` and `totalDebt`."
         ]
       },
       {
-        "category": "Balance Transfer",
+        "category": "External Balance Validation",
         "rule_descriptions": [
-          "Validate that the collateral amount of the closed Safe has been transferred to the `msg.sender`."
+          "Verify that the `msg.sender`'s native token balance (e.g., Ether for an ETH-backed CDP) has increased by the `collateralAmount` of the closed safe, as it is refunded during the closure process."
         ]
       }
     ]
@@ -84,88 +96,187 @@
         "contract_name": "StableBaseCDP",
         "state_updated": [
           {
-            "state_variable_name": "safes",
-            "type": "mapping",
-            "what_does_it_track": "Stores all the safes",
-            "why_is_is_important": "It is important to ensure that closed safes are removed to prevent reuse and maintain data integrity.",
-            "when_is_it_updated": "When a safe is closed after repaying all borrowed amount.",
-            "how_to_validate_state_update": "Check if the safe with safeId has been removed from the safes mapping and the collateralAmount has been transferred to msg.sender",
+            "state_variable_name": "safes[safeId].borrowedAmount",
+            "type": "uint256",
+            "what_does_it_track": "The current amount of debt (stablecoins) borrowed against the Safe.",
+            "why_is_is_important": "It reflects the actual outstanding debt of the Safe before closure, ensuring all accrued debt is accounted for and that the pre-condition safe.borrowedAmount == 0 can be checked effectively (meaning no debt should remain).",
+            "when_is_it_updated": "During the call to _updateSafe if there's a discrepancy between liquidationSnapshot.collateralPerCollateralSnapshot and cumulativeCollateralPerUnitCollateral.",
+            "how_to_validate_state_update": "Verify that safe.borrowedAmount is updated by the debtIncrease calculated based on cumulativeDebtPerUnitCollateral and the safe's previous debtPerCollateralSnapshot.",
             "has_conditional_updates": true,
-            "summary_of_update": "Removes the Safe from the mapping `safes`, essentially deleting the Safe's data associated with safeId.",
+            "summary_of_update": "The borrowedAmount for the specific safeId is increased to account for accrued debt due to system-wide changes (if any).",
             "conditions": [
-              "safe.borrowedAmount == 0"
+              "This update occurs if the liquidation snapshot's collateral-per-collateral-snapshot is not equal to the cumulative-collateral-per-unit-collateral. This typically means there have been changes in the system's overall collateral or debt values that affect the safe's actual borrowed and collateral amounts due to interest accrual or yield.",
+              "Requires safe.borrowedAmount == 0 after this update for the closeSafe function to proceed, but the update itself is based on system-wide changes before the borrowedAmount == 0 check in closeSafe and contributes to meeting that condition if it accrues debt that brings it above 0, or if it was already 0, it remains 0 (assuming no interest accrual if debt is 0)."
+            ]
+          },
+          {
+            "state_variable_name": "safes[safeId].totalBorrowedAmount",
+            "type": "uint256",
+            "what_does_it_track": "The cumulative sum of all debt ever borrowed against the Safe, including accrued interest.",
+            "why_is_is_important": "It keeps a record of the total debt that was ever associated with the Safe, useful for historical data or fee calculations, especially before the Safe is closed\u611f\u89c9\u5230",
+            "when_is_it_updated": "During the call to _updateSafe if there's a discrepancy between liquidationSnapshot.collateralPerCollateralSnapshot and cumulativeCollateralPerUnitCollateral.",
+            "how_to_validate_state_update": "Verify that safe.totalBorrowedAmount is updated by the debtIncrease calculated based on cumulativeDebtPerUnitCollateral and the safe's previous debtPerCollateralSnapshot.",
+            "has_conditional_updates": true,
+            "summary_of_update": "The totalBorrowedAmount for the specific safeId is increased to account for accrued debt due to system-wide changes (if any).",
+            "conditions": [
+              "This update occurs if the liquidation snapshot's collateral-per-collateral-snapshot is not equal to the cumulative-collateral-per-unit-collateral. This typically means there have been changes in the system's overall collateral or debt values that affect the safe's actual borrowed and collateral amounts due to interest accrual or yield.",
+              "Requires safe.borrowedAmount == 0 after this update for the closeSafe function to proceed, but the update itself is based on system-wide changes before the borrowedAmount == 0 check in closeSafe and contributes to meeting that condition if it accrues debt that brings it above 0, or if it was already 0, it remains 0 (assuming no interest accrual if debt is 0)."
+            ]
+          },
+          {
+            "state_variable_name": "liquidationSnapshots[safeId].debtPerCollateralSnapshot",
+            "type": "uint256",
+            "what_does_it_track": "A snapshot of the cumulativeDebtPerUnitCollateral at the time of the last Safe update, used to calculate accrued debt.",
+            "why_is_is_important": "It ensures future calculations of accrued debt for this Safe are based on the correct starting point, effectively 'resetting' the accrual calculation from this point.",
+            "when_is_it_updated": "During the call to _updateSafe if there's a discrepancy between liquidationSnapshot.collateralPerCollateralSnapshot and cumulativeCollateralPerUnitCollateral.",
+            "how_to_validate_state_update": "Verify that liquidationSnapshots[safeId].debtPerCollateralSnapshot is set to cumulativeDebtPerUnitCollateral.",
+            "has_conditional_updates": true,
+            "summary_of_update": "The debtPerCollateralSnapshot for the specified safeId is updated to the current cumulativeDebtPerUnitCollateral.",
+            "conditions": [
+              "This update occurs if the liquidation snapshot's collateral-per-collateral-snapshot is not equal to the cumulative-collateral-per-unit-collateral. This typically means there have been changes in the system's overall collateral or debt values that affect the safe's actual borrowed and collateral amounts due to interest accrual or yield.",
+              "Requires safe.borrowedAmount == 0 after this update for the closeSafe function to proceed, but the update itself is based on system-wide changes before the borrowedAmount == 0 check in closeSafe and contributes to meeting that condition if it accrues debt that brings it above 0, or if it was already 0, it remains 0 (assuming no interest accrual if debt is 0)."
+            ]
+          },
+          {
+            "state_variable_name": "safes[safeId].collateralAmount",
+            "type": "uint256",
+            "what_does_it_track": "The current amount of collateral held in the Safe.",
+            "why_is_is_important": "It reflects the actual collateral backing the Safe's debt before closure, ensuring the correct amount is returned to the user\u611f\u89c9\u5230",
+            "when_is_it_updated": "During the call to _updateSafe if there's a discrepancy between liquidationSnapshot.collateralPerCollateralSnapshot and cumulativeCollateralPerUnitCollateral.",
+            "how_to_validate_state_update": "Verify that safe.collateralAmount is updated by the collateralIncrease calculated based on cumulativeCollateralPerUnitCollateral and the safe's previous collateralPerCollateralSnapshot.",
+            "has_conditional_updates": true,
+            "summary_of_update": "The collateralAmount for the specific safeId is increased to account for accrued collateral due to system-wide changes (if any).",
+            "conditions": [
+              "This update occurs if the liquidation snapshot's collateral-per-collateral-snapshot is not equal to the cumulative-collateral-per-unit-collateral. This typically means there have been changes in the system's overall collateral or debt values that affect the safe's actual borrowed and collateral amounts due to interest accrual or yield.",
+              "Requires safe.borrowedAmount == 0 after this update for the closeSafe function to proceed, but the update itself is based on system-wide changes before the borrowedAmount == 0 check in closeSafe and contributes to meeting that condition if it accrues debt that brings it above 0, or if it was already 0, it remains 0 (assuming no interest accrual if debt is 0)."
+            ]
+          },
+          {
+            "state_variable_name": "liquidationSnapshots[safeId].collateralPerCollateralSnapshot",
+            "type": "uint256",
+            "what_does_it_track": "A snapshot of the cumulativeCollateralPerUnitCollateral at the time of the last Safe update, used to calculate accrued collateral.",
+            "why_is_is_important": "It ensures future calculations of accrued collateral for this Safe are based on the correct starting point, effectively 'resetting' the accrual calculation from this point.",
+            "when_is_it_updated": "During the call to _updateSafe if there's a discrepancy between liquidationSnapshot.collateralPerCollateralSnapshot and cumulativeCollateralPerUnitCollateral.",
+            "how_to_validate_state_update": "Verify that liquidationSnapshots[safeId].collateralPerCollateralSnapshot is set to cumulativeCollateralPerUnitCollateral.",
+            "has_conditional_updates": true,
+            "summary_of_update": "The collateralPerCollateralSnapshot for the specified safeId is updated to the current cumulativeCollateralPerUnitCollateral.",
+            "conditions": [
+              "This update occurs if the liquidation snapshot's collateral-per-collateral-snapshot is not equal to the cumulative-collateral-per-unit-collateral. This typically means there have been changes in the system's overall collateral or debt values that affect the safe's actual borrowed and collateral amounts due to interest accrual or yield.",
+              "Requires safe.borrowedAmount == 0 after this update for the closeSafe function to proceed, but the update itself is based on system-wide changes before the borrowedAmount == 0 check in closeSafe and contributes to meeting that condition if it accrues debt that brings it above 0, or if it was already 0, it remains 0 (assuming no interest accrual if debt is 0)."
             ]
           },
           {
             "state_variable_name": "totalCollateral",
             "type": "uint256",
-            "what_does_it_track": "Tracks the total amount of collateral in the system.",
-            "why_is_is_important": "Reflects the total collateral backing the system, crucial for calculating collateralization ratios and assessing system health.",
-            "when_is_it_updated": "When a safe is closed.",
-            "how_to_validate_state_update": "Check if `totalCollateral` is reduced by the safe's `collateralAmount`.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Decreases `totalCollateral` by the `collateralAmount` of the closed safe.",
-            "conditions": []
-          },
-          {
-            "state_variable_name": "liquidationSnapshots",
-            "type": "mapping",
-            "what_does_it_track": "Tracks the liquidation snapshot details for a given `safeId`.",
-            "why_is_is_important": "Ensures accurate debt and collateral calculations for liquidation purposes, preventing incorrect liquidations.",
-            "when_is_it_updated": "The `debtPerCollateralSnapshot` and `collateralPerCollateralSnapshot` are updated when the current cumulative values do not match liquidationSnapshot values, indicating changes since the last update.",
-            "how_to_validate_state_update": "Verify that `_safe.borrowedAmount`, `_safe.totalBorrowedAmount` are increased by calculated `debtIncrease`, `liquidationSnapshot.debtPerCollateralSnapshot` is updated to `cumulativeDebtPerUnitCollateral`, `_safe.collateralAmount` is increased by `collateralIncrease`, `liquidationSnapshot.collateralPerCollateralSnapshot` is updated to `cumulativeCollateralPerUnitCollateral`, `totalCollateral` increased by `collateralIncrease`, and `totalDebt` is updated",
+            "what_does_it_track": "The sum of all collateral held across all active Safes in the system.",
+            "why_is_is_important": "It maintains an accurate record of the total collateralized value within the protocol, reflecting the true state before the Safe is closed\u611f\u89c9\u5230",
+            "when_is_it_updated": "During the call to _updateSafe if there's a discrepancy between liquidationSnapshot.collateralPerCollateralSnapshot and cumulativeCollateralPerUnitCollateral.",
+            "how_to_validate_state_update": "Verify that totalCollateral is updated by adding the collateralIncrease amount to its previous value.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the debt and collateral amounts of a Safe based on cumulative snapshots if they are out of sync. Updates `debtPerCollateralSnapshot` and `collateralPerCollateralSnapshot` with cumulative values.",
+            "summary_of_update": "The total collateral in the system is increased by the collateralIncrease amount calculated for the specific safe (if any).",
             "conditions": [
-              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+              "This update occurs if the liquidation snapshot's collateral-per-collateral-snapshot is not equal to the cumulative-collateral-per-unit-collateral. This typically means there have been changes in the system's overall collateral or debt values that affect the safe's actual borrowed and collateral amounts due to interest accrual or yield.",
+              "Requires safe.borrowedAmount == 0 after this update for the closeSafe function to proceed, but the update itself is based on system-wide changes before the borrowedAmount == 0 check in closeSafe and contributes to meeting that condition if it accrues debt that brings it above 0, or if it was already 0, it remains 0 (assuming no interest accrual if debt is 0)."
             ]
           },
           {
             "state_variable_name": "totalDebt",
             "type": "uint256",
-            "what_does_it_track": "Tracks the total outstanding debt in the system.",
-            "why_is_is_important": "Critical for maintaining solvency and triggering protocol mode changes based on debt levels.",
-            "when_is_it_updated": "When debt is added or subtracted, primarily during borrowing, repaying, or liquidations.",
-            "how_to_validate_state_update": "If `add` is true, debt increases by `delta`, otherwise debt decreases by `delta`",
+            "what_does_it_track": "The sum of all outstanding debt (stablecoins) across all active Safes in the system.",
+            "why_is_is_important": "It maintains an accurate record of the total stablecoin debt within the protocol, reflecting the true state before the Safe is closed\u611f\u89c9\u5230",
+            "when_is_it_updated": "During the call to _updateTotalDebt (which is called by _updateSafe), if there's an debtIncrease due to interest accrual.",
+            "how_to_validate_state_update": "Verify that totalDebt is updated by adding the debtIncrease amount to its previous value.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the total debt of the protocol, potentially triggering a mode change from BOOTSTRAP to NORMAL if the debt exceeds a threshold.",
+            "summary_of_update": "The total debt in the system is increased by the debtIncrease amount calculated for the specific safe (if any).",
             "conditions": [
-              "add == true"
+              "The update to totalDebt is dependent on the debtIncrease calculated within _updateSafe. This debtIncrease is only non-zero if liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral.",
+              "Requires safe.borrowedAmount == 0 after this update for the closeSafe function to proceed, but the update itself is based on system-wide changes before the borrowedAmount == 0 check in closeSafe and contributes to meeting that condition if it accrues debt that brings it above 0, or if it was already 0, it remains 0 (assuming no interest accrual if debt is 0)."
             ]
           },
           {
-            "state_variable_name": "_owners",
-            "type": "mapping",
-            "what_does_it_track": "Tracks the owner of each token ID.",
-            "why_is_is_important": "It is important for the ERC721 token accounting and preventing the safe from being used again.",
-            "when_is_it_updated": "When a Safe is closed.",
-            "how_to_validate_state_update": "Check if `_owners[tokenId]` is set to `address(0)` and `_balances` is decremented.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Burns the ERC721 token associated with the Safe by setting the owner to `address(0)`.",
-            "conditions": []
-          },
-          {
-            "state_variable_name": "_balances",
-            "type": "mapping",
-            "what_does_it_track": "Tracks the balance of tokens owned by each address.",
-            "why_is_is_important": "Maintains the token balances of different owners.",
-            "when_is_it_updated": "During token transfers.",
-            "how_to_validate_state_update": "Check if `_balances` is decremented for the previous owner and incremented for the new owner.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Updates the balance of the previous and current owners of the token.",
-            "conditions": []
-          },
-          {
-            "state_variable_name": "_tokenApprovals",
-            "type": "mapping",
-            "what_does_it_track": "Tracks the approved address for a specific token ID.",
-            "why_is_is_important": "Maintains the token approvals.",
-            "when_is_it_updated": "During token transfers.",
-            "how_to_validate_state_update": "Check if approval is cleared for the token.",
+            "state_variable_name": "PROTOCOL_MODE",
+            "type": "enum SBStructs.Mode",
+            "what_does_it_track": "The current operational mode of the protocol, influencing parameters like fees or liquidations.",
+            "why_is_is_important": "This mode change affects various protocol behaviors, signifying a shift in the system's stability and maturity, even when closing a Safe can cause this threshold to be crossed (though typically it's new debt causing this).",
+            "when_is_it_updated": "During the call to _updateTotalDebt (which is called by _updateSafe), if the updated totalDebt crosses the BOOTSTRAP_MODE_DEBT_THRESHOLD.",
+            "how_to_validate_state_update": "Verify that PROTOCOL_MODE transitions from BOOTSTRAP to NORMAL only if the new totalDebt surpasses BOOTSTRAP_MODE_DEBT_THRESHOLD.",
             "has_conditional_updates": true,
-            "summary_of_update": "Clears the approval for a token when it's transferred or updated.",
+            "summary_of_update": "The protocol's operating mode might switch from BOOTSTRAP to NORMAL if the total debt crosses a threshold.",
             "conditions": [
-              "auth != address(0) && owner != auth && !isApprovedForAll(owner, auth)"
+              "PROTOCOL_MODE changes from BOOTSTRAP to NORMAL only if the totalDebt after the update exceeds BOOTSTRAP_MODE_DEBT_THRESHOLD.",
+              "Requires safe.borrowedAmount == 0 after the _updateSafe call for closeSafe function to proceed. This mode change is a side effect of totalDebt being updated within _updateSafe if the conditions are met. If debt accrues and pushes totalDebt over the threshold, the mode changes before the Safe is actually removed and collateral returned, but the borrowedAmount == 0 check in closeSafe would still need to pass (meaning the debt of the current Safe must have been zero)."
+            ]
+          },
+          {
+            "state_variable_name": "totalCollateral",
+            "type": "uint256",
+            "what_does_it_track": "The sum of all collateral held across all active Safes in the system.",
+            "why_is_is_important": "It maintains an accurate record of the total collateralized value within the protocol by removing the collateral of the now-closed Safe. This is crucial for overall system health and calculations (e.g., collateralization ratio).",
+            "when_is_it_updated": "In the closeSafe function, after the _updateSafe call and the safe.borrowedAmount == 0 check, the totalCollateral is reduced by the safe.collateralAmount.",
+            "how_to_validate_state_update": "Verify that totalCollateral is decreased by the value of safe.collateralAmount (which is collateralAmount in the function scope).",
+            "has_conditional_updates": false,
+            "summary_of_update": "The total collateral in the system is decreased by the collateral amount of the closed Safe.",
+            "conditions": [
+              "The closeSafe function requires safe.borrowedAmount == 0 after the _updateSafe call for the safe to be closed and this deletion to occur.",
+              "The collateralAmount of the safeId must be non-zero for totalCollateral to actually decrease (although the operation is attempted regardless)."
+            ]
+          },
+          {
+            "state_variable_name": "safes[safeId]",
+            "type": "mapping(uint256 => Safe)",
+            "what_does_it_track": "Stores all active Safe positions, indexed by their unique safeId.",
+            "why_is_is_important": "It marks the Safe as inactive and frees up storage, ensuring no further operations can be performed on it and its state is removed from the active safes list\u611f\u5230",
+            "when_is_it_updated": "When the closeSafe function is called and the safe.borrowedAmount is 0, leading to a call to _removeSafe.",
+            "how_to_validate_state_update": "Verify that the entry for _safeId is completely removed from the safes mapping.",
+            "has_conditional_updates": false,
+            "summary_of_update": "The Safe struct corresponding to safeId is deleted from the safes mapping, effectively removing the Safe.",
+            "conditions": [
+              "The closeSafe function requires safe.borrowedAmount == 0 after the _updateSafe call for the safe to be closed and this deletion to occur.",
+              "safeId must correspond to an existing Safe in the mapping for its deletion to have an effect. "
+            ]
+          },
+          {
+            "state_variable_name": "_tokenApprovals[tokenId]",
+            "type": "mapping(uint256 => address)",
+            "what_does_it_track": "The approved address for a specific ERC721 token.",
+            "why_is_is_important": "Ensures that after burning (closing) the Safe, no address retains approval to transfer the non-existent token, preventing potential misuse or confusion regarding ownership of a burned NFT\u611f\u5230",
+            "when_is_it_updated": "During the _update call (part of _burn which is part of _removeSafe), if the token had a previous owner (from != address(0)), its approval is cleared.",
+            "how_to_validate_state_update": "Verify that the approval for tokenId is cleared by setting it to address(0) in _tokenApprovals.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Any existing ERC721 approval for the safeId (token ID) is revoked.",
+            "conditions": [
+              "The from address (previous owner) must not be address(0). This check is internal to _update which is called by _burn.",
+              "The closeSafe function requires safe.borrowedAmount == 0 after _updateSafe for _removeSafe to be called, which in turn calls _burn and then _update.",
+              "The auth address (authorized caller) must not be address(0) or emitEvent must be true for this block to execute, but the approval is always cleared if from != address(0) regardless of emitEvent or auth conditions for revoking approval. "
+            ]
+          },
+          {
+            "state_variable_name": "_balances[from]",
+            "type": "mapping(address => uint256)",
+            "what_does_it_track": "The number of ERC721 tokens (Safes) owned by a specific address.",
+            "why_is_is_important": "It accurately reflects the number of active Safes owned by an address after one has been closed/burned, maintaining correct ERC721 token accounting\u611f\u5230",
+            "when_is_it_updated": "During the _update call (part of _burn which is part of _removeSafe), if the token had a previous owner (from != address(0)), their balance is reduced.",
+            "how_to_validate_state_update": "Verify that the balance of the from address is decremented by 1.",
+            "has_conditional_updates": true,
+            "summary_of_update": "The ERC721 token balance of the previous owner of the safeId is decremented by one.",
+            "conditions": [
+              "The from address (previous owner) must not be address(0). This check is internal to _update which is called by _burn.",
+              "The closeSafe function requires safe.borrowedAmount == 0 after _updateSafe for _removeSafe to be called, which in turn calls _burn and then _update.",
+              "to (receiver of NFT) must not be address(0) for _balances[to] to be incremented, but for burning, to is address(0), so only the _balances[from] decrement is relevant here. "
+            ]
+          },
+          {
+            "state_variable_name": "_owners[tokenId]",
+            "type": "mapping(uint256 => address)",
+            "what_does_it_track": "The owner of a specific ERC721 token (Safe).",
+            "why_is_is_important": "This formally burns the NFT representation of the Safe, ensuring it can no longer be owned or transferred and is removed from the active supply.",
+            "when_is_it_updated": "During the _update call (part of _burn which is part of _removeSafe), the owner of the safeId is set to address(0).",
+            "how_to_validate_state_update": "Verify that the owner of tokenId is set to address(0) in the _owners mapping.",
+            "has_conditional_updates": false,
+            "summary_of_update": "The ownership of the safeId (token ID) is transferred to the zero address, effectively marking it as burned.",
+            "conditions": [
+              "The closeSafe function requires safe.borrowedAmount == 0 after _updateSafe for _removeSafe to be called, which in turn calls _burn and then _update.",
+              "No other specific conditions for this update itself, as to is explicitly address(0) when burning the token.\u611f\u5230"
             ]
           }
         ]
