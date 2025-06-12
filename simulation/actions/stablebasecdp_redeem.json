@@ -11,103 +11,97 @@
     "contract_name": "StableBaseCDP",
     "function_name": "redeem",
     "pre_execution_parameter_generation_rules": [
-      "The `amount` parameter (representing the SBD amount to redeem) must be greater than 0.",
-      "The `amount` parameter should be less than or equal to the user's SBD balance (`sbdToken.balanceOf(msg.sender)`).",
-      "The `nearestSpotInLiquidationQueue` parameter should be a valid `safeId` that exists in the liquidation queue (`safesOrderedForLiquidation.getNode(nearestSpotInLiquidationQueue).value != 0`). If unsure, pass 0, and the contract logic will select a reasonable default.",
-      "The `msg.sender` must have sufficient SBD tokens to cover the redemption amount. Approval for the StableBaseCDP contract to `transferFrom` the sender\\'s account should exist, which means `sbdToken.allowance(msg.sender, address(this))` should be greater than or equal to the `amount`."
+      "amount: A positive integer representing the amount of SBD to redeem. This should be a reasonable amount based on the user's SBD balance.",
+      "nearestSpotInLiquidationQueue: A uint256 representing a hint for the location of a safe in the liquidation queue. This can be 0 or a safe ID in the queue."
     ],
     "on_execution_state_updates_made": [
       {
         "category": "SBD Token Transfers",
         "state_update_descriptions": [
-          "SBD tokens are transferred from the message sender to the StableBaseCDP contract using `sbdToken.transferFrom(msg.sender, address(this), amount)`.",
-          "SBD tokens are burned from the StableBaseCDP contract if the redeemed amount is greater than the refunded amount using `sbdToken.burn(address(this), _redemption.redeemedAmount - _redemption.refundedAmount)`."
+          "SBD tokens are transferred from the message sender to the contract.",
+          "SBD tokens are burned from the contract if redeemedAmount > refundedAmount.",
+          "SBD tokens are transferred to the safe owner if stabilityPool cannot receive rewards and amountToRefund - ownerFee > 0. A fee is paid for this transfer."
         ]
       },
       {
-        "category": "Collateral and Debt Updates",
+        "category": "Collateral Updates",
         "state_update_descriptions": [
-          "Total collateral (`totalCollateral`) is decreased by the collateral amount plus the redeemer fee: `totalCollateral -= (_redemption.collateralAmount + _redemption.redeemerFee);`.",
-          "Total debt (`totalDebt`) is updated (decreased) by the redeemed amount minus the refunded amount using the `_updateTotalDebt` function.",
-          "Safe's collateral amount (`safe.collateralAmount`) is decreased by `collateralToRedeem`.",
-          "Safe's borrowed amount (`safe.borrowedAmount`) is decreased by `amountToRedeem`."
+          "totalCollateral is decreased by collateralAmount + redeemerFee.",
+          "Collateral is sent to the msg.sender as a value transfer."
         ]
       },
       {
-        "category": "Redemption Tracking",
+        "category": "Total Debt Updates",
         "state_update_descriptions": [
-          "The redemption struct's `collateralAmount` is increased by `collateralToReturn`.",
-          "The redemption struct's `redeemedAmount` is increased by the `amountToRedeem` plus `amountToRefund`.",
-          "The redemption struct's `refundedAmount` is increased by `amountToRefund`.",
-          "redemption.ownerFee is updated.",
-          "redemption.redeemerFee is updated."
+          "totalDebt is decreased by redeemedAmount - refundedAmount."
         ]
       },
       {
-        "category": "Safe Queue Management",
+        "category": "Safe Updates",
         "state_update_descriptions": [
-          "If a safe's `borrowedAmount` becomes 0 in BORROW mode or its `collateralAmount` is close to zero (less than 1e10) and `borrowedAmount` is 0 in EXCHANGE mode, the safe is removed from both the liquidation and redemption queues via `_removeSafeFromBothQueues(safeId)`.",
-          "Otherwise, the safe's liquidation ratio is updated as `newRatio = (safe.borrowedAmount * PRECISION) / safe.collateralAmount`, and the safe is re-inserted or updated in the liquidation queue via `safesOrderedForLiquidation.upsert(safeId, newRatio, nearestSpotInLiquidationQueue)`."
+          "The targeted safe's collateralAmount and borrowedAmount are decreased.",
+          "Safes can be removed from the liquidation and redemption queues if their borrowedAmount and collateralAmount is close to zero.",
+          "Safes can have their position updated in the liquidation queue if their state has been updated."
         ]
       },
       {
-        "category": "Fee Distribution",
+        "category": "Redemption Updates",
         "state_update_descriptions": [
-          "Owner fees are distributed to the stability pool (if `stabilityPoolCanReceiveRewards` is true using `stabilityPool.addReward(redemption.ownerFee)`) or refunded to the message sender (using `sbdToken.transfer(msg.sender, redemption.ownerFee)`).",
-          "Redeemer fees are distributed to the stability pool as collateral (if `stabilityPoolCanReceiveRewards` is true using `stabilityPool.addCollateralReward{value: redemption.redeemerFee}(redemption.redeemerFee)`) or refunded to the message sender as collateral."
+          "The redemption's collateralAmount, redeemedAmount and refundedAmount are updated.",
+          "Owner fee can be transferred to the stability pool as reward, or sent to the safe owner.",
+          "Redeemer fee can be sent to the stability pool as collateral reward, or sent directly to redeemer."
         ]
       },
       {
         "category": "Liquidation Snapshot Updates",
         "state_update_descriptions": [
-          "If `liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral` the safe's `borrowedAmount`, `collateralAmount` are updated based on cumulative increases since the last snapshot. Also updates `liquidationSnapshot.debtPerCollateralSnapshot` and  `liquidationSnapshot.collateralPerCollateralSnapshot`"
+          "Liquidation snapshots for the safe are updated with cumulative debt and collateral per unit collateral."
         ]
       },
       {
-        "category": "Protocol Mode Update",
+        "category": "Protocol Mode Updates",
         "state_update_descriptions": [
-          "The `PROTOCOL_MODE` may be updated from `BOOTSTRAP` to `NORMAL` if `totalDebt` exceeds `BOOTSTRAP_MODE_DEBT_THRESHOLD`. This is handled by `_updateTotalDebt` function."
+          "PROTOCOL_MODE may be updated from BOOTSTRAP to NORMAL if totalDebt exceeds BOOTSTRAP_MODE_DEBT_THRESHOLD."
         ]
       }
     ],
     "post_execution_contract_state_validation_rules": [
       {
-        "category": "SBD Token Balance",
+        "category": "Redemption Success",
         "rule_descriptions": [
-          "The contract's SBD token balance (`sbdToken.balanceOf(address(this))`) should decrease by the redeemed amount (minus any refunds if applicable) after the burn. Specifically, the decrease should equal `_redemption.redeemedAmount - _redemption.refundedAmount`.",
-          "The user's SBD token balance (`sbdToken.balanceOf(msg.sender)`) should decrease by the amount being redeemed, verifiable via pre and post-transaction balance comparison."
+          "redemption.redeemedAmount must equal amount."
         ]
       },
       {
-        "category": "Collateral and Debt Consistency",
+        "category": "Total Collateral",
         "rule_descriptions": [
-          "`totalCollateral` should be decreased by the amount of collateral redeemed + the redeemerFee. This can be validated via pre and post-transaction `totalCollateral` comparison.",
-          "`totalDebt` should be decreased by the amount of debt redeemed - `refundedAmount`.  This can be validated via pre and post-transaction `totalDebt` comparison.",
-          "The safe's `collateralAmount` should be reduced by `collateralToRedeem`. If `closeToZero(safe.collateralAmount)` returns true, `safe.collateralAmount` should be less than 1e10.",
-          "The safe's `borrowedAmount` should be reduced by `amountToRedeem`. If the safe is closed, `safe.borrowedAmount` should be 0."
+          "totalCollateral must be decreased by the amount of collateral sent to the redeemer + redeemer fee."
         ]
       },
       {
-        "category": "Queue Integrity",
+        "category": "Total Debt",
         "rule_descriptions": [
-          "If a safe is removed from the liquidation and redemption queues (using `_removeSafeFromBothQueues`), `safesOrderedForLiquidation.getNode(safeId).value` and `safesOrderedForRedemption.getNode(safeId).value` should both return 0.",
-          "If a safe's liquidation ratio is updated, its position in the liquidation queue should reflect the new ratio. This means after redemption, `safesOrderedForLiquidation.getNode(safeId).value` equals `(safe.borrowedAmount * PRECISION) / safe.collateralAmount`",
-          "If the safe's borrowed amount and collateral amount are both zero then the safe should no longer exist (`safes[safeId].borrowedAmount == 0 && safes[safeId].collateralAmount == 0`)."
-        ]
-      },
-      {
-        "category": "Event Emission",
-        "rule_descriptions": [
-          "A `RedeemedBatch` event should be emitted with the correct parameters (`redemptionId`, `amount`, `redeemedCollateral`, `price`, `totalCollateral`, `totalDebt`).",
-          "A `Redeemed` event should be emitted for each safe that is redeemed with the correct parameters (`redemptionId`, `safeId`, `amount`, `collateral`, `refundedToOwner`, `remainingToRedeem`).",
-          "`OwnerFeePaid` and `RedeemerFeePaid` events should be emitted if applicable.",
-          "`SafeRemovedFromLiquidationQueue` and `SafeRemovedFromRedemptionQueue` events should be emitted if the safe is removed."
+          "totalDebt must be decreased by the amount of SBD burned (redeemedAmount - refundedAmount)."
         ]
       },
       {
         "category": "Safe State",
         "rule_descriptions": [
-          "If the safe is closed (either borrowedAmount is 0 and borrowMode is true, or !borrowMode && closeToZero(safe.collateralAmount) && safe.borrowedAmount == 0), the `safes` mapping should no longer contain an entry for the `safeId`, or the values are reset to zero: `safes[safeId].collateralAmount == 0 && safes[safeId].borrowedAmount == 0 && safes[safeId].weight == 0 && safes[safeId].totalBorrowedAmount == 0 && safes[safeId].feePaid == 0`."
+          "If a safe's borrowedAmount is 0 in borrow mode, or collateralAmount is close to zero and borrowedAmount is 0 in exchange mode, it must be removed from both liquidation and redemption queues.",
+          "If a safe is not removed, its position in the liquidation queue must be updated based on the new collateral to debt ratio."
+        ]
+      },
+      {
+        "category": "SBD Token Balance",
+        "rule_descriptions": [
+          "The contract's SBD token balance must be decreased by the amount burned (redeemedAmount - refundedAmount)."
+        ]
+      },
+      {
+        "category": "Vault State",
+        "rule_descriptions": [
+          "Vault's collateralAmount and borrowedAmount are decreased by respective amounts.",
+          "If vault is completely redeemed it should be removed from queue."
         ]
       }
     ]
@@ -116,8 +110,16 @@
     "action_name": "Redeem",
     "contract_name": "StableBaseCDP",
     "function_name": "redeem",
-    "does_register_new_identifier": false,
-    "new_identifiers": [],
+    "does_register_new_identifier": true,
+    "new_identifiers": [
+      {
+        "name": "redemptionId",
+        "type": "random_id",
+        "has_max_identifier_limit_per_address": false,
+        "max_identifier_limit_per_address": 0,
+        "description": "Unique identifier for each redemption request."
+      }
+    ],
     "all_state_updates": [
       {
         "contract_name": "StableBaseCDP",
@@ -126,53 +128,83 @@
             "state_variable_name": "totalCollateral",
             "type": "uint256",
             "what_does_it_track": "Tracks the total amount of collateral held by the protocol.",
-            "why_is_is_important": "Reflects the current collateralization of the system, crucial for stability and solvency checks.",
-            "when_is_it_updated": "When debt is redeemed, and collateral is returned to the redeemer.",
-            "how_to_validate_state_update": "Check the totalCollateral variable by subtracting the sum of _redemption.collateralAmount and _redemption.redeemerFee.",
+            "why_is_is_important": "Reflects the overall health and collateralization ratio of the system.",
+            "when_is_it_updated": "When debt is redeemed for collateral, reducing overall collateral.",
+            "how_to_validate_state_update": "Check that totalCollateral is decreased by (collateralAmount + redeemerFee). Verify event 'RedeemedBatch' with correct parameters.",
             "has_conditional_updates": true,
-            "summary_of_update": "totalCollateral is decreased by the collateral amount returned to the redeemer and the redeemer fee.",
+            "summary_of_update": "Decreases the total collateral in the protocol.",
             "conditions": [
               "amount > 0",
-              "sbdToken.transferFrom successful",
-              "in normal mode"
+              "sbdToken.transferFrom succeeds",
+              "PROTOCOL_MODE == SBStructs.Mode.NORMAL"
             ]
           },
           {
             "state_variable_name": "totalDebt",
             "type": "uint256",
-            "what_does_it_track": "Tracks the total amount of debt outstanding in the system.",
-            "why_is_is_important": "Reflects the overall liabilities of the protocol, essential for maintaining solvency.",
-            "when_is_it_updated": "When debt is redeemed by users.",
-            "how_to_validate_state_update": "Verify _updateTotalDebt function is called with the correct parameters.",
+            "what_does_it_track": "Tracks the total outstanding debt in the protocol.",
+            "why_is_is_important": "Reflects the overall risk and solvency of the system.",
+            "when_is_it_updated": "When debt is redeemed, reducing overall debt.",
+            "how_to_validate_state_update": "Check that totalDebt is decreased by (redeemedAmount - refundedAmount). Verify event 'RedeemedBatch' with correct parameters.",
             "has_conditional_updates": true,
-            "summary_of_update": "totalDebt is decreased by the difference between redeemed amount and refunded amount.",
+            "summary_of_update": "Decreases the total debt in the protocol.",
             "conditions": [
-              "_redemption.redeemedAmount > _redemption.refundedAmount",
-              "sbdToken.burn successful"
+              "amount > 0",
+              "sbdToken.transferFrom succeeds",
+              "PROTOCOL_MODE == SBStructs.Mode.NORMAL"
             ]
           },
           {
-            "state_variable_name": "safes",
-            "type": "mapping(uint256 => Safe)",
-            "what_does_it_track": "Tracks the state of each safe, including collateral and debt.",
-            "why_is_is_important": "Individual safe data is crucial for calculating liquidation risk and user positions.",
-            "when_is_it_updated": "When debt is redeemed, reducing the debt and collateral associated with the safe.",
-            "how_to_validate_state_update": "Check the safes mapping with safeId.",
-            "has_conditional_updates": false,
-            "summary_of_update": "The safe's collateralAmount and borrowedAmount are decreased.",
+            "state_variable_name": "safes[_safeId]",
+            "type": "Safe",
+            "what_does_it_track": "Tracks the collateral and debt associated with individual safes.",
+            "why_is_is_important": "Ensures accurate accounting of individual safe positions.",
+            "when_is_it_updated": "Updated before redemption to reflect accrued interest and collateral changes.",
+            "how_to_validate_state_update": "Verify that borrowedAmount and totalBorrowedAmount of the safe are increased by debtIncrease. Also verify that collateralAmount of the safe is increased by collateralIncrease. Check that liquidationSnapshot.debtPerCollateralSnapshot is updated to cumulativeDebtPerUnitCollateral and liquidationSnapshot.collateralPerCollateralSnapshot is updated to cumulativeCollateralPerUnitCollateral. Check that event `SafeUpdated` is emitted.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates the borrowed amount and collateral amount of a specific safe based on cumulative interest.",
             "conditions": [
-              "Always"
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral",
+              "Safe exists"
+            ]
+          },
+          {
+            "state_variable_name": "ownerOf(_safeId)",
+            "type": "address",
+            "what_does_it_track": "Tracks the owner of the safe.",
+            "why_is_is_important": "To refund the owner of the safe based on the amount of stablecoins that are left after debt is repaid.",
+            "when_is_it_updated": "When the owner of the safe is to be refunded.",
+            "how_to_validate_state_update": "Verify that sbdToken.transfer is called to transfer (amountToRefund - ownerFee) to the ownerOf(_safeId). Check that event `OwnerRefunded` is emitted.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Refund stablecoins back to the owner of the safe.",
+            "conditions": [
+              "amountToRefund > 0",
+              "amountToRefund > ownerFee",
+              "sbdToken.transfer succeeds"
+            ]
+          },
+          {
+            "state_variable_name": "safes[_safeId].feePaid",
+            "type": "uint256",
+            "what_does_it_track": "Tracks the fee paid by the safe owner.",
+            "why_is_is_important": "To keep track of fees paid by the owner of the safe.",
+            "when_is_it_updated": "When the owner fee is paid.",
+            "how_to_validate_state_update": "Verify that safe.feePaid is reset to 0, and safe.totalBorrowedAmount is set to 1. Verify that event `OwnerFeePaid` is emitted.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Reset the fee paid by the safe owner.",
+            "conditions": [
+              "ownerFee > 0"
             ]
           },
           {
             "state_variable_name": "safesOrderedForLiquidation",
             "type": "IDoublyLinkedList",
-            "what_does_it_track": "Maintains an ordered list of safes based on liquidation risk.",
-            "why_is_is_important": "Facilitates efficient liquidation of risky safes.",
-            "when_is_it_updated": "When a safe is closed or its risk profile changes significantly, and it's empty.",
-            "how_to_validate_state_update": "Check if _removeSafeFromBothQueues function is called.",
+            "what_does_it_track": "Maintains an ordered list of safes for liquidation purposes.",
+            "why_is_is_important": "Maintains the integrity and order of the liquidation queue.",
+            "when_is_it_updated": "Updated when a safe is fully redeemed or closed.",
+            "how_to_validate_state_update": "Verify that safesOrderedForLiquidation.remove(safeId) and safesOrderedForRedemption.remove(safeId) are called. Check that events `SafeRemovedFromLiquidationQueue` and `SafeRemovedFromRedemptionQueue` are emitted.",
             "has_conditional_updates": true,
-            "summary_of_update": "The safe is removed from the liquidation queue if it is empty.",
+            "summary_of_update": "Removes safe from the liquidation queue if it's fully redeemed or closed.",
             "conditions": [
               "(safe.borrowedAmount == 0 && borrowMode) || (!borrowMode && closeToZero(safe.collateralAmount) && safe.borrowedAmount == 0)"
             ]
@@ -180,12 +212,12 @@
           {
             "state_variable_name": "safesOrderedForRedemption",
             "type": "IDoublyLinkedList",
-            "what_does_it_track": "Maintains an ordered list of safes available for redemption.",
-            "why_is_is_important": "Facilitates efficient redemption of safes.",
-            "when_is_it_updated": "When a safe is closed or its suitability for redemption changes, and it's empty.",
-            "how_to_validate_state_update": "Check if _removeSafeFromBothQueues function is called.",
+            "what_does_it_track": "Maintains an ordered list of safes for redemption purposes.",
+            "why_is_is_important": "Maintains the integrity and order of the redemption queue.",
+            "when_is_it_updated": "Updated when a safe is fully redeemed or closed.",
+            "how_to_validate_state_update": "Verify that safesOrderedForLiquidation.remove(safeId) and safesOrderedForRedemption.remove(safeId) are called. Check that events `SafeRemovedFromLiquidationQueue` and `SafeRemovedFromRedemptionQueue` are emitted.",
             "has_conditional_updates": true,
-            "summary_of_update": "The safe is removed from the redemption queue if it is empty.",
+            "summary_of_update": "Removes safe from the redemption queue if it's fully redeemed or closed.",
             "conditions": [
               "(safe.borrowedAmount == 0 && borrowMode) || (!borrowMode && closeToZero(safe.collateralAmount) && safe.borrowedAmount == 0)"
             ]
@@ -193,41 +225,82 @@
           {
             "state_variable_name": "safesOrderedForLiquidation",
             "type": "IDoublyLinkedList",
-            "what_does_it_track": "Maintains an ordered list of safes based on liquidation risk.",
-            "why_is_is_important": "Facilitates efficient liquidation of risky safes.",
-            "when_is_it_updated": "When a safe's risk profile changes due to borrowing or collateral adjustments.",
-            "how_to_validate_state_update": "Verify that the upsert function of safesOrderedForLiquidation is called with the correct newRatio.",
+            "what_does_it_track": "Maintains an ordered list of safes for liquidation based on their collateralization ratio.",
+            "why_is_is_important": "Ensures the liquidation queue remains accurate and up-to-date.",
+            "when_is_it_updated": "Updated when the collateralization ratio changes due to redemption.",
+            "how_to_validate_state_update": "Verify that safesOrderedForLiquidation.upsert is called with the safeId and the newRatio. Check that event `LiquidationQueueUpdated` is emitted.",
             "has_conditional_updates": true,
-            "summary_of_update": "The safe's position in the liquidation queue is updated if its collateralization ratio changes.",
+            "summary_of_update": "Updates the liquidation queue with the new collateralization ratio.",
             "conditions": [
-              "safe.borrowedAmount != 0 && borrowMode || !borrowMode && !closeToZero(safe.collateralAmount) && safe.borrowedAmount != 0"
+              "safe.borrowedAmount != 0 && borrowMode",
+              "!closeToZero(safe.collateralAmount) && safe.borrowedAmount != 0"
             ]
           },
           {
-            "state_variable_name": "liquidationSnapshots",
-            "type": "mapping(uint256 => LiquidationSnapshot)",
-            "what_does_it_track": "Snapshots of debt and collateral ratios at specific points in time for individual safes.",
-            "why_is_is_important": "Ensures accurate accounting of debt and collateral, preventing manipulation and protecting against interest-related exploits.",
-            "when_is_it_updated": "Before performing operations like borrowing or adding/removing collateral to account for accrued interest.",
-            "how_to_validate_state_update": "Check that liquidationSnapshots[_safeId].debtPerCollateralSnapshot is updated to cumulativeDebtPerUnitCollateral and liquidationSnapshots[_safeId].collateralPerCollateralSnapshot is updated to cumulativeCollateralPerUnitCollateral.",
+            "state_variable_name": "stabilityPool",
+            "type": "IStabilityPool",
+            "what_does_it_track": "The contract that handles the stability pool.",
+            "why_is_is_important": "To send the fees to the stability pool.",
+            "when_is_it_updated": "When the redemption.ownerFee > 0 and the stability pool can receive rewards.",
+            "how_to_validate_state_update": "Verify that stabilityPool.addReward is called with redemption.ownerFee. Check that event `OwnerRedemptionFeeDistributed` is emitted.",
             "has_conditional_updates": true,
-            "summary_of_update": "Liquidation snapshot is updated, tracking collateral and debt per unit collateral.",
+            "summary_of_update": "Send the owner fee to the stability pool.",
             "conditions": [
-              "cumulativeCollateralPerUnitCollateral != liquidationSnapshots[_safeId].collateralPerCollateralSnapshot"
+              "redemption.ownerFee > 0",
+              "stabilityPoolCanReceiveRewards",
+              "stabilityPool.addReward succeeds"
+            ]
+          },
+          {
+            "state_variable_name": "msg.sender",
+            "type": "address",
+            "what_does_it_track": "The address of the message sender.",
+            "why_is_is_important": "To refund the owner fee to the user who initiated the redeem action.",
+            "when_is_it_updated": "when the owner fee is greater than 0, and the stability pool cannot receive rewards.",
+            "how_to_validate_state_update": "Verify that sbdToken.transfer is called with msg.sender and redemption.ownerFee.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Refund the owner fee to the message sender when stabilityPoolCanReceiveRewards is false",
+            "conditions": [
+              "redemption.ownerFee > 0",
+              "!stabilityPoolCanReceiveRewards",
+              "sbdToken.transfer succeeds"
             ]
           },
           {
             "state_variable_name": "PROTOCOL_MODE",
             "type": "SBStructs.Mode",
-            "what_does_it_track": "The operational mode of the protocol.",
-            "why_is_is_important": "Controls protocol behavior based on overall risk levels, enabling features like increased liquidation penalties during bootstrap mode.",
-            "when_is_it_updated": "When the total debt crosses a predefined threshold during operation.",
-            "how_to_validate_state_update": "Check the value of PROTOCOL_MODE, it should be SBStructs.Mode.NORMAL after the execution.",
+            "what_does_it_track": "Tracks the operational mode of the protocol.",
+            "why_is_is_important": "Governs protocol behavior and safety mechanisms.",
+            "when_is_it_updated": "Updated when total debt exceeds a predefined threshold during bootstrap mode.",
+            "how_to_validate_state_update": "Verify that PROTOCOL_MODE is set to SBStructs.Mode.NORMAL.",
             "has_conditional_updates": true,
-            "summary_of_update": "Protocol mode is updated from BOOTSTRAP to NORMAL if debt exceeds the threshold.",
+            "summary_of_update": "Transition the protocol from bootstrap mode to normal mode if debt exceeds a threshold.",
             "conditions": [
-              "debt > BOOTSTRAP_MODE_DEBT_THRESHOLD && PROTOCOL_MODE == SBStructs.Mode.BOOTSTRAP"
+              "debt > BOOTSTRAP_MODE_DEBT_THRESHOLD",
+              "PROTOCOL_MODE == SBStructs.Mode.BOOTSTRAP"
             ]
+          },
+          {
+            "state_variable_name": "safes[_safeId].collateralAmount",
+            "type": "uint256",
+            "what_does_it_track": "Amount of collateral deposited in a specific safe.",
+            "why_is_is_important": "Reflects the accurate collateralization of each safe.",
+            "when_is_it_updated": "When collateral is redeemed.",
+            "how_to_validate_state_update": "safe.collateralAmount -= collateralToRedeem; safe.borrowedAmount -= amountToRedeem; safes[_safeId] = safe;",
+            "has_conditional_updates": false,
+            "summary_of_update": "Decrease the collateral amount of the safe.",
+            "conditions": []
+          },
+          {
+            "state_variable_name": "safes[_safeId].borrowedAmount",
+            "type": "uint256",
+            "what_does_it_track": "Tracks the amount borrowed against a specific safe.",
+            "why_is_is_important": "Reflects the accurate outstanding debt for each safe.",
+            "when_is_it_updated": "When debt is redeemed.",
+            "how_to_validate_state_update": "safe.collateralAmount -= collateralToRedeem; safe.borrowedAmount -= amountToRedeem; safes[_safeId] = safe;",
+            "has_conditional_updates": false,
+            "summary_of_update": "Decrease the borrowed amount of the safe.",
+            "conditions": []
           }
         ]
       },
@@ -235,42 +308,43 @@
         "contract_name": "DFIDToken",
         "state_updated": [
           {
-            "state_variable_name": "_balances",
-            "type": "mapping(address => uint256)",
-            "what_does_it_track": "Tracks the balance of SBD tokens for each address.",
-            "why_is_is_important": "Reflects the token distribution across users and the contract's holdings.",
-            "when_is_it_updated": "When SBD tokens are burned during redemption.",
-            "how_to_validate_state_update": "Check the balanceOf(address(this)) and totalSupply() decrease by (_redemption.redeemedAmount - _redemption.refundedAmount).",
+            "state_variable_name": "totalSupply",
+            "type": "uint256",
+            "what_does_it_track": "Tracks the total supply of SBD tokens.",
+            "why_is_is_important": "Maintains the overall supply and value of the SBD token.",
+            "when_is_it_updated": "Updated when SBD is burned during redemption.",
+            "how_to_validate_state_update": "Verify that sbdToken.burn is called with address(this) and (_redemption.redeemedAmount - _redemption.refundedAmount). Check event `Burn`.",
             "has_conditional_updates": true,
-            "summary_of_update": "The contract's balance of SBD tokens is reduced.",
+            "summary_of_update": "Burns SBD tokens, decreasing the total supply.",
             "conditions": [
-              "_redemption.redeemedAmount > _redemption.refundedAmount"
+              "_redemption.redeemedAmount > _redemption.refundedAmount",
+              "sbdToken.burn succeeds"
             ]
           },
           {
-            "state_variable_name": "_totalSupply",
+            "state_variable_name": "_balances[msg.sender]",
             "type": "uint256",
-            "what_does_it_track": "The total circulating supply of the SBD token.",
-            "why_is_is_important": "Maintains the overall scarcity of the token and is crucial for price stability.",
-            "when_is_it_updated": "When SBD tokens are burned during redemption.",
-            "how_to_validate_state_update": "Check the value of totalSupply(), it should decrease by (_redemption.redeemedAmount - _redemption.refundedAmount).",
+            "what_does_it_track": "Tracks the SBD balance of a user.",
+            "why_is_is_important": "Accurately reflects a user's SBD holdings.",
+            "when_is_it_updated": "When a user redeems SBD, it is transferred from their balance.",
+            "how_to_validate_state_update": "Verify that sbdToken.transferFrom is called with msg.sender, address(this), and amount",
             "has_conditional_updates": true,
-            "summary_of_update": "The total supply of SBD tokens is reduced.",
+            "summary_of_update": "Decrease SBD balance of msg.sender.",
             "conditions": [
-              "_redemption.redeemedAmount > _redemption.refundedAmount"
+              "sbdToken.transferFrom succeeds"
             ]
           },
           {
-            "state_variable_name": "totalBurned",
+            "state_variable_name": "_balances[address(this)]",
             "type": "uint256",
-            "what_does_it_track": "The total amount of SBD tokens that have been burned.",
-            "why_is_is_important": "Records historical burn data.",
-            "when_is_it_updated": "When SBD tokens are burned during redemption.",
-            "how_to_validate_state_update": "Check the value of totalBurned, it should increase by (_redemption.redeemedAmount - _redemption.refundedAmount).",
+            "what_does_it_track": "Tracks the SBD balance of the contract.",
+            "why_is_is_important": "Accurately reflects the contract's SBD holdings.",
+            "when_is_it_updated": "When a user redeems SBD, it is transferred to the contract.",
+            "how_to_validate_state_update": "Verify that sbdToken.transferFrom is called with msg.sender, address(this), and amount",
             "has_conditional_updates": true,
-            "summary_of_update": "The total burned amount of SBD tokens is increased.",
+            "summary_of_update": "Increase SBD balance of the contract.",
             "conditions": [
-              "_redemption.redeemedAmount > _redemption.refundedAmount"
+              "sbdToken.transferFrom succeeds"
             ]
           }
         ]
@@ -279,55 +353,55 @@
         "contract_name": "OrderedDoublyLinkedList",
         "state_updated": [
           {
+            "state_variable_name": "nodes[safeId]",
+            "type": "Node",
+            "what_does_it_track": "Represents a node in the doubly linked list, storing value (e.g., collateralization ratio), previous, and next pointers.",
+            "why_is_is_important": "Maintains the integrity of the doubly linked list used for ordering safes for liquidation or redemption.",
+            "when_is_it_updated": "When a safe is fully redeemed or closed, and its corresponding node is removed from the list.",
+            "how_to_validate_state_update": "Inspect the doubly linked list to confirm the node associated with safeId has been removed. Check the previous and next pointers of adjacent nodes are updated correctly.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Removes a node from the doubly linked list, representing a safe being fully redeemed or closed.",
+            "conditions": [
+              "Safe is removed from queue"
+            ]
+          },
+          {
+            "state_variable_name": "nodes[safeId]",
+            "type": "Node",
+            "what_does_it_track": "Represents a node in the doubly linked list, storing value (e.g., collateralization ratio), previous, and next pointers.",
+            "why_is_is_important": "Maintains the accurate ordering of safes based on their collateralization ratio for liquidation or redemption.",
+            "when_is_it_updated": "When a safe's collateralization ratio changes, requiring its node to be updated and re-inserted.",
+            "how_to_validate_state_update": "Confirm the node associated with safeId has its value updated to the new collateralization ratio. Inspect the previous and next pointers to ensure correct ordering within the list.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Updates a node's value (collateralization ratio) in the doubly linked list and re-inserts it to maintain order.",
+            "conditions": [
+              "Safe is updated in queue"
+            ]
+          },
+          {
             "state_variable_name": "head",
             "type": "uint256",
-            "what_does_it_track": "The first element in the linked list.",
-            "why_is_is_important": "Facilitates traversal of the list.",
-            "when_is_it_updated": "When the element being removed is the head.",
-            "how_to_validate_state_update": "Check the values of head, tail and nodes[safeId], it should be zero.",
+            "what_does_it_track": "Tracks the first node in the doubly linked list.",
+            "why_is_is_important": "To keep track of the head of the linked list.",
+            "when_is_it_updated": "When the head node is removed.",
+            "how_to_validate_state_update": "Verify that head is updated if the safe being removed is the head node.",
             "has_conditional_updates": true,
-            "summary_of_update": "The head is updated if the safe being removed is the head of the linked list.",
+            "summary_of_update": "Updates the head of the doubly linked list if the head node is removed.",
             "conditions": [
-              "(safe.borrowedAmount == 0 && borrowMode) || (!borrowMode && closeToZero(safe.collateralAmount) && safe.borrowedAmount == 0)"
+              "safesOrderedForLiquidation.remove(safeId)"
             ]
           },
           {
             "state_variable_name": "tail",
             "type": "uint256",
-            "what_does_it_track": "The last element in the linked list.",
-            "why_is_is_important": "Facilitates traversal of the list.",
-            "when_is_it_updated": "When the element being removed is the tail.",
-            "how_to_validate_state_update": "Check the values of head, tail and nodes[safeId], it should be zero.",
+            "what_does_it_track": "Tracks the last node in the doubly linked list.",
+            "why_is_is_important": "To keep track of the tail of the linked list.",
+            "when_is_it_updated": "When the tail node is removed.",
+            "how_to_validate_state_update": "Verify that tail is updated if the safe being removed is the tail node.",
             "has_conditional_updates": true,
-            "summary_of_update": "The tail is updated if the safe being removed is the tail of the linked list.",
+            "summary_of_update": "Updates the tail of the doubly linked list if the tail node is removed.",
             "conditions": [
-              "(safe.borrowedAmount == 0 && borrowMode) || (!borrowMode && closeToZero(safe.collateralAmount) && safe.borrowedAmount == 0)"
-            ]
-          },
-          {
-            "state_variable_name": "nodes",
-            "type": "mapping(uint256 => Node)",
-            "what_does_it_track": "Each node in the linked list.",
-            "why_is_is_important": "Represents an individual safe in the list, crucial for maintaining order.",
-            "when_is_it_updated": "When an element is removed from the linked list.",
-            "how_to_validate_state_update": "Check the values of head, tail and nodes[safeId], it should be zero.",
-            "has_conditional_updates": true,
-            "summary_of_update": "The node corresponding to the safe being removed is deleted from the linked list.",
-            "conditions": [
-              "(safe.borrowedAmount == 0 && borrowMode) || (!borrowMode && closeToZero(safe.collateralAmount) && safe.borrowedAmount == 0)"
-            ]
-          },
-          {
-            "state_variable_name": "nodes",
-            "type": "mapping(uint256 => Node)",
-            "what_does_it_track": "Each node in the linked list.",
-            "why_is_is_important": "Represents an individual safe in the list, crucial for maintaining order.",
-            "when_is_it_updated": "When an element is added to or updated in the linked list.",
-            "how_to_validate_state_update": "Check the values of nodes[safeId], it should be updated with new value and its position should also be updated.",
-            "has_conditional_updates": true,
-            "summary_of_update": "A node is upserted with the new ratio.",
-            "conditions": [
-              "safe.borrowedAmount != 0 && borrowMode || !borrowMode && !closeToZero(safe.collateralAmount) && safe.borrowedAmount != 0"
+              "safesOrderedForLiquidation.remove(safeId)"
             ]
           }
         ]
@@ -336,29 +410,35 @@
         "contract_name": "StabilityPool",
         "state_updated": [
           {
-            "state_variable_name": "stakingToken",
-            "type": "IERC20",
-            "what_does_it_track": "Represents the staking token contract.",
-            "why_is_is_important": "Tracks balance of the token in the pool.",
-            "when_is_it_updated": "When adding rewards.",
-            "how_to_validate_state_update": "Verify that stabilityPool.addReward is called with redemption.ownerFee.",
+            "state_variable_name": "totalRewardPerToken",
+            "type": "uint256",
+            "what_does_it_track": "Tracks the amount of reward per token.",
+            "why_is_is_important": "To calculate the amount of reward per token.",
+            "when_is_it_updated": "when the owner fee is greater than 0 and the stability pool can receive rewards",
+            "how_to_validate_state_update": "Verify that stakingToken.transferFrom is called with address(this) and _amount. Also verify that the reward per token, totalRewardPerToken, and rewardLoss are updated correctly. Check the event `RewardAdded`.",
             "has_conditional_updates": true,
-            "summary_of_update": "stakingToken.transferFrom is called to transfer tokens from msg.sender to address(this).",
+            "summary_of_update": "Increase the total reward per token.",
             "conditions": [
-              "redemption.ownerFee > 0 && stabilityPoolCanReceiveRewards"
+              "redemption.ownerFee > 0",
+              "stabilityPoolCanReceiveRewards",
+              "stakingToken.transferFrom succeeds",
+              "totalStakedRaw > 0"
             ]
           },
           {
             "state_variable_name": "totalCollateralPerToken",
             "type": "uint256",
-            "what_does_it_track": "Tracks the total collateral per token.",
-            "why_is_is_important": "Tracks the amount of collateral distributed",
-            "when_is_it_updated": "When collateral rewards are added.",
-            "how_to_validate_state_update": "Verify that stabilityPool.addCollateralReward is called with redemption.redeemerFee.",
+            "what_does_it_track": "Tracks the amount of collateral per token.",
+            "why_is_is_important": "To calculate the amount of collateral per token.",
+            "when_is_it_updated": "when the redeemer fee is greater than 0 and the stability pool can receive rewards",
+            "how_to_validate_state_update": "Verify that the totalCollateralPerToken, and collateralLoss are updated correctly. Check the event `CollateralRewardAdded`.",
             "has_conditional_updates": true,
-            "summary_of_update": "totalCollateralPerToken is updated when collateral rewards are added.",
+            "summary_of_update": "Increase the total collateral per token.",
             "conditions": [
-              "redemption.redeemerFee > 0 && stabilityPoolCanReceiveRewards"
+              "redemption.redeemerFee > 0",
+              "stabilityPoolCanReceiveRewards",
+              "msg.value == amount",
+              "totalStakedRaw > 0"
             ]
           }
         ]
@@ -468,20 +548,8 @@
         "references": {
           "references": [
             {
-              "state_variable_name": "head",
-              "contract_name": "OrderedDoublyLinkedList"
-            },
-            {
-              "state_variable_name": "tail",
-              "contract_name": "OrderedDoublyLinkedList"
-            },
-            {
               "state_variable_name": "_stableBaseCDP",
-              "contract_name": "OrderedDoublyLinkedList"
-            },
-            {
-              "state_variable_name": "_stableBaseCDP",
-              "contract_name": "OrderedDoublyLinkedList"
+              "contract_name": "StableBaseCDP"
             }
           ]
         },
