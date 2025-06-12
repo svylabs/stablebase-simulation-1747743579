@@ -11,47 +11,53 @@
     "contract_name": "StableBaseCDP",
     "function_name": "repay",
     "pre_execution_parameter_generation_rules": [
-      "safeId must correspond to an existing safe owned by msg.sender. safes[safeId] must exist and the owner must be msg.sender.",
-      "amount must be greater than 0 and less than or equal to the borrowedAmount for the safe.",
-      "amount must be such that after repayment, either borrowedAmount is 0 or borrowedAmount is greater than or equal to MINIMUM_DEBT.",
-      "msg.sender must have a sufficient SBD token balance (sbdToken.balanceOf(msg.sender) >= amount).",
-      "nearestSpotInLiquidationQueue should be a valid safeId that exists inside safesOrderedForLiquidation.",
-      "Find a valid safeId that exists inside safesOrderedForLiquidation or set it to 0."
+      "safeId: A valid safeId that exists in the safes mapping and is owned by the caller.",
+      "amount: A valid amount of SBD tokens that the caller owns and is less than or equal to the borrowedAmount of the safe. The amount must result in a valid repayment, either fully repaying the debt or leaving a debt greater than or equal to MINIMUM_DEBT.",
+      "nearestSpotInLiquidationQueue: A valid safeId representing the nearest spot in the liquidation queue, used for reordering the queue after repayment. This can be 0 to indicate the head of the queue."
     ],
     "on_execution_state_updates_made": [
       {
         "category": "Safe State",
         "state_update_descriptions": [
           "The borrowedAmount of the safe with safeId is decreased by amount.",
-          "The collateralAmount of the safe with safeId might be updated based on cumulativeCollateralPerUnitCollateral and liquidationSnapshots.",
-          "The weight of the safe with safeId is updated in the liquidation queue based on the new ratio of borrowedAmount to collateralAmount.",
-          "If borrowedAmount becomes 0 after repayment, the safe is removed from both liquidation and redemption queues."
+          "If borrowedAmount becomes 0, the safe is removed from both liquidation and redemption queues.",
+          "If the cumulative collateral per unit collateral or cumulative debt per unit collateral has changed since the last update, the safe's collateralAmount and borrowedAmount are updated to reflect the change. The totalBorrowedAmount is also updated."
         ]
       },
       {
-        "category": "Token State",
+        "category": "Total Debt",
         "state_update_descriptions": [
-          "The SBD token balance of msg.sender is decreased by amount as the tokens are burned."
+          "The totalDebt is decreased by the amount repaid."
         ]
       },
       {
-        "category": "Protocol State",
+        "category": "Liquidation Queue",
         "state_update_descriptions": [
-          "The totalDebt is decreased by amount.",
-          "The PROTOCOL_MODE might be updated from BOOTSTRAP to NORMAL if totalDebt exceeds BOOTSTRAP_MODE_DEBT_THRESHOLD."
+          "If the new collateral ratio is not 0, the safe's position in the liquidation queue is updated based on the new ratio and nearestSpotInLiquidationQueue."
         ]
       },
       {
-        "category": "Liquidation Snapshot",
+        "category": "Protocol Mode",
         "state_update_descriptions": [
-          "liquidationSnapshots[safeId].debtPerCollateralSnapshot is updated to cumulativeDebtPerUnitCollateral.",
-          "liquidationSnapshots[safeId].collateralPerCollateralSnapshot is updated to cumulativeCollateralPerUnitCollateral."
+          "PROTOCOL_MODE is updated from BOOTSTRAP to NORMAL if totalDebt exceeds BOOTSTRAP_MODE_DEBT_THRESHOLD."
+        ]
+      },
+      {
+        "category": "SBD Token",
+        "state_update_descriptions": [
+          "The specified amount of SBD tokens is burned from the user's account."
+        ]
+      },
+      {
+        "category": "Liquidation Snapshots",
+        "state_update_descriptions": [
+          "liquidationSnapshots mapping is updated with the new values of cumulativeCollateralPerUnitCollateral and cumulativeDebtPerUnitCollateral to track debt and collateral changes for each safe."
         ]
       },
       {
         "category": "Total Collateral",
         "state_update_descriptions": [
-          "totalCollateral is updated by collateralIncrease"
+          "totalCollateral may increase if collateralAmount is updated to reflect cumulativeCollateralPerUnitCollateral changes."
         ]
       }
     ],
@@ -59,33 +65,37 @@
       {
         "category": "Safe State",
         "rule_descriptions": [
-          "safes[safeId].borrowedAmount should be equal to the initial borrowedAmount minus the repayment amount and potential debt increase/decrease from the _updateSafe function call, reflecting any accrued inactive debt.",
-          "If safes[safeId].borrowedAmount is greater than 0, then safes[safeId].borrowedAmount >= MINIMUM_DEBT.",
-          "If safes[safeId].borrowedAmount is 0, the safe should be removed from both the liquidation and redemption queues. safesOrderedForLiquidation.getNode(safeId).value, safesOrderedForLiquidation.getNode(safeId).next and safesOrderedForLiquidation.getNode(safeId).prev should all be 0. The same should be true for safesOrderedForRedemption.getNode(safeId).",
-          "The weight of the safe in the liquidation queue should reflect the new borrowedAmount to collateralAmount ratio if the safe is not removed from the queue."
+          "safes[safeId].borrowedAmount should be decreased by amount.",
+          "If safes[safeId].borrowedAmount is 0, safesOrderedForLiquidation.nodes[safeId] and safesOrderedForRedemption.nodes[safeId] should be empty.",
+          "If cumulativeCollateralPerUnitCollateral or cumulativeDebtPerUnitCollateral has changed, safes[safeId].collateralAmount and safes[safeId].borrowedAmount should be updated appropriately."
         ]
       },
       {
-        "category": "Token State",
+        "category": "Total Debt",
         "rule_descriptions": [
-          "sbdToken.balanceOf(msg.sender) should be decreased by the amount repaid. It is difficult to validate the precise balance due to potential concurrent transactions, but the balance should not have increased."
+          "totalDebt should be decreased by amount."
         ]
       },
       {
-        "category": "Protocol State",
+        "category": "Liquidation Queue",
         "rule_descriptions": [
-          "totalDebt should be decreased by the amount repaid and any changes that occur during the updateSafe function call.",
-          "If the totalDebt is greater than BOOTSTRAP_MODE_DEBT_THRESHOLD, then PROTOCOL_MODE should be NORMAL."
+          "If safes[safeId].borrowedAmount is not 0, safesOrderedForLiquidation should contain the safeId with the updated ratio."
         ]
       },
       {
-        "category": "Event Emission",
+        "category": "SBD Token",
         "rule_descriptions": [
-          "A Repaid event should be emitted with the correct safeId, amount, newRatio, totalCollateral and totalDebt.",
-          "A LiquidationQueueUpdated event should be emitted if the safe's position in the liquidation queue is updated and the safe is not removed.",
+          "sbdToken.balanceOf(msg.sender) should be decreased by amount. totalBurned should also be updated"
+        ]
+      },
+      {
+        "category": "Events",
+        "rule_descriptions": [
+          "A Repaid event should be emitted with the correct safeId, amount, newRatio, totalCollateral, and totalDebt.",
+          "A LiquidationQueueUpdated event should be emitted if safes[safeId].borrowedAmount is not zero and the ratio has changed, triggering an update to the liquidation queue.",
           "A SafeRemovedFromLiquidationQueue event should be emitted if the safe is removed from the liquidation queue.",
           "A SafeRemovedFromRedemptionQueue event should be emitted if the safe is removed from the redemption queue.",
-          "A SafeUpdated event should be emitted if inactive debt/collateral has accumulated."
+          "A SafeUpdated event should be emitted if the safe's collateralAmount or borrowedAmount is updated."
         ]
       }
     ]
@@ -101,159 +111,119 @@
         "contract_name": "StableBaseCDP",
         "state_updated": [
           {
-            "state_variable_name": "safes[safeId].borrowedAmount",
+            "state_variable_name": "_safe.borrowedAmount",
             "type": "uint256",
             "what_does_it_track": "The outstanding debt for a specific CDP.",
-            "why_is_is_important": "Reflects the current debt level of the CDP, crucial for calculating collateralization ratio and liquidation risk.",
-            "when_is_it_updated": "When a user repays part or all of their debt.",
-            "how_to_validate_state_update": "Check the safes mapping for the safeId and ensure that the borrowedAmount has decreased by the amount repaid.",
+            "why_is_is_important": "Reflects the current debt of a safe, which is crucial for calculating collateralization ratio and determining liquidation risk.",
+            "when_is_it_updated": "When a user repays their debt, reducing their outstanding borrowed amount.",
+            "how_to_validate_state_update": "Check if the borrowedAmount of the safe decreases by the repayment amount.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Decreases the borrowed amount of a specific safe (CDP) by the 'amount' repaid.",
+            "conditions": [
+              "_safe.borrowedAmount > 0",
+              "sbdToken.balanceOf(msg.sender) >= amount",
+              "amount <= _safe.borrowedAmount",
+              "_safe.borrowedAmount - amount == 0 || _safe.borrowedAmount - amount >= MINIMUM_DEBT"
+            ]
+          },
+          {
+            "state_variable_name": "_safe.borrowedAmount",
+            "type": "uint256",
+            "what_does_it_track": "The outstanding debt for a specific CDP.",
+            "why_is_is_important": "It is important to keep the debt value correct.",
+            "when_is_it_updated": "When the safe's snapshot is outdated, it will increase debt amount.",
+            "how_to_validate_state_update": "Verify that _safe.borrowedAmount increases by the calculated debtIncrease.",
+            "has_conditional_updates": true,
+            "summary_of_update": "The debt of the safe increases to account for protocol-wide debt increases since the last snapshot.",
+            "conditions": [
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
+            ]
+          },
+          {
+            "state_variable_name": "safesOrderedForLiquidation",
+            "type": "address",
+            "what_does_it_track": "Reference to the doubly linked list contract used for liquidation queue management.",
+            "why_is_is_important": "Maintaining an accurate liquidation queue is critical for efficient and fair liquidation of undercollateralized safes.",
+            "when_is_it_updated": "After the borrowed amount is updated. It is updated if newRatio is not 0.",
+            "how_to_validate_state_update": "Check if the safesOrderedForLiquidation is called and updated.",
             "has_conditional_updates": false,
-            "summary_of_update": "Decreases the borrowed amount of a specific safe (CDP) by the amount repaid.",
+            "summary_of_update": "The position of the safe in the liquidation queue is updated based on the new collateralization ratio.",
             "conditions": []
+          },
+          {
+            "state_variable_name": "safesOrderedForLiquidation",
+            "type": "address",
+            "what_does_it_track": "Reference to the doubly linked list contract used for liquidation queue management.",
+            "why_is_is_important": "Removing fully repaid safes from the queues ensures that only relevant safes are considered for liquidation and redemption.",
+            "when_is_it_updated": "When the borrowed amount becomes zero after repayment.",
+            "how_to_validate_state_update": "Check if _removeSafeFromBothQueues function is called.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Removes the safe from both the liquidation and redemption queues if the borrowed amount is fully repaid.",
+            "conditions": [
+              "_newRatio == 0"
+            ]
           },
           {
             "state_variable_name": "totalDebt",
             "type": "uint256",
-            "what_does_it_track": "The aggregate debt across all CDPs.",
-            "why_is_is_important": "Represents the overall risk of the protocol and is used in system-wide calculations.",
-            "when_is_it_updated": "When a user repays their debt.",
-            "how_to_validate_state_update": "Check the totalDebt variable to ensure it has decreased by the amount repaid.",
+            "what_does_it_track": "The total outstanding debt in the protocol.",
+            "why_is_is_important": "Reflects the overall health of the protocol and is used in various calculations, such as stability fees.",
+            "when_is_it_updated": "When a safe repays its debt.",
+            "how_to_validate_state_update": "Verify that totalDebt decreases by the repayment amount.",
             "has_conditional_updates": false,
-            "summary_of_update": "Decreases the total outstanding debt in the system.",
+            "summary_of_update": "Decreases the total outstanding debt in the protocol by the repayment amount.",
             "conditions": []
-          },
-          {
-            "state_variable_name": "liquidationSnapshots[safeId].debtPerCollateralSnapshot",
-            "type": "uint256",
-            "what_does_it_track": "The debt per collateral snapshot for a given safe.",
-            "why_is_is_important": "Used in calculating the inactive debt of a safe.",
-            "when_is_it_updated": "When the collateral per collateral snapshot is not equal to the cumulative collateral per unit collateral.",
-            "how_to_validate_state_update": "Check the liquidationSnapshots mapping for the safeId and ensure that debtPerCollateralSnapshot is updated to cumulativeDebtPerUnitCollateral.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates the debt snapshot for a safe used to calculate inactive debt.",
-            "conditions": [
-              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
-            ]
-          },
-          {
-            "state_variable_name": "safes[safeId].borrowedAmount",
-            "type": "uint256",
-            "what_does_it_track": "The borrowed amount for a given safe.",
-            "why_is_is_important": "Used in calculating the inactive debt of a safe.",
-            "when_is_it_updated": "When the collateral per collateral snapshot is not equal to the cumulative collateral per unit collateral.",
-            "how_to_validate_state_update": "Check the safes mapping for the safeId and ensure that borrowedAmount is updated by debtIncrease.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates the borrowed amount for a safe by debtIncrease if the liquidation snapshot is outdated.",
-            "conditions": [
-              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
-            ]
-          },
-          {
-            "state_variable_name": "safes[safeId].totalBorrowedAmount",
-            "type": "uint256",
-            "what_does_it_track": "The total borrowed amount for a given safe.",
-            "why_is_is_important": "Used in calculating the inactive debt of a safe.",
-            "when_is_it_updated": "When the collateral per collateral snapshot is not equal to the cumulative collateral per unit collateral.",
-            "how_to_validate_state_update": "Check the safes mapping for the safeId and ensure that totalBorrowedAmount is updated by debtIncrease.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates the total borrowed amount for a safe by debtIncrease if the liquidation snapshot is outdated.",
-            "conditions": [
-              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
-            ]
-          },
-          {
-            "state_variable_name": "safes[safeId].collateralAmount",
-            "type": "uint256",
-            "what_does_it_track": "The collateral amount for a given safe.",
-            "why_is_is_important": "Used in calculating the inactive debt of a safe.",
-            "when_is_it_updated": "When the collateral per collateral snapshot is not equal to the cumulative collateral per unit collateral.",
-            "how_to_validate_state_update": "Check the safes mapping for the safeId and ensure that collateralAmount is updated by collateralIncrease.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates the collateral amount for a safe by collateralIncrease if the liquidation snapshot is outdated.",
-            "conditions": [
-              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
-            ]
-          },
-          {
-            "state_variable_name": "liquidationSnapshots[safeId].collateralPerCollateralSnapshot",
-            "type": "uint256",
-            "what_does_it_track": "The collateral per collateral snapshot for a given safe.",
-            "why_is_is_important": "Used in calculating the inactive debt of a safe.",
-            "when_is_it_updated": "When the collateral per collateral snapshot is not equal to the cumulative collateral per unit collateral.",
-            "how_to_validate_state_update": "Check the liquidationSnapshots mapping for the safeId and ensure that collateralPerCollateralSnapshot is updated to cumulativeCollateralPerUnitCollateral.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates the collateral per collateral snapshot for a safe.",
-            "conditions": [
-              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
-            ]
           },
           {
             "state_variable_name": "totalCollateral",
             "type": "uint256",
-            "what_does_it_track": "The total collateral in the system.",
-            "why_is_is_important": "Used in calculating the inactive debt of a safe.",
-            "when_is_it_updated": "When the collateral per collateral snapshot is not equal to the cumulative collateral per unit collateral.",
-            "how_to_validate_state_update": "Check the totalCollateral variable to ensure it has increased by collateralIncrease.",
+            "what_does_it_track": "Keeps track of the total collateral locked within the protocol",
+            "why_is_is_important": "It is important for accounting purposes",
+            "when_is_it_updated": "The safe's snapshot is outdated.",
+            "how_to_validate_state_update": "Verify that totalCollateral increases by the calculated collateralIncrease.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the total collateral in the system.",
+            "summary_of_update": "Increases the total collateral to account for protocol-wide collateral increases since the last snapshot.",
             "conditions": [
               "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
             ]
           },
           {
             "state_variable_name": "PROTOCOL_MODE",
-            "type": "enum",
-            "what_does_it_track": "The protocol mode.",
-            "why_is_is_important": "Used to determine the protocol mode.",
-            "when_is_it_updated": "When the total debt is above the bootstrap mode debt threshold and the protocol mode is bootstrap.",
-            "how_to_validate_state_update": "Check the PROTOCOL_MODE variable to ensure it is updated to NORMAL.",
+            "type": "SBStructs.Mode",
+            "what_does_it_track": "Operational mode of the protocol.",
+            "why_is_is_important": "Controls certain protocol parameters and behaviors, especially during the initial bootstrapping phase.",
+            "when_is_it_updated": "When the total debt exceeds a certain threshold during the repayment process.",
+            "how_to_validate_state_update": "Check if PROTOCOL_MODE updates to NORMAL.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the protocol mode from BOOTSTRAP to NORMAL if the total debt is above the threshold.",
+            "summary_of_update": "Transitions the protocol from BOOTSTRAP mode to NORMAL mode if the total debt exceeds the threshold.",
             "conditions": [
-              "totalDebt > BOOTSTRAP_MODE_DEBT_THRESHOLD && PROTOCOL_MODE == SBStructs.Mode.BOOTSTRAP",
-              "The debt exceeds the bootstrap threshold, and the protocol is currently in bootstrap mode. This transition only happens once, from bootstrap to normal mode"
+              "debt > BOOTSTRAP_MODE_DEBT_THRESHOLD && PROTOCOL_MODE == SBStructs.Mode.BOOTSTRAP"
             ]
           },
           {
-            "state_variable_name": "safesOrderedForLiquidation",
-            "type": "contract",
-            "what_does_it_track": "The liquidation queue.",
-            "why_is_is_important": "Used to determine the order in which safes are liquidated.",
-            "when_is_it_updated": "When the new ratio is not 0.",
-            "how_to_validate_state_update": "Check the safesOrderedForLiquidation contract to ensure that the safe is upserted.",
+            "state_variable_name": "_safe.collateralAmount",
+            "type": "uint256",
+            "what_does_it_track": "Keeps track of the collateral of a safe.",
+            "why_is_is_important": "It is important to keep the debt value correct.",
+            "when_is_it_updated": "When the safe's snapshot is outdated, it will increase debt amount.",
+            "how_to_validate_state_update": "Verify that _safe.collateralAmount increases by the calculated collateralIncrease.",
             "has_conditional_updates": true,
-            "summary_of_update": "Upserts the safe into the liquidation queue if the CDP is not fully collateralized, maintaining the order for potential liquidation.",
+            "summary_of_update": "The collateral of the safe increases to account for protocol-wide collateral increases since the last snapshot.",
             "conditions": [
-              "_newRatio != 0",
-              "The CDP's collateralization ratio is not zero after the repayment. A zero ratio implies the CDP is fully collateralized and should be removed from the queue"
-            ]
-          },
-          {
-            "state_variable_name": "safesOrderedForLiquidation",
-            "type": "contract",
-            "what_does_it_track": "The liquidation and redemption queues.",
-            "why_is_is_important": "Used to determine the order in which safes are liquidated and redeemed.",
-            "when_is_it_updated": "When the borrowed amount is equal to the amount repaid.",
-            "how_to_validate_state_update": "Check the safesOrderedForLiquidation and safesOrderedForRedemption contracts to ensure that the safe is removed.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Removes the safe from the liquidation queue upon full repayment of debt, as the CDP is no longer at risk of liquidation.",
-            "conditions": [
-              "_safe.borrowedAmount - amount == 0",
-              "The borrowed amount after repayment is zero, indicating full repayment of the debt.  Both liquidation and redemption queues are cleared upon full repayment"
+              "liquidationSnapshot.collateralPerCollateralSnapshot != cumulativeCollateralPerUnitCollateral"
             ]
           },
           {
             "state_variable_name": "safesOrderedForRedemption",
-            "type": "contract",
-            "what_does_it_track": "The liquidation and redemption queues.",
-            "why_is_is_important": "Used to determine the order in which safes are liquidated and redeemed.",
-            "when_is_it_updated": "When the borrowed amount is equal to the amount repaid.",
-            "how_to_validate_state_update": "Check the safesOrderedForLiquidation and safesOrderedForRedemption contracts to ensure that the safe is removed.",
+            "type": "address",
+            "what_does_it_track": "Doubly linked list contract address.",
+            "why_is_is_important": "Ensures the redemption queue contains only safes with outstanding debt.",
+            "when_is_it_updated": "When a safe's debt is reduced to zero.",
+            "how_to_validate_state_update": "Confirm that safesOrderedForRedemption.remove(safeId) is called.",
             "has_conditional_updates": true,
-            "summary_of_update": "Removes the safe from the redemption queue upon full repayment, as the CDP no longer requires redemption.",
+            "summary_of_update": "Removes a safe from the redemption queue when its debt is fully repaid.",
             "conditions": [
-              "_safe.borrowedAmount - amount == 0",
-              "The borrowed amount after repayment is zero, indicating full repayment of the debt. Both liquidation and redemption queues are cleared upon full repayment"
+              "_newRatio == 0"
             ]
           }
         ]
@@ -262,36 +232,44 @@
         "contract_name": "DFIDToken",
         "state_updated": [
           {
-            "state_variable_name": "_balances[msg.sender]",
+            "state_variable_name": "_balances[from]",
             "type": "uint256",
-            "what_does_it_track": "The token balance of a user.",
-            "why_is_is_important": "Reflects the user's current token holdings.",
-            "when_is_it_updated": "When a user repays their debt.",
-            "how_to_validate_state_update": "Check the balance of the msg.sender to ensure it has decreased by the amount repaid.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Burns the SBD tokens from the user's balance.",
-            "conditions": []
-          },
-          {
-            "state_variable_name": "totalBurned",
-            "type": "uint256",
-            "what_does_it_track": "The total amount of tokens burned.",
-            "why_is_is_important": "Reflects the total amount of tokens burned.",
-            "when_is_it_updated": "When a user repays their debt.",
-            "how_to_validate_state_update": "Check the totalBurned variable to ensure it has increased by the amount repaid.",
-            "has_conditional_updates": false,
-            "summary_of_update": "Increases the total amount of tokens burned.",
-            "conditions": []
+            "what_does_it_track": "The SBD token balance of a specific address.",
+            "why_is_is_important": "Reduces the circulating supply of SBD tokens, maintaining the peg.",
+            "when_is_it_updated": "When a user repays their debt using SBD tokens.",
+            "how_to_validate_state_update": "Check if the SBD tokens are burned from the user's account, reducing their balance.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Burns (destroys) SBD tokens from the user's balance when they repay their debt.",
+            "conditions": [
+              "from != address(0)",
+              "amount > 0",
+              "balanceOf(msg.sender) >= amount"
+            ]
           },
           {
             "state_variable_name": "_totalSupply",
             "type": "uint256",
-            "what_does_it_track": "The total supply of tokens.",
-            "why_is_is_important": "Reflects the total supply of tokens.",
-            "when_is_it_updated": "When a user repays their debt.",
-            "how_to_validate_state_update": "Check the totalSupply to ensure it has decreased by the amount repaid.",
+            "what_does_it_track": "The total supply of SBD tokens.",
+            "why_is_is_important": "It is important for keeping track of the SBD token supply.",
+            "when_is_it_updated": "When SBD is burned, the total supply decreases.",
+            "how_to_validate_state_update": "Verify that _totalSupply is decreased.",
+            "has_conditional_updates": true,
+            "summary_of_update": "Decreases the total supply of SBD token when it is burned.",
+            "conditions": [
+              "from != address(0)",
+              "amount > 0",
+              "balanceOf(msg.sender) >= amount"
+            ]
+          },
+          {
+            "state_variable_name": "totalBurned",
+            "type": "uint256",
+            "what_does_it_track": "The total amount of SBD that has been burned.",
+            "why_is_is_important": "For accounting purposes.",
+            "when_is_it_updated": "When a user repays their debt using SBD tokens.",
+            "how_to_validate_state_update": "Verify that totalBurned increases by amount.",
             "has_conditional_updates": false,
-            "summary_of_update": "Decreases the total supply of tokens.",
+            "summary_of_update": "Increase the totalBurned amount when SBD is burned.",
             "conditions": []
           }
         ]
@@ -300,115 +278,71 @@
         "contract_name": "OrderedDoublyLinkedList",
         "state_updated": [
           {
-            "state_variable_name": "nodes",
-            "type": "mapping",
-            "what_does_it_track": "The nodes in the linked list.",
-            "why_is_is_important": "Maintains the correct order of safes in the queue, crucial for liquidation and redemption processes.",
-            "when_is_it_updated": "When a new safe needs to be added to the queue, and it's not already present.",
-            "how_to_validate_state_update": "Check the nodes mapping to ensure that the node is inserted with the correct value, prev, and next pointers.",
+            "state_variable_name": "nodes[id]",
+            "type": "IDoublyLinkedList.Node",
+            "what_does_it_track": "Each node's information in the linked list.",
+            "why_is_is_important": "Storing relevant information in each node.",
+            "when_is_it_updated": "If the node does not exist in the list",
+            "how_to_validate_state_update": "Verify that the _insert function is called.",
             "has_conditional_updates": true,
-            "summary_of_update": "Inserts a new node into the linked list if it doesn't already exist, maintaining the sorted order based on value.",
+            "summary_of_update": "Inserts a new node into the doubly linked list if it doesn't already exist.",
             "conditions": [
-              "nodes[id].value == 0 && nodes[id].next == 0 && nodes[id].prev == 0",
-              "The node with the given ID does not exist in the linked list. A new node needs to be created and inserted"
+              "nodes[id].value == 0 && nodes[id].next == 0 && nodes[id].prev == 0"
             ]
           },
           {
-            "state_variable_name": "nodes",
-            "type": "mapping",
-            "what_does_it_track": "The nodes in the linked list.",
-            "why_is_is_important": "Maintains the correct order of safes in the queue, crucial for liquidation and redemption processes.",
-            "when_is_it_updated": "When an existing safe's collateralization ratio changes, requiring a re-ordering in the queue.",
-            "how_to_validate_state_update": "Check the nodes mapping to ensure the node's value is updated and its prev and next pointers are adjusted correctly to reflect its new position in the sorted list.",
+            "state_variable_name": "nodes[id]",
+            "type": "IDoublyLinkedList.Node",
+            "what_does_it_track": "Each node's information in the linked list.",
+            "why_is_is_important": "Storing relevant information in each node.",
+            "when_is_it_updated": "If the node exists in the list.",
+            "how_to_validate_state_update": "Verify that the _update function is called.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates a node in the linked list if it already exists, adjusting its value and position to maintain sorted order.",
+            "summary_of_update": "Updates an existing node's value in the doubly linked list.",
             "conditions": [
-              "nodes[id].value != 0 || nodes[id].next != 0 || nodes[id].prev != 0",
-              "The node with the given ID already exists in the linked list.  The existing node needs to be updated with the new value and repositioned within the list to maintain sorted order"
-            ]
-          },
-          {
-            "state_variable_name": "head",
-            "type": "uint256",
-            "what_does_it_track": "The head of the linked list.",
-            "why_is_is_important": "Points to the first element in the sorted list, essential for traversing the queue.",
-            "when_is_it_updated": "When the linked list is empty and a new node is inserted.",
-            "how_to_validate_state_update": "Check the head and tail variables to ensure they both point to the ID of the newly inserted node.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates the head of the linked list when the list is empty, setting it to the new node.",
-            "conditions": [
-              "head == 0",
-              "The linked list is currently empty.  This is the first node being inserted, so it becomes both the head and tail"
-            ]
-          },
-          {
-            "state_variable_name": "tail",
-            "type": "uint256",
-            "what_does_it_track": "The tail of the linked list.",
-            "why_is_is_important": "Points to the last element in the sorted list, allowing efficient addition to the end of the queue.",
-            "when_is_it_updated": "When the linked list is empty and a new node is inserted.",
-            "how_to_validate_state_update": "Check the head and tail variables to ensure they both point to the ID of the newly inserted node.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates the tail of the linked list when the list is empty, setting it to the new node.",
-            "conditions": [
-              "head == 0",
-              "The linked list is currently empty. This is the first node being inserted, so it becomes both the head and tail"
-            ]
-          },
-          {
-            "state_variable_name": "nodes",
-            "type": "mapping",
-            "what_does_it_track": "The nodes in the linked list",
-            "why_is_is_important": "Ensures correct positioning of the new node relative to the existing head.",
-            "when_is_it_updated": "When the `_nearestSpot` provided is the head, directing insertion relative to the head",
-            "how_to_validate_state_update": "Examine the `nodes` mapping to ensure the new node's `next` and `prev` pointers are correctly set, and that the head is updated if necessary.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Inserts the new node either before or after the head node, maintaining the sorted order of the list.",
-            "conditions": [
-              "_nearestSpot == head",
-              "The `_nearestSpot` provided is the current head of the list. The new node needs to be inserted either before or after the head, depending on its value"
-            ]
-          },
-          {
-            "state_variable_name": "nodes",
-            "type": "mapping",
-            "what_does_it_track": "The nodes in the linked list",
-            "why_is_is_important": "Ensures correct positioning of the new node relative to the existing tail.",
-            "when_is_it_updated": "When the `_nearestSpot` provided is the tail, directing insertion relative to the tail",
-            "how_to_validate_state_update": "Examine the `nodes` mapping to ensure the new node's `next` and `prev` pointers are correctly set, and that the tail is updated if necessary.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Inserts the new node either before or after the tail node, maintaining the sorted order of the list.",
-            "conditions": [
-              "_nearestSpot == tail",
-              "The `_nearestSpot` provided is the current tail of the list. The new node needs to be inserted either before or after the tail, depending on its value"
+              "nodes[id].value != 0 || nodes[id].next != 0 || nodes[id].prev != 0"
             ]
           },
           {
             "state_variable_name": "head",
             "type": "uint256",
-            "what_does_it_track": "The head of the linked list",
-            "why_is_is_important": "Maintains the correct start of the linked list after head removal.",
-            "when_is_it_updated": "When the node being removed is the head",
-            "how_to_validate_state_update": "Check that the `head` variable now points to the node that was previously after the removed node.",
-            "has_conditional_updates": true,
-            "summary_of_update": "Updates the head of the linked list when the head node is removed.",
-            "conditions": [
-              "node.prev == 0",
-              "The node being removed is the head of the list.  The `head` pointer needs to be updated to the next node in the list"
-            ]
+            "what_does_it_track": "The first node in the list.",
+            "why_is_is_important": "Important for list traversal.",
+            "when_is_it_updated": "During insertion if the current node is the first node.",
+            "how_to_validate_state_update": "Check if head is updated correctly.",
+            "has_conditional_updates": false,
+            "summary_of_update": "Updates the head of the list.",
+            "conditions": []
           },
           {
             "state_variable_name": "tail",
             "type": "uint256",
-            "what_does_it_track": "The tail of the linked list",
-            "why_is_is_important": "Maintains the correct end of the linked list after tail removal.",
-            "when_is_it_updated": "When the node being removed is the tail",
-            "how_to_validate_state_update": "Check that the `tail` variable now points to the node that was previously before the removed node.",
+            "what_does_it_track": "The last node in the list.",
+            "why_is_is_important": "Important for list traversal.",
+            "when_is_it_updated": "During insertion if the current node is the last node.",
+            "how_to_validate_state_update": "Check if tail is updated correctly.",
+            "has_conditional_updates": false,
+            "summary_of_update": "Updates the tail of the list.",
+            "conditions": []
+          }
+        ]
+      },
+      {
+        "contract_name": "DFIDToken",
+        "state_updated": [
+          {
+            "state_variable_name": "_balances[from]",
+            "type": "uint256",
+            "what_does_it_track": "The SBD token balance of a specific address.",
+            "why_is_is_important": "Reduces the circulating supply of SBD tokens, maintaining the peg.",
+            "when_is_it_updated": "When a user repays their debt using SBD tokens.",
+            "how_to_validate_state_update": "Check if the SBD tokens are burned from the user's account, reducing their balance.",
             "has_conditional_updates": true,
-            "summary_of_update": "Updates the tail of the linked list when the tail node is removed.",
+            "summary_of_update": "Burns (destroys) SBD tokens from the user's balance when they repay their debt.",
             "conditions": [
-              "node.next == 0",
-              "The node being removed is the tail of the list. The `tail` pointer needs to be updated to the previous node in the list"
+              "from != address(0)",
+              "amount > 0",
+              "balanceOf(msg.sender) >= amount"
             ]
           }
         ]
@@ -500,7 +434,72 @@
         "contract_name": "DFIDToken",
         "code_snippet": "function balanceOf(address account) external view returns (uint256);\nfunction burn(\n        address from,\n        uint256 amount\n    ) external onlyOwner returns (bool) {\n        require(from != address(0), \"Invalid address\");\n        require(amount > 0, \"Amount must be greater than 0\");\n        require(balanceOf(from) >= amount, \"Insufficient balance\");\n\n        _burn(from, amount); // Using OpenZeppelin's internal _burn function\n\n        totalBurned += amount;\n\n        emit Burn(from, amount);\n        return true;\n    }\nfunction _burn(address account, uint256 value) internal {\n        if (account == address(0)) {\n            revert ERC20InvalidSender(address(0));\n        }\n        _update(account, address(0), value);\n    }\nfunction _update(address from, address to, uint256 value) internal virtual {\n        if (from == address(0)) {\n            // Overflow check required: The rest of the code assumes that totalSupply never overflows\n            _totalSupply += value;\n        } else {\n            uint256 fromBalance = _balances[from];\n            if (fromBalance < value) {\n                revert ERC20InsufficientBalance(from, fromBalance, value);\n            }\n            unchecked {\n                // Overflow not possible: value <= fromBalance <= totalSupply.\n                _balances[from] = fromBalance - value;\n            }\n        }\n\n        if (to == address(0)) {\n            unchecked {\n                // Overflow not possible: value <= totalSupply or value <= fromBalance <= totalSupply.\n                _totalSupply -= value;\n            }\n        } else {\n            unchecked {\n                // Overflow not possible: balance + value is at most totalSupply, which we know fits into a uint256.\n                _balances[to] += value;\n            }\n        }\n\n        emit Transfer(from, to, value);\n    }",
         "references": {
-          "references": []
+          "references": [
+            {
+              "state_variable_name": "_stableBaseCDP",
+              "contract_name": "DFIDToken"
+            },
+            {
+              "state_variable_name": "_stabilityPool",
+              "contract_name": "DFIREToken"
+            },
+            {
+              "state_variable_name": "_stakingToken",
+              "contract_name": "DFIREStaking"
+            },
+            {
+              "state_variable_name": "_rewardToken",
+              "contract_name": "DFIREStaking"
+            },
+            {
+              "state_variable_name": "_stableBaseContract",
+              "contract_name": "DFIREStaking"
+            },
+            {
+              "state_variable_name": "_stakingToken",
+              "contract_name": "StabilityPool"
+            },
+            {
+              "state_variable_name": "_stableBaseCDP",
+              "contract_name": "StabilityPool"
+            },
+            {
+              "state_variable_name": "_sbrToken",
+              "contract_name": "StabilityPool"
+            },
+            {
+              "state_variable_name": "_sbdToken",
+              "contract_name": "StableBaseCDP"
+            },
+            {
+              "state_variable_name": "_priceOracle",
+              "contract_name": "StableBaseCDP"
+            },
+            {
+              "state_variable_name": "_stabilityPool",
+              "contract_name": "StableBaseCDP"
+            },
+            {
+              "state_variable_name": "_dfireTokenStaking",
+              "contract_name": "StableBaseCDP"
+            },
+            {
+              "state_variable_name": "_safesOrderedForLiquidation",
+              "contract_name": "StableBaseCDP"
+            },
+            {
+              "state_variable_name": "_safesOrderedForRedemption",
+              "contract_name": "StableBaseCDP"
+            },
+            {
+              "state_variable_name": "_stableBaseCDP",
+              "contract_name": "OrderedDoublyLinkedList"
+            },
+            {
+              "state_variable_name": "_stableBaseCDP",
+              "contract_name": "OrderedDoublyLinkedList"
+            }
+          ]
         },
         "constants": []
       },
@@ -509,6 +508,22 @@
         "code_snippet": "function upsert(\n        uint256 id,\n        uint256 value,\n        uint256 _nearestSpot\n    ) external override onlyOwner returns (Node memory) {\n        if (\n            nodes[id].value == 0 && nodes[id].next == 0 && nodes[id].prev == 0\n        ) {\n            return _insert(id, value, _nearestSpot);\n        } else {\n            return _update(id, value, _nearestSpot);\n        }\n    }\nfunction _insert(\n        uint256 id,\n        uint256 value,\n        uint256 _nearestSpot\n    ) internal returns (Node memory) {\n        Node memory node = Node(value, 0, 0);\n        return _insert(id, node, _nearestSpot);\n    }\nfunction _insert(\n        uint256 id,\n        Node memory node,\n        uint256 _nearestSpot\n    ) internal returns (Node memory) {\n        uint256 _head = head;\n        if (_head == 0) {\n            head = id;\n            tail = id;\n        } else {\n            uint256 _tail = tail;\n            if (_nearestSpot == 0) {\n                _nearestSpot = _head;\n            }\n\n            if (\n                nodes[_nearestSpot].prev == 0 &&\n                nodes[_nearestSpot].next == 0 &&\n                nodes[_nearestSpot].value == 0\n            ) {\n                _nearestSpot = head;\n                //nearest = nodes[_nearestSpot];\n            }\n            // nearest: 7, node:10: 7, 7, 9, 11, 11\n            // nearest: 9, node: 7: 7, 7, 9, 11, 11\n            // nearest: 9, node: 12: 7, 7, 9, 11, 11\n\n            while (\n                _nearestSpot != _tail && nodes[_nearestSpot].value < node.value\n            ) {\n                _nearestSpot = nodes[_nearestSpot].next;\n                //nearest = nodes[_nearestSpot];\n            }\n            // nearest: 11, node:10: 7, 7, 9, 11, 11\n            // nearest: 9, node:7: 7, 7, 9, 11, 11\n            // nearest: 11(last), node: 12: 7, 7, 9, 11, 11\n\n            while (\n                _nearestSpot != _head && nodes[_nearestSpot].value >= node.value\n            ) {\n                _nearestSpot = nodes[_nearestSpot].prev;\n                //nearest = nodes[_nearestSpot];\n            }\n            // nearest: 7, node: 7: 7, 7, 9, 11, 11\n\n            if (_nearestSpot == _head) {\n                if (nodes[_nearestSpot].value >= node.value) {\n                    node.next = _nearestSpot;\n                    nodes[_nearestSpot].prev = id;\n                    head = id;\n                } else {\n                    node.prev = _nearestSpot;\n                    node.next = nodes[_nearestSpot].next;\n                    nodes[_nearestSpot].next = id;\n                    if (node.next != 0) {\n                        nodes[node.next].prev = id;\n                    } else {\n                        tail = id;\n                    }\n                }\n            } else if (_nearestSpot == _tail) {\n                // nearest: 11(last), node: 12: 7, 7, 9, 11, 11\n                if (nodes[_nearestSpot].value < node.value) {\n                    node.prev = _nearestSpot;\n                    nodes[_nearestSpot].next = id;\n                    tail = id;\n                } else {\n                    node.prev = nodes[_nearestSpot].prev;\n                    node.next = _nearestSpot;\n                    nodes[_nearestSpot].prev = id;\n                    if (node.prev != 0) {\n                        nodes[node.prev].next = id;\n                    } else {\n                        head = id;\n                    }\n                }\n            } else {\n                // nearest: 9, node: 10: 7, 7, 9, 11, 11\n                node.prev = _nearestSpot;\n                node.next = nodes[_nearestSpot].next;\n                nodes[_nearestSpot].next = id;\n                nodes[node.next].prev = id;\n            }\n        }\n        nodes[id] = node;\n        return node;\n    }\nfunction _update(\n        uint256 id,\n        uint256 value,\n        uint256 _nearestSpot\n    ) internal returns (Node memory) {\n        Node memory node = _remove(id);\n        node.value = value;\n        node.prev = 0;\n        node.next = 0;\n        return _insert(id, node, _nearestSpot);\n    }\nfunction _remove(uint256 id) internal returns (Node memory) {\n        Node memory node = nodes[id];\n        if (node.prev == 0) {\n            head = node.next;\n            nodes[node.next].prev = 0;\n        } else {\n            nodes[node.prev].next = node.next;\n            nodes[node.next].prev = node.prev;\n        }\n        if (node.next == 0) {\n            tail = node.prev;\n            nodes[node.prev].next = 0;\n        } else {\n            nodes[node.next].prev = node.prev;\n            nodes[node.prev].next = node.next;\n        }\n        delete nodes[id];\n        return node;\n    }\nfunction remove(\n        uint256 id\n    ) external override onlyOwner returns (Node memory) {\n        if (\n            nodes[id].value == 0 && nodes[id].next == 0 && nodes[id].prev == 0\n        ) {\n            // Node doesn't exist\n            return Node(0, 0, 0);\n        }\n        return _remove(id);\n    }",
         "references": {
           "references": [
+            {
+              "state_variable_name": "head",
+              "contract_name": "OrderedDoublyLinkedList"
+            },
+            {
+              "state_variable_name": "tail",
+              "contract_name": "OrderedDoublyLinkedList"
+            },
+            {
+              "state_variable_name": "head",
+              "contract_name": "OrderedDoublyLinkedList"
+            },
+            {
+              "state_variable_name": "tail",
+              "contract_name": "OrderedDoublyLinkedList"
+            },
             {
               "state_variable_name": "_stableBaseCDP",
               "contract_name": "OrderedDoublyLinkedList"
