@@ -11,15 +11,15 @@
     "contract_name": "MockPriceOracle",
     "function_name": "setPrice",
     "pre_execution_parameter_generation_rules": [
-      "The `_price` parameter should be a uint256 representing the desired price.",
-      "The `_price` parameter should be a reasonable value (e.g., within a certain range).",
-      "The transaction should be sent by the owner of the contract."
+      "The `_price` parameter must be a non-negative integer.",
+      "The `_price` parameter should represent the desired price without considering the 1e18 scaling factor.",
+      "The transaction must be sent by the owner of the contract."
     ],
     "on_execution_state_updates_made": [
       {
         "category": "Price",
         "state_update_descriptions": [
-          "The `price` variable is updated to `_price * 1e18`."
+          "The `price` variable is updated to the new price, multiplied by 1e18."
         ]
       }
     ],
@@ -27,13 +27,20 @@
       {
         "category": "Price",
         "rule_descriptions": [
-          "The `price` variable should be equal to the provided `_price` multiplied by 1e18."
+          "Validate that the `price` variable is equal to the provided `_price` parameter multiplied by 1e18.",
+          "Verify that the `price` variable is greater than or equal to zero."
         ]
       },
       {
         "category": "Ownership",
         "rule_descriptions": [
-          "The transaction sender should be the owner of the contract."
+          "Verify that the owner remains unchanged after the execution."
+        ]
+      },
+      {
+        "category": "Events",
+        "rule_descriptions": [
+          "Verify that no `OwnershipTransferred` event is emitted during the execution."
         ]
       }
     ]
@@ -51,16 +58,14 @@
           {
             "state_variable_name": "price",
             "type": "uint256",
-            "what_does_it_track": "The current price used by the oracle.",
-            "why_is_is_important": "This variable is the central point of this contract which other contracts use. It determines the price returned by the oracle and is crucial for dependent contracts that rely on the price feed. Incorrect pricing can lead to significant financial losses or incorrect execution of smart contract logic.",
-            "when_is_it_updated": "When the `setPrice` function is called by the owner.",
-            "how_to_validate_state_update": "Read the value of the `price` state variable after the function execution and verify it is equal to the `_price` argument multiplied by 1e18.",
+            "what_does_it_track": "Tracks the current price of the asset.",
+            "why_is_is_important": "This variable holds the current price, which is crucial for other functionalities relying on price feeds.",
+            "when_is_it_updated": "It is updated when the owner calls the 'setPrice' function.",
+            "how_to_validate_state_update": "Check the value of the 'price' storage variable after the function execution. The 'price' variable should be equal to the input '_price' multiplied by 1e18.",
             "has_conditional_updates": true,
-            "summary_of_update": "The `price` state variable is updated to the new price provided as input, scaled by 1e18.",
+            "summary_of_update": "The 'price' state variable is updated with the new price provided as input, scaled by 1e18.",
             "conditions": [
-              "The caller must be the owner of the contract. This is enforced by the `onlyOwner` modifier.",
-              "The `onlyOwner` modifier restricts access to the function, ensuring that only the contract owner can modify the price.",
-              "The price must be a valid uint256 value to prevent overflows or unexpected behavior during calculations in dependent contracts, although the function itself does not explicitly check for this condition.'"
+              "The function must be called by the owner."
             ]
           }
         ]
