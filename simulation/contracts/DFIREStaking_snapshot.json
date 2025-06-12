@@ -1,18 +1,6 @@
 {
   "attributes": [
     {
-      "name": "stakes",
-      "type": "mapping",
-      "contract_function": "stakes",
-      "parameters": [
-        {
-          "name": "accountAddress",
-          "type": "address",
-          "reference": "accountAddress"
-        }
-      ]
-    },
-    {
       "name": "rewardSenderActive",
       "type": "bool",
       "contract_function": "rewardSenderActive",
@@ -37,38 +25,32 @@
       "parameters": []
     },
     {
-      "name": "userPendingReward",
-      "type": "function",
-      "contract_function": "userPendingReward",
+      "name": "userStake",
+      "type": "tuple",
+      "contract_function": "getStake",
       "parameters": [
         {
-          "name": "accountAddress",
+          "name": "user",
           "type": "address",
           "reference": "accountAddress"
         }
       ]
     },
     {
-      "name": "stakingToken",
-      "type": "address",
-      "contract_function": "stakingToken",
-      "parameters": []
-    },
-    {
-      "name": "rewardToken",
-      "type": "address",
-      "contract_function": "rewardToken",
-      "parameters": []
-    },
-    {
-      "name": "PRECISION",
-      "type": "uint256",
-      "contract_function": "PRECISION",
-      "parameters": []
+      "name": "userPendingRewards",
+      "type": "tuple",
+      "contract_function": "userPendingReward",
+      "parameters": [
+        {
+          "name": "user",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface DFIREStakingSnapshot {\n  stakes: { [accountAddress: string]: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint } };\n  rewardSenderActive: boolean;\n  totalCollateralPerToken: bigint;\n  totalRewardPerToken: bigint;\n  totalStake: bigint;\n  userPendingReward: { [accountAddress: string]: [bigint, bigint] };\n  stakingToken: string;\n  rewardToken: string;\n  PRECISION: bigint;\n}",
+    "contract_snapshot_interface_code": "export interface IStake {stake: bigint;rewardSnapshot: bigint;collateralSnapshot: bigint;}export interface IDFIREStakingSnapshot {rewardSenderActive: boolean;totalCollateralPerToken: bigint;totalRewardPerToken: bigint;totalStake: bigint;userStake: IStake;userPendingRewards: {pendingRewardAmount: bigint;pendingCollateralReward: bigint;};}",
     "interface_name": "DFIREStakingSnapshot"
   }
 }
