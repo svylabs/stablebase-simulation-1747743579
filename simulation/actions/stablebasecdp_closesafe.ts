@@ -4,98 +4,141 @@ import { ethers } from "ethers";
 import { expect } from "chai";
 
 export class CloseSafeAction extends Action {
-    private contract: ethers.Contract;
+  private contract: ethers.Contract;
 
-    constructor(contract: ethers.Contract) {
-        super("CloseSafeAction");
-        this.contract = contract;
+  constructor(contract: ethers.Contract) {
+    super("CloseSafeAction");
+    this.contract = contract;
+  }
+
+  async initialize(
+    context: RunContext,
+    actor: Actor,
+    currentSnapshot: Snapshot
+  ): Promise<[boolean, any, Record<string, any>]> {
+    const stableBaseCDPSnapshot: any = currentSnapshot.contractSnapshot.stableBaseCDP;
+    const safeOwners = stableBaseCDPSnapshot.safeOwners;
+
+    let safeIdToClose: number | null = null;
+    for (const safeId in safeOwners) {
+      if (safeOwners.hasOwnProperty(safeId)) {
+        const owner = safeOwners[safeId];
+        if (owner === actor.account.address) {
+          const safeData = stableBaseCDPSnapshot.safesData[safeId];
+          if (safeData && safeData.borrowedAmount === BigInt(0)) {
+            safeIdToClose = parseInt(safeId, 10);
+            break;
+          }
+        }
+      }
     }
 
-    async initialize(
-        context: RunContext,
-        actor: Actor,
-        currentSnapshot: Snapshot
-    ): Promise<[boolean, any, Record<string, any>]> {
-        const safeId = actor.identifiers.safeId;
-
-        if (!safeId) {
-            console.log("Safe ID is missing for actor:", actor.account.address);
-            return [false, {}, {}];
-        }
-
-        // Check if safe exists and owned by the actor
-        const stableBaseCDPSnapshot: any = currentSnapshot.contractSnapshot.stableBaseCDP
-        const safeInfo: any = stableBaseCDPSnapshot.safes[safeId.toString()];
-
-        if (!safeInfo) {
-            console.log(`Safe with ID ${safeId} does not exist.`);
-            return [false, {}, {}];
-        }
-
-        // Check borrowed amount is 0
-        if (safeInfo.borrowedAmount !== BigInt(0)) {
-            console.log(`Safe with ID ${safeId} has non-zero borrowed amount: ${safeInfo.borrowedAmount}`);
-            return [false, {}, {}];
-        }
-
-        return [true, { safeId: BigInt(safeId) }, {}];
+    if (safeIdToClose === null) {
+      return [false, {}, {}];
     }
 
-    async execute(
-        context: RunContext,
-        actor: Actor,
-        currentSnapshot: Snapshot,
-        actionParams: any
-    ): Promise<ExecutionReceipt> {
-        const { safeId } = actionParams;
+    const actionParams = {
+      safeId: BigInt(safeIdToClose),
+    };
 
-        const tx = await this.contract
-            .connect(actor.account.value)
-            .closeSafe(safeId);
+    return [true, actionParams, {}];
+  }
 
-        const receipt = await tx.wait();
-        return { receipt };
+  async execute(
+    context: RunContext,
+    actor: Actor,
+    currentSnapshot: Snapshot,
+    actionParams: any
+  ): Promise<ExecutionReceipt> {
+    const tx = await this.contract
+      .connect(actor.account.value)
+      .closeSafe(actionParams.safeId);
+    return { receipt: await tx.wait(), events: [] };
+  }
+
+  async validate(
+    context: RunContext,
+    actor: Actor,
+    previousSnapshot: Snapshot,
+    newSnapshot: Snapshot,
+    actionParams: any,
+    executionReceipt: ExecutionReceipt
+  ): Promise<boolean> {
+    const safeId = Number(actionParams.safeId);
+    const previousStableBaseCDPSnapshot: any = previousSnapshot.contractSnapshot.stableBaseCDP;
+    const newStableBaseCDPSnapshot: any = newSnapshot.contractSnapshot.stableBaseCDP;
+    const previousDFIDTokenSnapshot: any = previousSnapshot.contractSnapshot.dfidToken;
+    const newDFIDTokenSnapshot: any = newSnapshot.contractSnapshot.dfidToken;
+
+    // Safe State Validation
+    expect(
+      newStableBaseCDPSnapshot.safesData[safeId],
+      "Safe should no longer exist in the safes mapping"
+    ).to.be.undefined;
+    expect(
+      newStableBaseCDPSnapshot.safeOwners[safeId],
+      "Safe owner should no longer exist"
+    ).to.be.undefined;
+
+    // Token Ownership Validation (ERC721)
+    if (previousStableBaseCDPSnapshot.safeOwners[safeId]) {
+    const previousSafeOwner = previousStableBaseCDPSnapshot.safeOwners[safeId];
+    const newSafeOwner = newStableBaseCDPSnapshot.safeOwners[safeId];
+    expect(
+      newSafeOwner,
+      "The owner of the token ID should be undefined (burned)"
+    ).to.be.undefined;
+
+    // ERC721 Balance Validation
+    const previousOwnerBalance = previousDFIDTokenSnapshot.balances[previousSafeOwner] || BigInt(0);
+    const newOwnerBalance = newDFIDTokenSnapshot.balances[previousSafeOwner] || BigInt(0);
+    expect(
+      newOwnerBalance,
+      "The balance of the previous owner should decrease by 1"
+    ).to.equal(previousOwnerBalance - BigInt(1));
     }
 
-    async validate(
-        context: RunContext,
-        actor: Actor,
-        previousSnapshot: Snapshot,
-        newSnapshot: Snapshot,
-        actionParams: any,
-        executionReceipt: ExecutionReceipt
-    ): Promise<boolean> {
-        const { safeId } = actionParams;
+    // Global State Validation
+    const previousTotalCollateral = previousStableBaseCDPSnapshot.totalCollateral;
+    const newTotalCollateral = newStableBaseCDPSnapshot.totalCollateral;
+    if(previousStableBaseCDPSnapshot.safesData[safeId]){
+      const collateralAmount = previousStableBaseCDPSnapshot.safesData[safeId].collateralAmount;
+      expect(
+        newTotalCollateral,
+        "Total collateral should be decreased by the collateralAmount of the closed Safe"
+      ).to.equal(previousTotalCollateral - collateralAmount);
 
-        const previousStableBaseCDPSnapshot: any = previousSnapshot.contractSnapshot.stableBaseCDP
-        const newStableBaseCDPSnapshot: any = newSnapshot.contractSnapshot.stableBaseCDP
+      const previousTotalDebt = previousStableBaseCDPSnapshot.totalDebt;
+      const newTotalDebt = newStableBaseCDPSnapshot.totalDebt;
+      expect(
+        newTotalDebt,
+        "Total debt should reflect the debt removed from the closed Safe"
+      ).to.equal(previousTotalDebt);
 
-        // Validate Safe is removed from `safes` mapping
-        expect(newStableBaseCDPSnapshot.safes[safeId.toString()], `safes[${safeId}] should not exist`).to.be.undefined;
-
-        // Validate totalCollateral decreased
-        const previousSafeInfo: any = previousStableBaseCDPSnapshot.safes[safeId.toString()];
-        const collateralAmount = previousSafeInfo.collateralAmount;
-
-        if (previousStableBaseCDPSnapshot.totalCollateral < collateralAmount) {
-            console.warn("Collateral amount is greater than total collateral. Validation may be incorrect.");
-        } else {
-            expect(newStableBaseCDPSnapshot.totalCollateral, "totalCollateral should decrease").to.equal(previousStableBaseCDPSnapshot.totalCollateral - collateralAmount);
-        }
-
-        //Validate totalDebt - impossible to assert on the exact value, but should be less or equal to totalDebt
-        expect(newStableBaseCDPSnapshot.totalDebt, "totalDebt should be less or equal").to.lessThanOrEqual(previousStableBaseCDPSnapshot.totalDebt);
-
-        // Validate ERC721 changes
-        const owner = await this.contract.ownerOf(safeId);
-        expect(owner).to.equal(ethers.constants.AddressZero, `ownerOf(${safeId}) should be address(0)`);
-
-        // Validate ERC721 changes for balances
-        const dfidToken = context.contracts.dfidToken;
-        const previousAccountBalance = previousSnapshot.contractSnapshot.dfidToken.balances[this.contract.target];
-        const newAccountBalance = newSnapshot.contractSnapshot.dfidToken.balances[this.contract.target];
-
-
-        return true;
+      // User Balance Validation
+      const previousAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+      const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+      expect(
+        newAccountBalance,
+        "User balance should increase by the collateralAmount of the closed Safe"
+      ).to.equal(previousAccountBalance + collateralAmount);
     }
+
+
+    //OrderedDoublyLinkedList validation
+    const previousSafesOrderedForLiquidation: any = previousSnapshot.contractSnapshot.safesOrderedForLiquidation;
+    const newSafesOrderedForLiquidation: any = newSnapshot.contractSnapshot.safesOrderedForLiquidation;
+
+    const previousSafesOrderedForRedemption: any = previousSnapshot.contractSnapshot.safesOrderedForRedemption;
+    const newSafesOrderedForRedemption: any = newSnapshot.contractSnapshot.safesOrderedForRedemption;
+
+    if(previousSafesOrderedForLiquidation.nodes[safeId]){
+      expect(newSafesOrderedForLiquidation.nodes[safeId], "Safe ID should not exist in liquidation list").to.be.undefined;
+    }
+    if(previousSafesOrderedForRedemption.nodes[safeId]){
+      expect(newSafesOrderedForRedemption.nodes[safeId], "Safe ID should not exist in redemption list").to.be.undefined;
+    }
+
+    return true;
+  }
 }
