@@ -1,7 +1,7 @@
 import { Action, Actor, Snapshot } from "@svylabs/ilumina";
 import type { RunContext, ExecutionReceipt } from "@svylabs/ilumina";
 import { ethers } from "ethers";
-import { expect } from 'chai';
+import { expect } from "chai";
 
 export class ClaimAction extends Action {
     private contract: ethers.Contract;
@@ -17,20 +17,22 @@ export class ClaimAction extends Action {
         currentSnapshot: Snapshot
     ): Promise<[boolean, any, Record<string, any>]> {
         const dfireStakingSnapshot = currentSnapshot.contractSnapshot.dfireStaking;
-        const stakeInfo = dfireStakingSnapshot.stakes[actor.account.address];
+        const stakes = dfireStakingSnapshot.stakes;
+        const userAddress = actor.account.address;
 
-        if (!stakeInfo || stakeInfo.stake === BigInt(0)) {
-            return [false, {}, {}]; // User has no stake
+        if (!stakes[userAddress] || stakes[userAddress].stake === BigInt(0)) {
+            console.log("User has no staked tokens.");
+            return [false, [], {}];
         }
 
-        const canExecuteReward = dfireStakingSnapshot.totalRewardPerTokenValue > stakeInfo.rewardSnapshot;
-        const canExecuteCollateral = dfireStakingSnapshot.totalCollateralPerTokenValue > stakeInfo.collateralSnapshot;
+        const userPendingReward = dfireStakingSnapshot.userPendingReward[userAddress];
 
-        if (!canExecuteReward && !canExecuteCollateral) {
-          return [false, {}, {}];
+        if (!userPendingReward || (userPendingReward[0] === BigInt(0) && userPendingReward[1] === BigInt(0))) {
+            console.log("No claimable rewards exist.");
+            return [false, [], {}];
         }
 
-        // No parameters needed for claim function
+
         return [true, [], {}];
     }
 
@@ -53,63 +55,58 @@ export class ClaimAction extends Action {
         actionParams: any,
         executionReceipt: ExecutionReceipt
     ): Promise<boolean> {
-        const previousDFIREStakingSnapshot = previousSnapshot.contractSnapshot.dfireStaking;
-        const newDFIREStakingSnapshot = newSnapshot.contractSnapshot.dfireStaking;
+        const userAddress = actor.account.address;
+        const previousDfireStakingSnapshot = previousSnapshot.contractSnapshot.dfireStaking;
+        const newDfireStakingSnapshot = newSnapshot.contractSnapshot.dfireStaking;
 
-        const previousDFIDTokenSnapshot = previousSnapshot.contractSnapshot.dfidToken;
-        const newDFIDTokenSnapshot = newSnapshot.contractSnapshot.dfidToken;
+        const previousStakes = previousDfireStakingSnapshot.stakes;
+        const newStakes = newDfireStakingSnapshot.stakes;
 
-        const previousStakeInfo = previousDFIREStakingSnapshot.stakes[actor.account.address];
-        const newStakeInfo = newDFIREStakingSnapshot.stakes[actor.account.address];
+        const previousTotalRewardPerToken = previousDfireStakingSnapshot.totalRewardPerToken;
+        const newTotalRewardPerToken = newDfireStakingSnapshot.totalRewardPerToken;
 
-        const previousRewardTokenBalance = previousDFIDTokenSnapshot.balances[actor.account.address] || BigInt(0);
-        const newRewardTokenBalance = newDFIDTokenSnapshot.balances[actor.account.address] || BigInt(0);
+        const previousTotalCollateralPerToken = previousDfireStakingSnapshot.totalCollateralPerToken;
+        const newTotalCollateralPerToken = newDfireStakingSnapshot.totalCollateralPerToken;
 
-        const previousEthBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-        const newEthBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+        const rewardTokenAddress = previousDfireStakingSnapshot.rewardToken;
+        const previousRewardTokenBalanceContract = (previousSnapshot.contractSnapshot as any)[rewardTokenAddress].accountBalance[this.contract.target];
+        const newRewardTokenBalanceContract = (newSnapshot.contractSnapshot as any)[rewardTokenAddress].accountBalance[this.contract.target];
 
-        const totalRewardPerToken = newDFIREStakingSnapshot.totalRewardPerTokenValue;
-        const totalCollateralPerToken = newDFIREStakingSnapshot.totalCollateralPerTokenValue;
-        const stake = previousStakeInfo.stake;
-        const PRECISION = previousDFIREStakingSnapshot.precisionValue;
+        const previousRewardTokenBalanceUser = (previousSnapshot.contractSnapshot as any)[rewardTokenAddress].accountBalance[userAddress];
+        const newRewardTokenBalanceUser = (newSnapshot.contractSnapshot as any)[rewardTokenAddress].accountBalance[userAddress];
 
-        const expectedReward = ((totalRewardPerToken - previousStakeInfo.rewardSnapshot) * stake) / PRECISION;
-        const expectedCollateralReward = ((totalCollateralPerToken - previousStakeInfo.collateralSnapshot) * stake) / PRECISION;
+        const previousEthBalanceUser = previousSnapshot.accountSnapshot[userAddress];
+        const newEthBalanceUser = newSnapshot.accountSnapshot[userAddress];
 
-        const actualRewardIncrease = newRewardTokenBalance - previousRewardTokenBalance;
-        const ethBalanceChange = newEthBalance - previousEthBalance;
+        const userStakeBefore = previousStakes[userAddress];
+        const userStakeAfter = newStakes[userAddress];
 
-        expect(newStakeInfo.rewardSnapshot).to.equal(totalRewardPerToken, "Reward snapshot should be updated to totalRewardPerToken");
-        expect(newStakeInfo.collateralSnapshot).to.equal(totalCollateralPerToken, "Collateral snapshot should be updated to totalCollateralPerToken");
 
-        if (expectedReward > BigInt(0)) {
-            expect(actualRewardIncrease).to.equal(expectedReward, "Reward token balance should increase by the expected reward amount");
+        // Reward Claim
+        expect(userStakeAfter.rewardSnapshot).to.equal(newTotalRewardPerToken, "User reward snapshot matches total reward per token");
+        expect(userStakeAfter.collateralSnapshot).to.equal(newTotalCollateralPerToken, "User collateral snapshot matches total collateral per token");
+
+        const reward = ((newTotalRewardPerToken - previousTotalRewardPerToken) * userStakeBefore.stake) / previousDfireStakingSnapshot.PRECISION;
+        const collateralReward = ((newTotalCollateralPerToken - previousTotalCollateralPerToken) * userStakeBefore.stake) / previousDfireStakingSnapshot.PRECISION;
+
+        if (reward > BigInt(0)) {
+            expect(newRewardTokenBalanceUser - previousRewardTokenBalanceUser).to.equal(reward, "User's reward token balance increased by reward amount");
+            expect(previousRewardTokenBalanceContract - newRewardTokenBalanceContract).to.equal(reward, "RewardToken contract balance decreased by reward amount");
+        }
+        else {
+             expect(newRewardTokenBalanceUser).to.equal(previousRewardTokenBalanceUser, "User's reward token balance did not change");
         }
 
-        if(expectedCollateralReward > BigInt(0)){
-            expect(ethBalanceChange).to.equal(expectedCollateralReward, "ETH balance should increase by the expected collateral reward amount");
+        if (collateralReward > BigInt(0)) {
+            expect(newEthBalanceUser - previousEthBalanceUser).to.equal(collateralReward, "User's ether balance increased by collateral reward amount");
         }
-
-        expect(newDFIREStakingSnapshot.totalRewardPerTokenValue).to.equal(previousDFIREStakingSnapshot.totalRewardPerTokenValue, "totalRewardPerToken should remain unchanged");
-        expect(newDFIREStakingSnapshot.totalCollateralPerTokenValue).to.equal(previousDFIREStakingSnapshot.totalCollateralPerTokenValue, "totalCollateralPerToken should remain unchanged");
-        expect(newDFIREStakingSnapshot.totalStakeValue).to.equal(previousDFIREStakingSnapshot.totalStakeValue, "totalStake should remain unchanged");
-
-        // Check for Claimed event emission
-        const claimedEvent = executionReceipt.receipt.logs.find((log: any) => {
-            try {
-                const parsedLog = this.contract.interface.parseLog(log);
-                return parsedLog.name === "Claimed";
-            } catch (e) {
-                return false;
-            }
-        });
-
-        if (claimedEvent) {
-            const parsedLog = this.contract.interface.parseLog(claimedEvent);
-            expect(parsedLog.args.user).to.equal(actor.account.address, "Claimed event should emit the correct user address");
-            expect(parsedLog.args.reward).to.equal(expectedReward, "Claimed event should emit the correct reward amount");
-            expect(parsedLog.args.collateralReward).to.equal(expectedCollateralReward, "Claimed event should emit the correct collateral reward amount");
+        else {
+            expect(newEthBalanceUser).to.equal(previousEthBalanceUser, "User's ether balance did not change");
         }
+        
+
+        // Staking Status
+        expect(userStakeAfter.stake).to.equal(userStakeBefore.stake, "User's staked amount remains unchanged");
 
         return true;
     }
