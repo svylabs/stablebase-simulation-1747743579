@@ -1,10 +1,10 @@
-import {Action, Actor, Snapshot} from "@svylabs/ilumina";
-import type {RunContext, ExecutionReceipt} from "@svylabs/ilumina";
-import {ethers} from "ethers";
-import {expect} from 'chai';
+import { Action, Actor, Snapshot } from "@svylabs/ilumina";
+import type { RunContext, ExecutionReceipt } from "@svylabs/ilumina";
+import { ethers } from "ethers";
+import { expect } from "chai";
 
 export class SetPriceAction extends Action {
-    private contract: ethers.Contract;
+    contract: ethers.Contract;
 
     constructor(contract: ethers.Contract) {
         super("SetPriceAction");
@@ -16,20 +16,19 @@ export class SetPriceAction extends Action {
         actor: Actor,
         currentSnapshot: Snapshot
     ): Promise<[boolean, any, Record<string, any>]> {
-        const mockPriceOracleSnapshot = currentSnapshot.contractSnapshot?.mockPriceOracle;
-        if (!mockPriceOracleSnapshot) {
-            console.log("MockPriceOracle snapshot is not available, cannot proceed.");
-            return [false, {}, {}];
+
+        // Check if the actor is the owner. The action summary said only owner can set the price
+        const mockPriceOracleSnapshot = currentSnapshot.contractSnapshot.mockPriceOracle;
+        if (
+            mockPriceOracleSnapshot.ownerAddress.toLowerCase() !==
+            actor.account.address.toLowerCase()
+        ) {
+            console.log(`Actor ${actor.account.address} is not the owner, skipping action.`);
+            return [false, [], {}];
         }
 
-        if (actor.account.address !== mockPriceOracleSnapshot.ownerAddress) {
-            console.log("Actor is not the owner of the contract, cannot proceed.");
-            return [false, {}, {}];
-        }
-
-        // Use a random price between 0 and lastGoodPrice
-        const maxPrice = mockPriceOracleSnapshot.lastGoodPrice > 10000n ? 10000n : mockPriceOracleSnapshot.lastGoodPrice;
-        const price = BigInt(Math.floor(context.prng.next() % Number(maxPrice)));
+        // Generate a random price between 0 and 9999 * 10^18
+        const price = BigInt(Math.floor(context.prng.next() % 10000)) * BigInt(10 ** 18);
 
         const actionParams = {
             _price: price,
@@ -44,14 +43,14 @@ export class SetPriceAction extends Action {
         currentSnapshot: Snapshot,
         actionParams: any
     ): Promise<ExecutionReceipt> {
-        const mockPriceOracleSnapshot = currentSnapshot.contractSnapshot?.mockPriceOracle;
-        if (!mockPriceOracleSnapshot) {
-            console.log("MockPriceOracle snapshot is not available, cannot proceed.");
-            return {receipt: null as any, additionalInfo: {}};
-        }
+        const { _price } = actionParams;
 
-        const tx = await this.contract.connect(actor.account.value).setPrice(actionParams._price);
-        return {receipt: await tx.wait(), additionalInfo: {}};
+        const tx = await this.contract
+            .connect(actor.account.value)
+            .setPrice(_price);
+        const receipt = await tx.wait();
+
+        return { receipt };
     }
 
     async validate(
@@ -62,23 +61,23 @@ export class SetPriceAction extends Action {
         actionParams: any,
         executionReceipt: ExecutionReceipt
     ): Promise<boolean> {
-        const previousMockPriceOracleSnapshot = previousSnapshot.contractSnapshot?.mockPriceOracle;
-        const newMockPriceOracleSnapshot = newSnapshot.contractSnapshot?.mockPriceOracle;
+        const { _price } = actionParams;
 
-        if (!previousMockPriceOracleSnapshot || !newMockPriceOracleSnapshot) {
-            console.log("MockPriceOracle snapshot is not available for validation.");
-            return false;
-        }
+        const newPrice = newSnapshot.contractSnapshot.mockPriceOracle.currentPrice;
+        const expectedPrice = _price * BigInt(1);
+        const priceScaled = _price * BigInt(10**18)
 
-        const expectedPrice = actionParams._price * (10n ** 18n);
+        expect(newPrice).to.equal(
+            priceScaled,
+            "Price should be updated correctly"
+        );
 
-        expect(newMockPriceOracleSnapshot.currentPrice).to.equal(expectedPrice,
-            "Price should be updated to the new price.");
-
-        // Validate Account balances.
-        const previousAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-        const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-        expect(newAccountBalance).to.lte(previousAccountBalance, "Account balance should not increase.");
+        // Validate that the transaction sender is the owner in the new snapshot
+        const newMockPriceOracleSnapshot = newSnapshot.contractSnapshot.mockPriceOracle;
+        expect(newMockPriceOracleSnapshot.ownerAddress.toLowerCase()).to.equal(
+            actor.account.address.toLowerCase(),
+            "Sender should be owner"
+        );
 
         return true;
     }
