@@ -1,7 +1,7 @@
 {
   "attributes": [
     {
-      "name": "Allowance",
+      "name": "allowanceAmount",
       "type": "uint256",
       "contract_function": "allowance",
       "parameters": [
@@ -18,7 +18,7 @@
       ]
     },
     {
-      "name": "Balance",
+      "name": "accountBalance",
       "type": "uint256",
       "contract_function": "balanceOf",
       "parameters": [
@@ -30,44 +30,44 @@
       ]
     },
     {
-      "name": "Decimals",
+      "name": "decimalPlaces",
       "type": "uint8",
       "contract_function": "decimals",
       "parameters": []
     },
     {
-      "name": "Name",
+      "name": "tokenName",
       "type": "string",
       "contract_function": "name",
       "parameters": []
     },
     {
-      "name": "Owner",
+      "name": "contractOwner",
       "type": "address",
       "contract_function": "owner",
       "parameters": []
     },
     {
-      "name": "Symbol",
+      "name": "tokenSymbol",
       "type": "string",
       "contract_function": "symbol",
       "parameters": []
     },
     {
-      "name": "TotalBurned",
+      "name": "burnedSupply",
       "type": "uint256",
       "contract_function": "totalBurned",
       "parameters": []
     },
     {
-      "name": "TotalSupply",
+      "name": "totalTokenSupply",
       "type": "uint256",
       "contract_function": "totalSupply",
       "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface DFIRETokenSnapshot {\n  allowances: { [owner: string]: { [spender: string]: bigint } };\n  balances: { [account: string]: bigint };\n  decimals: bigint;\n  name: string;\n  owner: string;\n  symbol: string;\n  totalBurned: bigint;\n  totalSupply: bigint;\n}",
+    "contract_snapshot_interface_code": "interface DFIRETokenSnapshot {\n  allowanceAmount: { [owner: string]: { [spender: string]: bigint } };\n  accountBalance: { [accountAddress: string]: bigint };\n  decimalPlaces: bigint;\n  tokenName: string;\n  contractOwner: string;\n  tokenSymbol: string;\n  burnedSupply: bigint;\n  totalTokenSupply: bigint;\n}",
     "interface_name": "DFIRETokenSnapshot"
   }
 }
