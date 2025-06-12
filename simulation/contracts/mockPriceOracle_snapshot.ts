@@ -9,23 +9,33 @@ import { MockPriceOracleSnapshot } from './snapshot_interfaces';
  * @param contract - ethers.Contract instance
  * @returns Promise returning the interface MockPriceOracleSnapshot
  */
-export async function takemockPriceOracleContractSnapshot(contract: ethers.Contract): Promise<MockPriceOracleSnapshot> {
-  try {
-    const lastGoodPrice: bigint = BigInt(await contract.lastGoodPrice());
-    const currentPrice: bigint = BigInt(await contract.price());
-    const fetchedPrice: bigint = BigInt(await contract.fetchPrice());
-    const ownerAddress: string = await contract.owner();
+export async function takemockPriceOracleContractSnapshot(
+    contract: ethers.Contract,
+    actors: Actor[]
+): Promise<MockPriceOracleSnapshot> {
+    try {
+        const priceFromFetch: bigint = BigInt(await contract.fetchPrice());
+        const lastGoodPrice: bigint = BigInt(await contract.lastGoodPrice());
+        const currentPrice: bigint = BigInt(await contract.price());
+        const ownerAddress: string = await contract.owner();
 
-    const snapshot: MockPriceOracleSnapshot = {
-      lastGoodPrice,
-      currentPrice,
-      fetchedPrice,
-      ownerAddress,
-    };
+        const snapshot: MockPriceOracleSnapshot = {
+            priceFromFetch,
+            lastGoodPrice,
+            currentPrice,
+            ownerAddress
+        };
 
-    return snapshot;
-  } catch (error: any) {
-    console.error('Error taking MockPriceOracle snapshot:', error);
-    throw new Error(`Failed to take MockPriceOracle snapshot: ${error.message} while calling ${error.method}`);
-  }
+        // Iterate through actors (currently no user-specific data is fetched)
+        for (const actor of actors) {
+            const identifiers = actor.getIdentifiers();
+            console.log(`Actor identifiers:`, identifiers);
+            //Add more logic to fetch user specific data if any.
+        }
+
+        return snapshot;
+    } catch (error: any) {
+        console.error('Error taking MockPriceOracle snapshot:', error);
+        throw new Error(`Failed to take MockPriceOracle snapshot: ${error.message}`);
+    }
 }

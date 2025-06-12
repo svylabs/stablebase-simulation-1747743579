@@ -7,43 +7,68 @@ import { DFIDTokenSnapshot } from './snapshot_interfaces';
 /**
  * Takes a snapshot of DFIDToken state
  * @param contract - ethers.Contract instance
- * @param actors - Array of Actor instances
+ * @param actors - Array of Actor instances. Each actor should have an 'accountAddress' identifier.
  * @returns Promise returning the interface DFIDTokenSnapshot
  */
 export async function takedfidTokenContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<DFIDTokenSnapshot> {
   try {
+    const contractAddress = await contract.getAddress();
     const allowances: { [owner: string]: { [spender: string]: bigint } } = {};
     const balances: { [account: string]: bigint } = {};
 
-    const decimals = Number(await contract.decimals());
-    const name = await contract.name();
-    const owner = await contract.owner();
-    const symbol = await contract.symbol();
-    const totalBurned = BigInt(await contract.totalBurned());
-    const totalSupply = BigInt(await contract.totalSupply());
+    // Fetch decimals, name, owner, symbol, totalBurned, and totalSupply in parallel
+    const [decimals, name, owner, symbol, totalBurned, totalSupply] = await Promise.all([
+      contract.decimals(),
+      contract.name(),
+      contract.owner(),
+      contract.symbol(),
+      contract.totalBurned(),
+      contract.totalSupply(),
+    ]);
 
+    // Iterate through each actor to fetch account-specific data
     for (const actor of actors) {
       const accountAddress = actor.getIdentifiers().accountAddress as string;
 
-      balances[accountAddress] = BigInt(await contract.balanceOf(accountAddress));
+      // Fetch account balance
+      try {
+        balances[accountAddress] = (await contract.balanceOf(accountAddress)) as bigint;
+      } catch (err: any) {
+        console.error(`Error fetching balance for account ${accountAddress} on contract ${contractAddress}: ${err.message}`);
+        balances[accountAddress] = BigInt(0);
+      }
 
+      // Fetch allowances for each spender that the account has approved
       allowances[accountAddress] = {};
-            // Fetch allowance only against the owner themselves
-      allowances[accountAddress][accountAddress] = BigInt(await contract.allowance(accountAddress, accountAddress));
+
+      // Check if the actor has a 'spenders' identifier, otherwise default to all actors
+      const spenders = (actor.getIdentifiers().spenders as string[]) || actors.map(a => a.getIdentifiers().accountAddress as string);
+
+      for (const spenderAddress of spenders) {
+          if(typeof spenderAddress !== 'string') continue;
+        try {
+          allowances[accountAddress][spenderAddress] = (await contract.allowance(accountAddress, spenderAddress)) as bigint;
+        } catch (err: any) {
+          console.error(`Error fetching allowance for owner ${accountAddress} and spender ${spenderAddress} on contract ${contractAddress}: ${err.message}`);
+          allowances[accountAddress][spenderAddress] = BigInt(0);
+        }
+      }
     }
 
-    return {
+    const snapshot: DFIDTokenSnapshot = {
       allowances,
       balances,
-      decimals,
-      name,
-      owner,
-      symbol,
-      totalBurned,
-      totalSupply,
+      decimals: decimals,
+      name: name,
+      owner: owner,
+      symbol: symbol,
+      totalBurned: totalBurned as bigint,
+      totalSupply: totalSupply as bigint,
     };
-  } catch (error) {
-    console.error('Error taking DFIDToken snapshot:', error);
-    throw error;
+
+    return snapshot;
+  } catch (error: any) {
+    console.error("Error taking DFIDToken contract snapshot:", error);
+    throw new Error(`Failed to take DFIDToken contract snapshot: ${error.message}`);
   }
 }

@@ -2,53 +2,75 @@
 
 import { ethers } from 'ethers';
 import { Actor } from '@svylabs/ilumina';
-import { DFIREStakingSnapshot, StakeInfo } from './snapshot_interfaces';
+import { DFIREStakingSnapshot } from './snapshot_interfaces';
 
 /**
  * Takes a snapshot of DFIREStaking state
  * @param contract - ethers.Contract instance
- * @param actors - Array of Actor instances
+ * @param actors - An array of Actor objects to fetch user-specific data.
  * @returns Promise returning the interface DFIREStakingSnapshot
  */
 export async function takedfireStakingContractSnapshot(contract: ethers.Contract, actors: Actor[]): Promise<DFIREStakingSnapshot> {
   try {
-    const precisionValue = await contract.PRECISION() as bigint;
-    const isRewardSenderActive = await contract.rewardSenderActive() as boolean;
-    const totalCollateralPerTokenValue = await contract.totalCollateralPerToken() as bigint;
-    const totalRewardPerTokenValue = await contract.totalRewardPerToken() as bigint;
-    const totalStakeValue = await contract.totalStake() as bigint;
+    const stakes: { [accountAddress: string]: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint } } = {};
+    const userPendingReward: { [accountAddress: string]: [bigint, bigint] } = {};
 
-    const stakes: { [accountAddress: string]: StakeInfo } = {};
-
+    // Fetch stakes and userPendingReward for each actor (user)
     for (const actor of actors) {
-      const accountAddress = actor.accountAddress;
-      if (!accountAddress) {
-        console.warn(`Actor ${actor.id} has no accountAddress. Skipping stake info fetch.`);
-        continue;
-      }
+      const identifiers = actor.getIdentifiers();
+      const accountAddress = identifiers.accountAddress as string;
 
-      try {
-        const [stake, rewardSnapshot, collateralSnapshot] = await contract.stakes(accountAddress) as [bigint, bigint, bigint];
-        stakes[accountAddress] = {
-          stake,
-          rewardSnapshot,
-          collateralSnapshot,
-        };
-      } catch (error: any) {
-        console.error(`Error fetching stake info for actor ${actor.id} with address ${accountAddress}: ${error.message}`);
+      if (accountAddress) {
+        try {
+          const stakeData = await contract.stakes(accountAddress);
+          stakes[accountAddress] = {
+            stake: BigInt(stakeData.stake),
+            rewardSnapshot: BigInt(stakeData.rewardSnapshot),
+            collateralSnapshot: BigInt(stakeData.collateralSnapshot),
+          };
+        } catch (error: any) {
+          console.error(`Error fetching stake data for address ${accountAddress}: ${error.message}`);
+          // Handle the error appropriately, e.g., set default values or skip the user
+          stakes[accountAddress] = { stake: BigInt(0), rewardSnapshot: BigInt(0), collateralSnapshot: BigInt(0) };
+        }
+
+        try {
+          const pendingRewardData = await contract.userPendingReward(accountAddress);
+          userPendingReward[accountAddress] = [BigInt(pendingRewardData[0]), BigInt(pendingRewardData[1])];
+        } catch (error: any) {
+          console.error(`Error fetching pending reward data for address ${accountAddress}: ${error.message}`);
+          // Handle the error appropriately, e.g., set default values or skip the user
+          userPendingReward[accountAddress] = [BigInt(0), BigInt(0)];
+        }
       }
     }
 
-    return {
-      precisionValue,
-      isRewardSenderActive,
+    const [rewardSenderActive, totalCollateralPerToken, totalRewardPerToken, totalStake, stakingToken, rewardToken, PRECISION] = await Promise.all([
+      contract.rewardSenderActive(),
+      contract.totalCollateralPerToken(),
+      contract.totalRewardPerToken(),
+      contract.totalStake(),
+      contract.stakingToken(),
+      contract.rewardToken(),
+      contract.PRECISION()
+    ]);
+
+
+    const snapshot: DFIREStakingSnapshot = {
       stakes,
-      totalCollateralPerTokenValue,
-      totalRewardPerTokenValue,
-      totalStakeValue,
+      rewardSenderActive,
+      totalCollateralPerToken: BigInt(totalCollateralPerToken),
+      totalRewardPerToken: BigInt(totalRewardPerToken),
+      totalStake: BigInt(totalStake),
+      userPendingReward,
+      stakingToken,
+      rewardToken,
+      PRECISION: BigInt(PRECISION),
     };
+
+    return snapshot;
   } catch (error: any) {
-    console.error(`Error taking DFIREStaking snapshot: ${error.message}`);
-    throw new Error(`Failed to snapshot DFIREStaking contract: ${error.message}`);
+    console.error(`Error taking DFIREStaking contract snapshot: ${error.message}`);
+    throw new Error(`Failed to take DFIREStaking contract snapshot: ${error.message}`);
   }
 }

@@ -30,7 +30,7 @@ export interface ContractSnapshot {
 
     dfireStaking: DFIREStakingSnapshot;
 
-    stabilityPool: StabilityPoolSnapshot;
+    stabilityPool: IStabilityPoolSnapshot;
 
     stableBaseCDP: StableBaseCDPSnapshot;
 
