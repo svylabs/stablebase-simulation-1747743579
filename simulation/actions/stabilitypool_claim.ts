@@ -1,7 +1,20 @@
-import { Action, Actor, Snapshot } from "@svylabs/ilumina";
-import type { RunContext, ExecutionReceipt } from "@svylabs/ilumina";
-import { ethers } from "ethers";
-import { expect } from 'chai';
+import {Action, Actor, Snapshot} from "@svylabs/ilumina";
+import type {RunContext, ExecutionReceipt} from "@svylabs/ilumina";
+import {expect} from 'chai';
+import type { ethers } from "ethers";
+import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
+
+// Define StabilityPoolSBRRewardDistribution enum values as BigInts
+const SBRRewardDistribution = {
+    NOT_STARTED: 0n,
+    STARTED: 1n,
+    ENDED: 2n,
+    CLAIMED: 3n
+};
+
+// Define constants from contract context
+const PRECISION = 10n**18n;
+const BASIS_POINTS_DIVISOR = 10000n;
 
 export class ClaimAction extends Action {
     private contract: ethers.Contract;
@@ -16,15 +29,19 @@ export class ClaimAction extends Action {
         actor: Actor,
         currentSnapshot: Snapshot
     ): Promise<[boolean, any, Record<string, any>]> {
-        const stabilityPoolSnapshot = currentSnapshot.contractSnapshot.stabilityPool;
         const userAddress = actor.account.address;
-        const userInfo = stabilityPoolSnapshot.users[userAddress];
+        const userStabilityPoolInfo = currentSnapshot.contractSnapshot.stabilityPool.users[userAddress];
 
-        if (!userInfo || userInfo.stake <= BigInt(0)) {
+        // The claim() function checks if user.stake > 0.
+        // If the user has no stake, the action cannot be executed.
+        if (!userStabilityPoolInfo || userStabilityPoolInfo.stake === 0n) {
+            context.log.info(`ClaimAction: User ${userAddress} has no stake or no info, cannot claim.`);
             return [false, {}, {}];
         }
 
-        return [true, [], {}];
+        context.log.info(`ClaimAction: User ${userAddress} has stake ${userStabilityPoolInfo.stake}, proceeding to claim.`);
+        // The claim() function takes no parameters.
+        return [true, {}, {}]; // No parameters needed for claim()
     }
 
     async execute(
@@ -33,14 +50,14 @@ export class ClaimAction extends Action {
         currentSnapshot: Snapshot,
         actionParams: any
     ): Promise<ExecutionReceipt> {
-        try {
-            const tx = await this.contract.connect(actor.account.value).claim();
-            const receipt = await tx.wait();
-            return { receipt };
-        } catch (error) {
-            console.error("Claim execution failed:", error);
-            throw error;
-        }
+        context.log.info(`Executing Claim action for user ${actor.account.address}`);
+        const signer = actor.account.value as HardhatEthersSigner;
+        
+        // Call the claim() function on the StabilityPool contract
+        const tx = await this.contract.connect(signer).claim();
+        const receipt = await tx.wait();
+        context.log.info(`Claim action transaction hash: ${receipt.hash}`);
+        return receipt;
     }
 
     async validate(
@@ -51,99 +68,168 @@ export class ClaimAction extends Action {
         actionParams: any,
         executionReceipt: ExecutionReceipt
     ): Promise<boolean> {
+        context.log.info(`Validating Claim action for user ${actor.account.address}`);
         const userAddress = actor.account.address;
-        const previousStabilityPool = previousSnapshot.contractSnapshot.stabilityPool;
-        const newStabilityPool = newSnapshot.contractSnapshot.stabilityPool;
-        const previousDFIDToken = previousSnapshot.contractSnapshot.dfidToken;
-        const newDFIDToken = newSnapshot.contractSnapshot.dfidToken;
-        const previousDFIREToken = previousSnapshot.contractSnapshot.dfireToken;
-        const newDFIREToken = newSnapshot.contractSnapshot.dfireToken;
+        const currentTimestamp = BigInt(executionReceipt.blockTimestamp);
 
-        const previousUserInfo = previousStabilityPool.users[userAddress];
-        const newUserInfo = newStabilityPool.users[userAddress];
+        const previousUser = previousSnapshot.contractSnapshot.stabilityPool.users[userAddress];
+        const newUser = newSnapshot.contractSnapshot.stabilityPool.users[userAddress];
 
-        // Validate reward snapshot update
-        expect(newUserInfo.rewardSnapshot).to.equal(newStabilityPool.totalRewardPerToken, "Reward snapshot should be updated");
+        const previousSBRSnapshot = previousSnapshot.contractSnapshot.stabilityPool.sbrRewardSnapshots[userAddress];
+        const newSBRSnapshot = newSnapshot.contractSnapshot.stabilityPool.sbrRewardSnapshots[userAddress];
 
-        // Validate collateral snapshot update
-        expect(newUserInfo.collateralSnapshot).to.equal(newStabilityPool.totalCollateralPerToken, "Collateral snapshot should be updated");
+        const previousPool = previousSnapshot.contractSnapshot.stabilityPool;
+        const newPool = newSnapshot.contractSnapshot.stabilityPool;
 
-        //Validate cumulativeProductScalingFactor update
-        expect(newUserInfo.cumulativeProductScalingFactor).to.equal(newStabilityPool.stakeScalingFactor, "cumulativeProductScalingFactor should be updated");
+        const previousDFIDBalance = previousSnapshot.contractSnapshot.dfidToken.accountBalances[userAddress] || 0n;
+        const newDFIDBalance = newSnapshot.contractSnapshot.dfidToken.accountBalances[userAddress] || 0n;
 
-        //Validate stakeResetCount update
-        expect(newUserInfo.stakeResetCount).to.equal(newStabilityPool.stakeResetCount, "stakeResetCount should be updated");
+        const previousDFIREBalance = previousSnapshot.contractSnapshot.dfireToken.accounts[userAddress]?.balance || 0n;
+        const newDFIREBalance = newSnapshot.contractSnapshot.dfireToken.accounts[userAddress]?.balance || 0n;
 
-        const previousSBRRewardSnapshot = previousStabilityPool.sbrRewardSnapshots[userAddress];
-        const newSBRRewardSnapshot = newStabilityPool.sbrRewardSnapshots[userAddress];
+        const previousDFIRETotalSupply = previousSnapshot.contractSnapshot.dfireToken.totalTokenSupply;
+        const newDFIRETotalSupply = newSnapshot.contractSnapshot.dfireToken.totalTokenSupply;
+        
+        const previousETHBalance = previousSnapshot.accountSnapshot[userAddress] || 0n;
+        const newETHBalance = newSnapshot.accountSnapshot[userAddress] || 0n;
 
-        // Assuming 2 represents the ENDED state, add a comment to explain.
-        //sbrRewardDistributionStatus: 0 - NOT_STARTED, 1 - STARTED, 2 - ENDED
-        if (newStabilityPool.sbrRewardDistributionStatus != 2) {
-            // Validate SBR reward snapshot update
-            expect(newSBRRewardSnapshot.rewardSnapshot).to.equal(newStabilityPool.totalSbrRewardPerToken, "SBR reward snapshot should be updated");
-        } else if (
-            previousSBRRewardSnapshot.status != 2
-        ) {
-            // Validate SBR reward status update
-            expect(newSBRRewardSnapshot.status).to.equal(2, "SBR reward status should be CLAIMED");
-        }
+        // Calculate gas cost (ethers.js returns gasUsed and gasPrice as BigInts)
+        const gasUsed = executionReceipt.gasUsed * executionReceipt.gasPrice;
 
-        const pendingRewardBefore = previousStabilityPool.userPendingReward[userAddress] || BigInt(0);
-        const pendingCollateralBefore = previousStabilityPool.userPendingCollateral[userAddress] || BigInt(0);
-        const pendingSbrRewardsBefore = previousStabilityPool.userPendingRewardAndCollateral[userAddress]?.[2] || BigInt(0);
+        // 1. Retrieve expected pending rewards, collateral, and SBR based on the previous snapshot
+        // This data comes from the `userPendingRewardAndCollateral` view function in the StabilityPool contract.
+        // Assuming this snapshot function returns the *gross* amounts before fees, and fees are 0 for claim() as per prompt.
+        const [expectedPendingReward, expectedPendingCollateral, expectedPendingSbrRewards] = 
+            previousSnapshot.contractSnapshot.stabilityPool.userPendingRewardAndCollateral[userAddress] || [0n, 0n, 0n];
 
-        const BASIS_POINTS_DIVISOR = BigInt(10000);
-        const rewardFee = (pendingRewardBefore * BASIS_POINTS_DIVISOR) / BASIS_POINTS_DIVISOR;
-        const collateralFee = (pendingCollateralBefore * BASIS_POINTS_DIVISOR) / BASIS_POINTS_DIVISOR;
-        const sbrFee = (pendingSbrRewardsBefore * BASIS_POINTS_DIVISOR) / BASIS_POINTS_DIVISOR;
-
-        const expectedStakingTokenIncrease = pendingRewardBefore - rewardFee;
-        const actualStakingTokenIncrease = (newDFIDToken.balances[userAddress] || BigInt(0)) - (previousDFIDToken.balances[userAddress] || BigInt(0));
-        expect(actualStakingTokenIncrease).to.equal(expectedStakingTokenIncrease, "Staking token balance should increase by claimed amount");
-
-        // Validate ETH balance change for user
-        const expectedETHIncrease = pendingCollateralBefore - collateralFee;
-        const actualETHIncrease = (newSnapshot.accountSnapshot[userAddress] || BigInt(0)) - (previousSnapshot.accountSnapshot[userAddress] || BigInt(0));
-        expect(actualETHIncrease).to.equal(expectedETHIncrease, "ETH balance should increase by claimed amount");
-
-        // Validate sbrToken balance change for user
-        const expectedSBRTokenIncrease = pendingSbrRewardsBefore - sbrFee;
-        const actualSBRTokenIncrease = (newDFIREToken.accountBalance[userAddress] || BigInt(0)) - (previousDFIREToken.accountBalance[userAddress] || BigInt(0));
-        expect(actualSBRTokenIncrease).to.equal(expectedSBRTokenIncrease, "SBR token balance should increase by claimed amount");
-
-        // Validate events
-        const rewardClaimedEvent = executionReceipt.receipt.logs.find((log: any) => {
-            try {
-                const parsedLog = this.contract.interface.parseLog(log);
-                return parsedLog && parsedLog.name === "RewardClaimed";
-            } catch (e) {
-                return false;
+        // 2. Validate User Specific State Updates within StabilityPool (users[msg.sender])
+        expect(newUser.rewardSnapshot, "User's rewardSnapshot should be updated to current totalRewardPerToken").to.equal(newPool.totalRewardPerToken);
+        expect(newUser.collateralSnapshot, "User's collateralSnapshot should be updated to current totalCollateralPerToken").to.equal(newPool.totalCollateralPerToken);
+        expect(newUser.cumulativeProductScalingFactor, "User's cumulativeProductScalingFactor should be updated to current stakeScalingFactor").to.equal(newPool.stakeScalingFactor);
+        expect(newUser.stakeResetCount, "User's stakeResetCount should be updated to current stakeResetCount").to.equal(newPool.stakeResetCount);
+        
+        // Implement _getUserEffectiveStake for validation purposes to check newUser.stake
+        const _getUserEffectiveStake = (user: any, pool: any): bigint => {
+            let stake: bigint;
+            if (user.cumulativeProductScalingFactor === 0n) {
+                // As per _updateUserStake, if cumulativeProductScalingFactor is 0, stake is not adjusted.
+                return user.stake;
             }
-        });
 
-        if (rewardClaimedEvent) {
-            const parsedLog = this.contract.interface.parseLog(rewardClaimedEvent);
-            expect(parsedLog.args.user).to.equal(userAddress, "RewardClaimed event should have correct user");
-            // Add more validation for reward, rewardFee, collateral, collateralFee if needed
+            if (user.stakeResetCount === pool.stakeResetCount) {
+                stake = (((user.stake * pool.stakeScalingFactor) * PRECISION) / user.cumulativeProductScalingFactor) / PRECISION;
+            } else {
+                const snapshot = pool.stakeResetSnapshots[Number(user.stakeResetCount)];
+                stake = ((user.stake * snapshot.scalingFactor * PRECISION) / user.cumulativeProductScalingFactor) / PRECISION;
+
+                if (user.stakeResetCount + 1n !== pool.stakeResetCount) {
+                    const nextSnapshot = pool.stakeResetSnapshots[Number(user.stakeResetCount + 1n)];
+                    stake = (stake * nextSnapshot.scalingFactor) / PRECISION;
+                } else {
+                    stake = (stake * pool.stakeScalingFactor) / PRECISION;
+                }
+            }
+            return stake;
+        };
+        
+        // Only adjust stake if `user.cumulativeProductScalingFactor` was not 0 prior to update
+        if (previousUser.cumulativeProductScalingFactor !== 0n) {
+            const expectedEffectiveStake = _getUserEffectiveStake(previousUser, previousPool);
+            expect(newUser.stake, "User's stake should be updated to its calculated effective stake").to.equal(expectedEffectiveStake);
         } else {
-            expect.fail("RewardClaimed event was not emitted");
+             // If cumulativeProductScalingFactor was 0, _updateUserStake does not modify `user.stake`.
+             expect(newUser.stake, "User's stake should not change if cumulativeProductScalingFactor was 0").to.equal(previousUser.stake);
         }
 
-        const dFireRewardClaimedEvent = executionReceipt.receipt.logs.find((log: any) => {
-            try {
-                const parsedLog = this.contract.interface.parseLog(log);
-                return parsedLog && parsedLog.name === "DFireRewardClaimed";
-            } catch (e) {
-                return false;
-            }
-        });
+        // 3. Validate SBR Reward Snapshots (sbrRewardSnapshots[msg.sender])
+        if (previousPool.sbrRewardDistributionStatus !== SBRRewardDistribution.ENDED) {
+            // If SBR distribution is not ended, rewardSnapshot should be updated.
+            expect(newSBRSnapshot?.rewardSnapshot, "User's SBR rewardSnapshot updated").to.equal(newPool.totalSbrRewardPerToken);
+        } else if (previousSBRSnapshot?.status !== SBRRewardDistribution.CLAIMED) {
+            // If SBR distribution ended and not yet claimed, status should be CLAIMED.
+            expect(newSBRSnapshot?.status, "User's SBR reward status set to CLAIMED").to.equal(SBRRewardDistribution.CLAIMED);
+        }
 
-        if (dFireRewardClaimedEvent) {
-            const parsedLog = this.contract.interface.parseLog(dFireRewardClaimedEvent);
-            expect(parsedLog.args.user).to.equal(userAddress, "DFireRewardClaimed event should have correct user");
-            // Add more validation for sbrReward, sbrRewardFee if needed
-        } // It's possible that this event is not emitted if there were no SBR rewards
+        // 4. Validate Balance Updates for Claiming User
+        // Fees are 0 for the external claim() function.
+        expect(newDFIDBalance, "DFID Token balance should increase by pending reward").to.equal(previousDFIDBalance + expectedPendingReward);
+        expect(newETHBalance, "Native Token balance should increase by pending collateral minus gas cost").to.equal(previousETHBalance + expectedPendingCollateral - gasUsed);
+        expect(newDFIREBalance, "DFIRE Token balance should increase by pending SBR rewards").to.equal(previousDFIREBalance + expectedPendingSbrRewards);
+        expect(newDFIRETotalSupply, "DFIRE Token total supply should increase by pending SBR rewards").to.equal(previousDFIRETotalSupply + expectedPendingSbrRewards);
+
+        // 5. Validate Protocol-Wide SBR Reward Distribution Updates
+        let expectedLastSBRRewardDistributedTime = previousPool.lastSBRRewardDistributedTime;
+        let expectedSbrRewardDistributionStatus = previousPool.sbrRewardDistributionStatus;
+        let expectedSbrRewardDistributionEndTime = previousPool.sbrRewardDistributionEndTime;
+        let expectedTotalSbrRewardPerToken = previousPool.totalSbrRewardPerToken;
+        let expectedSbrRewardLoss = previousPool.sbrRewardLoss;
+        let expectedSbrRewardsAddedEventAmount = 0n; // Corresponds to `sbrReward` in Solidity's _addSBRRewards
+
+        // The _addSBRRewards function is called if sbrRewardDistributionStatus is not ENDED
+        if (previousPool.sbrRewardDistributionStatus !== SBRRewardDistribution.ENDED) {
+            // lastSBRRewardDistributedTime is always updated to currentTimestamp if _addSBRRewards is called
+            expectedLastSBRRewardDistributedTime = currentTimestamp;
+
+            if (previousPool.sbrRewardDistributionStatus === SBRRewardDistribution.STARTED) {
+                let timeElapsed = currentTimestamp - previousPool.lastSBRRewardDistributedTime;
+
+                // Handle potential status change within _addSBRRewards due to end time
+                if (currentTimestamp > previousPool.sbrRewardDistributionEndTime) {
+                    expectedSbrRewardDistributionStatus = SBRRewardDistribution.ENDED;
+                    timeElapsed = previousPool.sbrRewardDistributionEndTime - previousPool.lastSBRRewardDistributedTime;
+                }
+
+                expectedSbrRewardsAddedEventAmount = timeElapsed * previousPool.sbrDistributionRate;
+
+                if (previousPool.totalStakedRaw > 0n) {
+                    const _sbrRewardWithLoss = expectedSbrRewardsAddedEventAmount + previousPool.sbrRewardLoss;
+                    const _totalSbrRewardPerTokenIncrease = ((_sbrRewardWithLoss * previousPool.stakeScalingFactor * PRECISION) / previousPool.totalStakedRaw) / PRECISION;
+                    expectedTotalSbrRewardPerToken = previousPool.totalSbrRewardPerToken + _totalSbrRewardPerTokenIncrease;
+                    expectedSbrRewardLoss = _sbrRewardWithLoss - ((_totalSbrRewardPerTokenIncrease * previousPool.totalStakedRaw * PRECISION) / previousPool.stakeScalingFactor) / PRECISION;
+                }
+            } else if (previousPool.sbrRewardDistributionStatus === SBRRewardDistribution.NOT_STARTED) {
+                // When NOT_STARTED, it transitions to STARTED, sets end time, but doesn't update totalSbrRewardPerToken or sbrRewardLoss yet.
+                expectedSbrRewardDistributionStatus = SBRRewardDistribution.STARTED;
+                expectedSbrRewardDistributionEndTime = currentTimestamp + (365n * 24n * 60n * 60n); // 365 days in seconds
+            }
+        }
+
+        expect(newPool.lastSBRRewardDistributedTime, "lastSBRRewardDistributedTime mismatch").to.equal(expectedLastSBRRewardDistributedTime);
+        expect(newPool.sbrRewardDistributionStatus, "sbrRewardDistributionStatus mismatch").to.equal(expectedSbrRewardDistributionStatus);
+        expect(newPool.sbrRewardDistributionEndTime, "sbrRewardDistributionEndTime mismatch").to.equal(expectedSbrRewardDistributionEndTime);
+        expect(newPool.totalSbrRewardPerToken, "totalSbrRewardPerToken mismatch").to.equal(expectedTotalSbrRewardPerToken);
+        expect(newPool.sbrRewardLoss, "sbrRewardLoss mismatch").to.equal(expectedSbrRewardLoss);
+
+        // 6. Validate Event Emissions
+        const rewardClaimedEvent = executionReceipt.events?.find(e => e.eventName === 'RewardClaimed');
+        expect(rewardClaimedEvent, "RewardClaimed event must be emitted").to.exist;
+        expect(rewardClaimedEvent?.args?.user, "RewardClaimed: user address mismatch").to.equal(userAddress);
+        expect(rewardClaimedEvent?.args?.totalReward, "RewardClaimed: total reward mismatch").to.equal(expectedPendingReward);
+        expect(rewardClaimedEvent?.args?.rewardFrontendFee, "RewardClaimed: reward frontend fee should be 0").to.equal(0n);
+        expect(rewardClaimedEvent?.args?.totalCollateral, "RewardClaimed: total collateral mismatch").to.equal(expectedPendingCollateral);
+        expect(rewardClaimedEvent?.args?.collateralFrontendFee, "RewardClaimed: collateral frontend fee should be 0").to.equal(0n);
+
+        if (expectedPendingSbrRewards > 0n) {
+            const dfireRewardClaimedEvent = executionReceipt.events?.find(e => e.eventName === 'DFireRewardClaimed');
+            expect(dfireRewardClaimedEvent, "DFireRewardClaimed event must be emitted if SBR rewards are claimed").to.exist;
+            expect(dfireRewardClaimedEvent?.args?.user, "DFireRewardClaimed: user address mismatch").to.equal(userAddress);
+            expect(dfireRewardClaimedEvent?.args?.amount, "DFireRewardClaimed: amount mismatch").to.equal(expectedPendingSbrRewards);
+            expect(dfireRewardClaimedEvent?.args?.frontendFee, "DFireRewardClaimed: frontend fee should be 0").to.equal(0n);
+        } else {
+            expect(executionReceipt.events?.find(e => e.eventName === 'DFireRewardClaimed'), "DFireRewardClaimed event should not be emitted if no SBR rewards").to.not.exist;
+        }
+
+        const sbrRewardsAddedEvent = executionReceipt.events?.find(e => e.eventName === 'SBRRewardsAdded');
+        // The SBRRewardsAdded event is emitted only if _addSBRRewards is called AND (sbrRewardDistributionStatus was STARTED AND totalStakedRaw > 0)
+        if (previousPool.sbrRewardDistributionStatus === SBRRewardDistribution.STARTED && previousPool.totalStakedRaw > 0n) {
+            expect(sbrRewardsAddedEvent, "SBRRewardsAdded event must be emitted if SBR rewards were added").to.exist;
+            expect(sbrRewardsAddedEvent?.args?.lastTime, "SBRRewardsAdded: lastTime mismatch").to.equal(previousPool.lastSBRRewardDistributedTime);
+            expect(sbrRewardsAddedEvent?.args?.currentTime, "SBRRewardsAdded: currentTime mismatch").to.equal(currentTimestamp);
+            expect(sbrRewardsAddedEvent?.args?.rewardAmount, "SBRRewardsAdded: rewardAmount mismatch").to.equal(expectedSbrRewardsAddedEventAmount);
+            expect(sbrRewardsAddedEvent?.args?.totalRewardPerToken, "SBRRewardsAdded: totalRewardPerToken mismatch").to.equal(expectedTotalSbrRewardPerToken);
+        } else {
+            expect(sbrRewardsAddedEvent, "SBRRewardsAdded event should not be emitted if no SBR rewards were added").to.not.exist;
+        }
 
         return true;
     }
