@@ -1,50 +1,74 @@
 {
   "attributes": [
     {
-      "name": "PrecisionValue",
-      "type": "uint256",
-      "contract_function": "PRECISION",
-      "parameters": []
-    },
-    {
-      "name": "IsRewardSenderActive",
-      "type": "bool",
-      "contract_function": "rewardSenderActive",
-      "parameters": []
-    },
-    {
-      "name": "StakeInfo",
-      "type": "tuple",
+      "name": "stakes",
+      "type": "mapping",
       "contract_function": "stakes",
       "parameters": [
         {
-          "name": "user",
+          "name": "accountAddress",
           "type": "address",
           "reference": "accountAddress"
         }
       ]
     },
     {
-      "name": "TotalCollateralPerTokenValue",
+      "name": "rewardSenderActive",
+      "type": "bool",
+      "contract_function": "rewardSenderActive",
+      "parameters": []
+    },
+    {
+      "name": "totalCollateralPerToken",
       "type": "uint256",
       "contract_function": "totalCollateralPerToken",
       "parameters": []
     },
     {
-      "name": "TotalRewardPerTokenValue",
+      "name": "totalRewardPerToken",
       "type": "uint256",
       "contract_function": "totalRewardPerToken",
       "parameters": []
     },
     {
-      "name": "TotalStakeValue",
+      "name": "totalStake",
       "type": "uint256",
       "contract_function": "totalStake",
+      "parameters": []
+    },
+    {
+      "name": "userPendingReward",
+      "type": "function",
+      "contract_function": "userPendingReward",
+      "parameters": [
+        {
+          "name": "accountAddress",
+          "type": "address",
+          "reference": "accountAddress"
+        }
+      ]
+    },
+    {
+      "name": "stakingToken",
+      "type": "address",
+      "contract_function": "stakingToken",
+      "parameters": []
+    },
+    {
+      "name": "rewardToken",
+      "type": "address",
+      "contract_function": "rewardToken",
+      "parameters": []
+    },
+    {
+      "name": "PRECISION",
+      "type": "uint256",
+      "contract_function": "PRECISION",
       "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface DFIREStakingSnapshot {\n  precisionValue: bigint;\n  isRewardSenderActive: boolean;\n  stakes: { [accountAddress: string]: StakeInfo };\n  totalCollateralPerTokenValue: bigint;\n  totalRewardPerTokenValue: bigint;\n  totalStakeValue: bigint;\n}\n\ninterface StakeInfo {\n  stake: bigint;\n  rewardSnapshot: bigint;\n  collateralSnapshot: bigint;\n}",
+    "contract_snapshot_interface_code": "interface DFIREStakingSnapshot {\n  stakes: { [accountAddress: string]: { stake: bigint; rewardSnapshot: bigint; collateralSnapshot: bigint } };\n  rewardSenderActive: boolean;\n  totalCollateralPerToken: bigint;\n  totalRewardPerToken: bigint;\n  totalStake: bigint;\n  userPendingReward: { [accountAddress: string]: [bigint, bigint] };\n  stakingToken: string;\n  rewardToken: string;\n  PRECISION: bigint;\n}",
     "interface_name": "DFIREStakingSnapshot"
   }
 }
