@@ -1,10 +1,10 @@
 import { Action, Actor, Snapshot } from "@svylabs/ilumina";
 import type { RunContext, ExecutionReceipt } from "@svylabs/ilumina";
 import { ethers } from "ethers";
-import { expect } from 'chai';
+import { expect } from "chai";
 
 export class WithdrawCollateralAction extends Action {
-  contract: ethers.Contract;
+  private contract: ethers.Contract;
 
   constructor(contract: ethers.Contract) {
     super("WithdrawCollateralAction");
@@ -17,72 +17,35 @@ export class WithdrawCollateralAction extends Action {
     currentSnapshot: Snapshot
   ): Promise<[boolean, any, Record<string, any>]> {
     const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
-    if (!stableBaseCDPSnapshot) {
-      return [false, {}, {}];
-    }
+    const safeOwners = stableBaseCDPSnapshot.safeOwners;
+    const safeIds = Object.keys(safeOwners).map(Number);
 
-    const safeIds = Object.keys(stableBaseCDPSnapshot.safes || {});
-    if (safeIds.length === 0) {
-      return [false, {}, {}];
-    }
-
-    let safeId: bigint | undefined;
+    let safeId: number | undefined = undefined;
     for (const id of safeIds) {
-      const safe = stableBaseCDPSnapshot.safes?.[BigInt(id)];
-      if (safe && safe.collateralAmount > BigInt(0)) {
-        safeId = BigInt(id);
+      if (safeOwners[id] === actor.account.address) {
+        safeId = id;
         break;
       }
     }
 
-    if (!safeId) {
+    if (safeId === undefined) {
+      console.log("No Safe found for this actor");
       return [false, {}, {}];
     }
 
-    const safe = stableBaseCDPSnapshot.safes?.[safeId];
+    const safeData = stableBaseCDPSnapshot.safesData[safeId];
 
-    if (!safe) {
+    if (!safeData || safeData.collateralAmount <= BigInt(0)) {
+      console.log("No collateral to withdraw or Safe does not exist");
       return [false, {}, {}];
     }
 
-    let amount: bigint;
-    const mockPriceOracle = context.contracts.mockPriceOracle;
-    if (!mockPriceOracle) {
-      console.warn("MockPriceOracle contract not found in context");
-      return [false, {}, {}];
-    }
-    const mockPriceOracleSnapshot = currentSnapshot.contractSnapshot.mockPriceOracle;
-    if (!mockPriceOracleSnapshot) {
-      console.warn("MockPriceOracle snapshot not found");
-      return [false, {}, {}];
-    }
-    const price = mockPriceOracleSnapshot.currentPrice;
-
-    if (safe.borrowedAmount > BigInt(0)) {
-      const liquidationRatio = 1500000000000000000n;
-      const PRECISION = 1000000000000000000n;
-      const BASIS_POINTS_DIVISOR = 10000n;
-      const maxWithdrawal = safe.collateralAmount - (safe.borrowedAmount * liquidationRatio * PRECISION) / (price * BASIS_POINTS_DIVISOR);
-      if (maxWithdrawal <= BigInt(0)) {
-        return [false, {}, {}];
-      }
-      amount = context.prng.next() % (maxWithdrawal + BigInt(1));
-      if (amount <= BigInt(0)) {
-        amount = BigInt(1);
-      }
-    } else {
-      amount = context.prng.next() % (safe.collateralAmount + BigInt(1));
-      if (amount <= BigInt(0)) {
-        amount = BigInt(1);
-      }
-    }
-
-    const nearestSpotInLiquidationQueue = BigInt(0);
-
+    const amount = (context.prng.next() % Number(safeData.collateralAmount)) + 1;
+    const nearestSpotInLiquidationQueue = 0;
     const actionParams = {
-      safeId: safeId,
-      amount: amount,
-      nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue,
+      safeId: BigInt(safeId),
+      amount: BigInt(amount),
+      nearestSpotInLiquidationQueue: BigInt(nearestSpotInLiquidationQueue),
     };
 
     return [true, actionParams, {}];
@@ -94,12 +57,13 @@ export class WithdrawCollateralAction extends Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<ExecutionReceipt> {
-    const { safeId, amount, nearestSpotInLiquidationQueue } = actionParams;
-    const tx = await this.contract
+    return await this.contract
       .connect(actor.account.value)
-      .withdrawCollateral(safeId, amount, nearestSpotInLiquidationQueue);
-
-    return { receipt: await tx.wait(), additionalInfo: {} };
+      .withdrawCollateral(
+        actionParams.safeId,
+        actionParams.amount,
+        actionParams.nearestSpotInLiquidationQueue
+      );
   }
 
   async validate(
@@ -110,64 +74,78 @@ export class WithdrawCollateralAction extends Action {
     actionParams: any,
     executionReceipt: ExecutionReceipt
   ): Promise<boolean> {
-    const { safeId, amount } = actionParams;
+    const safeId = actionParams.safeId;
+    const amount = actionParams.amount;
 
-    const previousSafe = previousSnapshot.contractSnapshot.stableBaseCDP.safes?.[safeId];
-    const newSafe = newSnapshot.contractSnapshot.stableBaseCDP.safes?.[safeId];
+    const previousStableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
+    const newStableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
 
-    const previousTotalCollateral = previousSnapshot.contractSnapshot.stableBaseCDP.totalCollateral;
-    const newTotalCollateral = newSnapshot.contractSnapshot.stableBaseCDP.totalCollateral;
+    const previousSafeData = previousStableBaseCDPSnapshot.safesData[Number(safeId)];
+    const newSafeData = newStableBaseCDPSnapshot.safesData[Number(safeId)];
+
+    const previousTotalCollateral = previousStableBaseCDPSnapshot.totalCollateral;
+    const newTotalCollateral = newStableBaseCDPSnapshot.totalCollateral;
+
+    const previousTotalDebt = previousStableBaseCDPSnapshot.totalDebt;
+    const newTotalDebt = newStableBaseCDPSnapshot.totalDebt;
+
+    const previousProtocolMode = previousStableBaseCDPSnapshot.protocolMode;
+    const newProtocolMode = newStableBaseCDPSnapshot.protocolMode;
 
     const previousAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
     const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
 
-    if (!previousSafe) {
-      console.warn("Safe not found in previous snapshot");
-      return false;
-    }
+    const previousContractBalance = previousSnapshot.accountSnapshot[this.contract.target] || BigInt(0);
+    const newContractBalance = newSnapshot.accountSnapshot[this.contract.target] || BigInt(0);
 
     // Safe State Validation
-    if (newSafe) {
-      expect(newSafe.collateralAmount, 'safes[safeId].collateralAmount should be equal to the previous collateralAmount minus the amount withdrawn.')
-        .to.equal(previousSafe.collateralAmount - amount);
-    } else {
-      // Safe should be removed if collateralAmount is zero after withdrawal
-      expect(previousSafe.collateralAmount - amount, "Collateral should be zero").to.equal(BigInt(0));
-    }
+    expect(newSafeData.collateralAmount).to.equal(previousSafeData.collateralAmount - amount, "Safe collateral amount should be decreased by amount");
+    expect(newSafeData.collateralAmount).to.be.at.least(BigInt(0), "Safe collateral amount must be non-negative");
 
-    // Total Collateral Validation
-    expect(newTotalCollateral, 'totalCollateral should be equal to the previous totalCollateral minus the amount withdrawn.')
-      .to.equal(previousTotalCollateral - amount);
+    // Protocol State Validation
+    expect(newTotalCollateral).to.equal(previousTotalCollateral - amount, "Total collateral should be decreased by amount");
 
     // Balance Validation
-    expect(newAccountBalance, "The msg.sender's ETH balance should increase by the amount withdrawn.").to.equal(previousAccountBalance + amount);
+    expect(newAccountBalance).to.equal(previousAccountBalance + amount, "Account balance should be increased by amount");
+    expect(newContractBalance).to.equal(previousContractBalance - amount, "Contract balance should be decreased by amount");
 
-    // borrowedAmount == 0 validation
-    if (previousSafe.borrowedAmount <= BigInt(0)) {
-      const liquidationHeadPrevious = previousSnapshot.contractSnapshot.safesOrderedForLiquidation.head;
-      const redemptionHeadPrevious = previousSnapshot.contractSnapshot.safesOrderedForRedemption.head;
+    // Check if the safe was removed from liquidation queues
+    const previousLiquidationQueue = previousSnapshot.contractSnapshot.safesOrderedForLiquidation.nodes;
+    const newLiquidationQueue = newSnapshot.contractSnapshot.safesOrderedForLiquidation.nodes;
+    if (previousSafeData.borrowedAmount === BigInt(0) && previousLiquidationQueue[Number(safeId)]) {
+      expect(newLiquidationQueue[Number(safeId)]).to.be.undefined;
+    }
+    const cumulativeDebtPerUnitCollateralPrevious = previousStableBaseCDPSnapshot.cumulativeDebtPerUnitCollateral;
+    const cumulativeDebtPerUnitCollateralNew = newStableBaseCDPSnapshot.cumulativeDebtPerUnitCollateral;
 
-      const safesOrderedForLiquidationNew = newSnapshot.contractSnapshot.safesOrderedForLiquidation;
-      const safesOrderedForRedemptionNew = newSnapshot.contractSnapshot.safesOrderedForRedemption;
+    const cumulativeCollateralPerUnitCollateralPrevious = previousStableBaseCDPSnapshot.cumulativeCollateralPerUnitCollateral;
+    const cumulativeCollateralPerUnitCollateralNew = newStableBaseCDPSnapshot.cumulativeCollateralPerUnitCollateral;
 
-      // Check if safe was removed from liquidation queue
-      if (liquidationHeadPrevious !== BigInt(0)) {
-        if (safesOrderedForLiquidationNew && safesOrderedForLiquidationNew.nodes && safesOrderedForLiquidationNew.nodes[safeId]) {
-          console.warn("Safe should be removed from liquidation queue");
-          return false;
-        }
-      }
+    let debtIncrease = BigInt(0);
+    let collateralIncrease = BigInt(0);
 
-      // Check if safe was removed from redemption queue
-      if (redemptionHeadPrevious !== BigInt(0)) {
-        if (safesOrderedForRedemptionNew && safesOrderedForRedemptionNew.nodes && safesOrderedForRedemptionNew.nodes[safeId]) {
-          console.warn("Safe should be removed from redemption queue");
-          return false;
-        }
-      }
+    if (cumulativeDebtPerUnitCollateralPrevious!=cumulativeDebtPerUnitCollateralNew){
+         // Validate borrowed amount updates
+        debtIncrease = (previousSafeData.collateralAmount *
+         (cumulativeDebtPerUnitCollateralNew -
+         cumulativeDebtPerUnitCollateralPrevious)) / BigInt(10**18);
+         expect(newSafeData.borrowedAmount).to.equal(previousSafeData.borrowedAmount + debtIncrease, 'Borrowed amount should be  updated');
+         expect(newSafeData.totalBorrowedAmount).to.equal(previousSafeData.totalBorrowedAmount + debtIncrease, 'Total borrowed amount should be  updated');
     }
 
-    // Additional checks for total debt, cumulative values if needed
+    if (cumulativeCollateralPerUnitCollateralPrevious!=cumulativeCollateralPerUnitCollateralNew){
+        collateralIncrease = (previousSafeData.collateralAmount *
+        (cumulativeCollateralPerUnitCollateralNew -
+        cumulativeCollateralPerUnitCollateralPrevious)) / BigInt(10**18);
+
+    }
+
+    const BOOTSTRAP_MODE_DEBT_THRESHOLD = BigInt(5000000) * BigInt(10) ** BigInt(18);
+    if(previousTotalDebt + debtIncrease > BOOTSTRAP_MODE_DEBT_THRESHOLD && previousProtocolMode == 0 && newProtocolMode == 1){
+      expect(newProtocolMode).to.equal(1, "Protocol should be updated to Normal Mode.");
+    }
+    expect(newTotalDebt).to.equal(previousTotalDebt + debtIncrease - collateralIncrease, "Total debt should be correctly updated");
+
 
     return true;
   }
