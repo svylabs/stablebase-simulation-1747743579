@@ -18,54 +18,74 @@ export class RepayAction extends Action {
   ): Promise<[boolean, any, Record<string, any>]> {
     const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
     const dfidTokenSnapshot = currentSnapshot.contractSnapshot.dfidToken;
+    const accountAddress = actor.account.address;
 
-    const safeIds = stableBaseCDPSnapshot.safes ? Object.keys(stableBaseCDPSnapshot.safes) : [];
-    if (safeIds.length === 0) {
-      return [false, [], {}];
-    }
-
-    let safeId: bigint | null = null;
-    for (const id of safeIds) {
-      const safeInfo = stableBaseCDPSnapshot.safes ? stableBaseCDPSnapshot.safes[BigInt(id)] : undefined;
-      if (safeInfo && safeInfo.borrowedAmount > BigInt(0)) {
-        safeId = BigInt(id);
+    let safeId: number | null = null;
+    for (const id in stableBaseCDPSnapshot.safeOwners) {
+      if (stableBaseCDPSnapshot.safeOwners[id] === accountAddress) {
+        safeId = parseInt(id, 10);
         break;
       }
     }
 
-    if (!safeId) {
-      return [false, [], {}];
+    if (safeId === null) {
+      console.log("No safe found for this account.");
+      return [false, {}, {}];
     }
 
-    const safeInfo = stableBaseCDPSnapshot.safes ? stableBaseCDPSnapshot.safes[safeId] : undefined;
-    if (!safeInfo) {
-      return [false, [], {}];
+    const safe = stableBaseCDPSnapshot.safesData[safeId];
+    if (!safe || safe.borrowedAmount === BigInt(0)) {
+      console.log("No borrowed amount to repay for this safe.");
+      return [false, {}, {}];
     }
 
-    const borrowedAmount = safeInfo.borrowedAmount;
-
-    const actorBalance = dfidTokenSnapshot.balances[actor.account.address] || BigInt(0);
-
-    if (borrowedAmount <= BigInt(0) || actorBalance <= BigInt(0)) {
-      return [false, [], {}];
+    const accountSBDBalance = dfidTokenSnapshot.balances[accountAddress] || BigInt(0);
+    if (accountSBDBalance === BigInt(0)) {
+      console.log("Account has no SBD to repay");
+      return [false, {}, {}];
     }
 
-    let amount: bigint;
-    if (actorBalance < borrowedAmount) {
-      amount = BigInt(context.prng.next()) % actorBalance + BigInt(1);
-    } else {
-      amount = BigInt(context.prng.next()) % borrowedAmount + BigInt(1);
+    let amount =  (safe.borrowedAmount < accountSBDBalance ? safe.borrowedAmount : accountSBDBalance);
+
+    if (amount <= BigInt(0)) {
+      console.log("Amount is zero or less than zero.");
+      return [false, {}, {}];
     }
 
-    const nearestSpotInLiquidationQueue = BigInt(0);
+    // Find a valid nearestSpotInLiquidationQueue. It can be 0 also.
+    let nearestSpotInLiquidationQueue = BigInt(0);
+    const safesOrderedForLiquidationSnapshot = currentSnapshot.contractSnapshot.safesOrderedForLiquidation;
+    if (safesOrderedForLiquidationSnapshot.headId !== BigInt(0)) {
+      let currentId = safesOrderedForLiquidationSnapshot.headId;
+      let closestNodeId = BigInt(0);
+      let minDifference = BigInt(2**256 - 1);
 
-    const params = [
-      safeId,
-      amount,
-      nearestSpotInLiquidationQueue,
-    ];
+      while (currentId !== BigInt(0)) {
+        const currentNode = safesOrderedForLiquidationSnapshot.nodes[currentId];
+        if(!currentNode) {
+          currentId = safesOrderedForLiquidationSnapshot.headId;
+          continue;
+        }
 
-    return [true, params, {}];
+        const currentNodeValue = currentNode.value;
+        const difference = safe.borrowedAmount > currentNodeValue ? safe.borrowedAmount - currentNodeValue : currentNodeValue - safe.borrowedAmount;
+        if (difference < minDifference) {
+          minDifference = difference;
+          closestNodeId = currentId;
+        }
+        currentId = safesOrderedForLiquidationSnapshot.nodes[currentId].next || BigInt(0);
+      }
+      nearestSpotInLiquidationQueue = closestNodeId;
+    }
+
+
+    const actionParams = {
+      safeId: safeId,
+      amount: amount,
+      nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue,
+    };
+
+    return [true, actionParams, {}];
   }
 
   async execute(
@@ -74,13 +94,14 @@ export class RepayAction extends Action {
     currentSnapshot: Snapshot,
     actionParams: any
   ): Promise<ExecutionReceipt> {
-    const [safeId, amount, nearestSpotInLiquidationQueue] = actionParams;
-
     const tx = await this.contract
       .connect(actor.account.value)
-      .repay(safeId, amount, nearestSpotInLiquidationQueue);
-
-    return { receipt: await tx.wait(), additionalInfo: {} };
+      .repay(
+        actionParams.safeId,
+        actionParams.amount,
+        actionParams.nearestSpotInLiquidationQueue
+      );
+    return { receipt: await tx.wait() };
   }
 
   async validate(
@@ -91,67 +112,103 @@ export class RepayAction extends Action {
     actionParams: any,
     executionReceipt: ExecutionReceipt
   ): Promise<boolean> {
-    const [safeId, amount, nearestSpotInLiquidationQueue] = actionParams;
+    const safeId = actionParams.safeId;
+    const amount = actionParams.amount;
 
     const previousStableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
     const newStableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
     const previousDFIDTokenSnapshot = previousSnapshot.contractSnapshot.dfidToken;
     const newDFIDTokenSnapshot = newSnapshot.contractSnapshot.dfidToken;
-    const previousAccountSnapshot = previousSnapshot.accountSnapshot;
-    const newAccountSnapshot = newSnapshot.accountSnapshot;
 
-    // Safe State Validations
-    const previousSafeInfo = previousStableBaseCDPSnapshot.safes![safeId];
-    const newSafeInfo = newStableBaseCDPSnapshot.safes![safeId];
+    const previousSafe = previousStableBaseCDPSnapshot.safesData[safeId];
+    const newSafe = newStableBaseCDPSnapshot.safesData[safeId];
 
-    expect(newSafeInfo.borrowedAmount).to.be.lte(previousSafeInfo.borrowedAmount, "borrowedAmount should be decreased by amount.");
+    const initialBorrowedAmount = previousSafe.borrowedAmount;
 
-    if (newSafeInfo.borrowedAmount > BigInt(0)) {
-      expect(newSafeInfo.borrowedAmount).to.be.gte(previousStableBaseCDPSnapshot.minimumDebt, "borrowedAmount should be greater than or equal to MINIMUM_DEBT.");
-    } else {
-      const safesOrderedForLiquidationSnapshotPrevious = previousSnapshot.contractSnapshot.safesOrderedForLiquidation;
-      const safesOrderedForLiquidationSnapshotNew = newSnapshot.contractSnapshot.safesOrderedForLiquidation;
-      if (safesOrderedForLiquidationSnapshotNew.nodes && safesOrderedForLiquidationSnapshotNew.nodes[safeId]) {
-        expect(safesOrderedForLiquidationSnapshotNew.nodes[safeId].value).to.be.eq(BigInt(0), "Safe should be removed from liquidation queue");
-      }
+    // Validate safes[safeId].borrowedAmount
+    let expectedBorrowedAmount = initialBorrowedAmount - amount;
 
-      const safesOrderedForRedemptionSnapshotPrevious = previousSnapshot.contractSnapshot.safesOrderedForRedemption;
-      const safesOrderedForRedemptionSnapshotNew = newSnapshot.contractSnapshot.safesOrderedForRedemption;
+    const liquidationSnapshotBefore = previousStableBaseCDPSnapshot.liquidationSnapshotsData[safeId];
+    const liquidationSnapshotAfter = newStableBaseCDPSnapshot.liquidationSnapshotsData[safeId];
 
-      if (safesOrderedForRedemptionSnapshotNew.nodes && safesOrderedForRedemptionSnapshotNew.nodes[safeId]) {
-        expect(safesOrderedForRedemptionSnapshotNew.nodes[safeId].value).to.be.eq(BigInt(0), "Safe should be removed from redemption queue");
-      }
-    }
-    // Token State Validations
-    const previousActorBalance = previousDFIDTokenSnapshot.balances[actor.account.address] || BigInt(0);
-    const newActorBalance = newDFIDTokenSnapshot.balances[actor.account.address] || BigInt(0);
-
-    expect(newActorBalance).to.be.eq(previousActorBalance - amount, "The SBD token balance of the user (msg.sender) should be decreased by the amount repaid.");
-
-    const previousTotalSupply = previousDFIDTokenSnapshot.totalSupply;
-    const newTotalSupply = newDFIDTokenSnapshot.totalSupply;
-
-    expect(newTotalSupply).to.be.eq(previousTotalSupply - amount, "The total supply of SBD tokens should be decreased by the amount repaid.");
-
-    // Total Debt Validations
-    expect(newStableBaseCDPSnapshot.totalDebt).to.be.eq(previousStableBaseCDPSnapshot.totalDebt - amount, "totalDebt should be decreased by amount.");
-
-    // Protocol Mode Validation
+    let debtIncrease = BigInt(0);
     if (
-      previousStableBaseCDPSnapshot.totalDebt > previousStableBaseCDPSnapshot.bootstrapModeDebtThreshold &&
-      previousStableBaseCDPSnapshot.mode == 0
+      liquidationSnapshotBefore.collateralPerCollateralSnapshot !=
+      newStableBaseCDPSnapshot.cumulativeCollateralPerUnitCollateral
     ) {
-      if (newStableBaseCDPSnapshot.totalDebt < previousStableBaseCDPSnapshot.bootstrapModeDebtThreshold) {
-        expect(newStableBaseCDPSnapshot.mode).to.be.eq(1, "PROTOCOL_MODE should be NORMAL.");
-      }
+      debtIncrease = (previousSafe.collateralAmount *
+        (newStableBaseCDPSnapshot.cumulativeDebtPerUnitCollateral -
+          liquidationSnapshotBefore.debtPerCollateralSnapshot)) / BigInt(10 ** 18);
+      expectedBorrowedAmount += debtIncrease;
+    }
+
+    expect(newSafe.borrowedAmount).to.equal(expectedBorrowedAmount, "safes[safeId].borrowedAmount should be equal to the initial borrowedAmount minus the repayment amount and potential debt increase/decrease from the _updateSafe function call");
+
+    if (newSafe.borrowedAmount > BigInt(0)) {
+      expect(newSafe.borrowedAmount).to.be.gte(BigInt(2000) * BigInt(10) ** BigInt(18), "If safes[safeId].borrowedAmount is greater than 0, then safes[safeId].borrowedAmount >= MINIMUM_DEBT.");
+    } else {
+      const safesOrderedForLiquidation = newSnapshot.contractSnapshot.safesOrderedForLiquidation;
+      const safesOrderedForRedemption = newSnapshot.contractSnapshot.safesOrderedForRedemption;
+      expect(safesOrderedForLiquidation.nodes[safeId]?.value).to.equal(undefined, "The safe should be removed from the liquidation queue.");
+      expect(safesOrderedForRedemption.nodes[safeId]?.value).to.equal(undefined, "The safe should be removed from the redemption queues.");
+    }
+
+    // Validate sbdToken.balanceOf(msg.sender)
+    const previousAccountBalance = previousDFIDTokenSnapshot.balances[actor.account.address] || BigInt(0);
+    const newAccountBalance = newDFIDTokenSnapshot.balances[actor.account.address] || BigInt(0);
+
+    expect(newAccountBalance).to.equal(previousAccountBalance - amount, "sbdToken.balanceOf(msg.sender) should be decreased by the amount repaid.");
+
+    // Validate totalDebt
+    const previousTotalDebt = previousStableBaseCDPSnapshot.totalDebt;
+    const newTotalDebt = newStableBaseCDPSnapshot.totalDebt;
+    let expectedTotalDebt = previousTotalDebt - amount;
+
+    expectedTotalDebt += debtIncrease;
+
+    expect(newTotalDebt).to.equal(expectedTotalDebt, "totalDebt should be decreased by the amount repaid and any changes that occur during the updateSafe function call.");
+
+    //Validate protocol mode
+    if (
+      newTotalDebt > BigInt(5000000) * BigInt(10) ** BigInt(18) &&
+      previousStableBaseCDPSnapshot.protocolMode == 0
+    ) {
+      expect(newStableBaseCDPSnapshot.protocolMode).to.equal(1, "If the totalDebt is greater than BOOTSTRAP_MODE_DEBT_THRESHOLD, and the protocol mode was BOOTSTRAP then PROTOCOL_MODE should be NORMAL.");
+    }
+
+    // Validate Liquidation Queue updates
+    const previousLiquidationQueue = previousSnapshot.contractSnapshot.safesOrderedForLiquidation.nodes;
+    const newLiquidationQueue = newSnapshot.contractSnapshot.safesOrderedForLiquidation.nodes;
+
+    const newRatio = (newSafe.borrowedAmount * BigInt(10 ** 18)) / newSafe.collateralAmount;
+
+    if (newRatio !== BigInt(0)) {
+      // Safe should be in liquidation queue
+      expect(newLiquidationQueue[safeId]).to.not.be.undefined;
+      // Weight should be updated
+      expect(newLiquidationQueue[safeId].value).to.equal(newRatio);
+    } else {
+      // Safe should be removed from liquidation queue
+      expect(newLiquidationQueue[safeId]).to.be.undefined;
     }
 
     // Event Emission Validation
     const repaidEvent = executionReceipt.receipt.logs.find(
-      (log) => log.address === this.contract.target && this.contract.interface.parseLog(log)?.name === "Repaid"
+      (log) =>
+        log.address === this.contract.target &&
+        this.contract.interface.parseLog(log)?.name === "Repaid"
     );
 
     expect(repaidEvent).to.not.be.undefined;
+
+    if (repaidEvent) {
+      const parsedLog = this.contract.interface.parseLog(repaidEvent);
+      expect(parsedLog.args.safeId).to.equal(BigInt(safeId));
+      expect(parsedLog.args.amount).to.equal(amount);
+      expect(parsedLog.args.newRatio).to.equal(newRatio);
+      expect(parsedLog.args.totalCollateral).to.equal(newStableBaseCDPSnapshot.totalCollateral);
+      expect(parsedLog.args.totalDebt).to.equal(newStableBaseCDPSnapshot.totalDebt);
+    }
 
     return true;
   }
