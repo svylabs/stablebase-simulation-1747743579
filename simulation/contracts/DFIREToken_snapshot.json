@@ -1,8 +1,8 @@
 {
   "attributes": [
     {
-      "name": "allowanceAmount",
-      "type": "uint256",
+      "name": "allowance",
+      "type": "bigint",
       "contract_function": "allowance",
       "parameters": [
         {
@@ -18,8 +18,8 @@
       ]
     },
     {
-      "name": "accountBalance",
-      "type": "uint256",
+      "name": "balance",
+      "type": "bigint",
       "contract_function": "balanceOf",
       "parameters": [
         {
@@ -30,8 +30,8 @@
       ]
     },
     {
-      "name": "decimalPlaces",
-      "type": "uint8",
+      "name": "decimals",
+      "type": "bigint",
       "contract_function": "decimals",
       "parameters": []
     },
@@ -43,7 +43,7 @@
     },
     {
       "name": "contractOwner",
-      "type": "address",
+      "type": "string",
       "contract_function": "owner",
       "parameters": []
     },
@@ -54,20 +54,20 @@
       "parameters": []
     },
     {
-      "name": "burnedSupply",
-      "type": "uint256",
+      "name": "totalBurnedSupply",
+      "type": "bigint",
       "contract_function": "totalBurned",
       "parameters": []
     },
     {
       "name": "totalTokenSupply",
-      "type": "uint256",
+      "type": "bigint",
       "contract_function": "totalSupply",
       "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface DFIRETokenSnapshot {\n  allowanceAmount: { [owner: string]: { [spender: string]: bigint } };\n  accountBalance: { [accountAddress: string]: bigint };\n  decimalPlaces: bigint;\n  tokenName: string;\n  contractOwner: string;\n  tokenSymbol: string;\n  burnedSupply: bigint;\n  totalTokenSupply: bigint;\n}",
+    "contract_snapshot_interface_code": "interface DFIRETokenAccountSnapshot {\\n  balance: bigint;\\n  allowances: Record<string, bigint>; // Key: spenderAddress\\n}\\n\\ninterface DFIRETokenSnapshot {\\n  decimals: bigint;\\n  tokenName: string;\\n  contractOwner: string;\\n  tokenSymbol: string;\\n  totalBurnedSupply: bigint;\\n  totalTokenSupply: bigint;\\n  accounts: Record<string, DFIRETokenAccountSnapshot>; // Key: accountAddress\\n}",
     "interface_name": "DFIRETokenSnapshot"
   }
 }
