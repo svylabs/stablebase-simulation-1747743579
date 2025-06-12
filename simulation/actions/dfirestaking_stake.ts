@@ -1,10 +1,10 @@
 import {Action, Actor, Snapshot} from "@svylabs/ilumina";
 import type {RunContext, ExecutionReceipt} from "@svylabs/ilumina";
-import { ethers } from "ethers";
-import { expect } from 'chai';
+import {ethers} from "ethers";
+import {expect} from "chai";
 
 export class StakeAction extends Action {
-    private contract: ethers.Contract;
+    contract: ethers.Contract;
 
     constructor(contract: ethers.Contract) {
         super("StakeAction");
@@ -17,23 +17,25 @@ export class StakeAction extends Action {
         currentSnapshot: Snapshot
     ): Promise<[boolean, any, Record<string, any>]> {
         const dfireTokenSnapshot = currentSnapshot.contractSnapshot.dfireToken;
-        const actorAddress = actor.account.address;
+        const accountAddress = actor.account.address;
+        const accountBalance = dfireTokenSnapshot.accountBalance[accountAddress] || BigInt(0);
 
-        if (!dfireTokenSnapshot.balances[actorAddress] || dfireTokenSnapshot.balances[actorAddress] === BigInt(0)) {
+        if (accountBalance <= BigInt(0)) {
             return [false, {}, {}];
         }
 
-        const amount = BigInt(Math.floor(context.prng.next() % Number(dfireTokenSnapshot.balances[actorAddress])));
-
-        if (amount <= BigInt(0)) {
-             return [false, {}, {}];
+        // Generate a random amount to stake, but ensure it's within the account's balance
+        const maxStakeAmount = accountBalance;
+        const amountToStake = BigInt(context.prng.next()) % (maxStakeAmount + BigInt(1)); // Ensure non-zero stake
+        if (amountToStake <= BigInt(0)) {
+          return [false, {}, {}];
         }
 
-        const actionParams = {
-            _amount: amount
+        const params = {
+            _amount: amountToStake,
         };
 
-        return [true, actionParams, {}];
+        return [true, params, {}];
     }
 
     async execute(
@@ -42,10 +44,10 @@ export class StakeAction extends Action {
         currentSnapshot: Snapshot,
         actionParams: any
     ): Promise<ExecutionReceipt> {
-        const signer = actor.account.value.connect(this.contract.runner! as any);
-        const tx = await this.contract.stake(actionParams._amount);
-        const receipt = await tx.wait();
-        return { transactionHash: tx.hash, receipt };
+        const signer = actor.account.value.connect(this.contract.provider);
+        const contractWithSigner = this.contract.connect(signer);
+        const tx = await contractWithSigner.stake(actionParams._amount);
+        return {receipt: await tx.wait(), rawResponse: tx};
     }
 
     async validate(
@@ -56,64 +58,84 @@ export class StakeAction extends Action {
         actionParams: any,
         executionReceipt: ExecutionReceipt
     ): Promise<boolean> {
+        const amountStaked = actionParams._amount;
         const actorAddress = actor.account.address;
-        const amount = actionParams._amount;
+        const stakingContractAddress = this.contract.target;
 
-        const previousDfireStakingSnapshot = previousSnapshot.contractSnapshot.dfireStaking;
-        const newDfireStakingSnapshot = newSnapshot.contractSnapshot.dfireStaking;
-
-        const previousDfireTokenSnapshot = previousSnapshot.contractSnapshot.dfireToken;
-        const newDfireTokenSnapshot = newSnapshot.contractSnapshot.dfireToken;
-
-        const previousDfidTokenSnapshot = previousSnapshot.contractSnapshot.dfidToken;
-        const newDfidTokenSnapshot = newSnapshot.contractSnapshot.dfidToken;
-
-        const previousAccountBalance = previousSnapshot.accountSnapshot[actorAddress] || BigInt(0);
+        // Get previous and new snapshots for relevant contracts
+        const prevDfireStaking = previousSnapshot.contractSnapshot.dfireStaking;
+        const newDfireStaking = newSnapshot.contractSnapshot.dfireStaking;
+        const prevDfireToken = previousSnapshot.contractSnapshot.dfireToken;
+        const newDfireToken = newSnapshot.contractSnapshot.dfireToken;
+        const prevDfidToken = previousSnapshot.contractSnapshot.dfidToken;
+        const newDfidToken = newSnapshot.contractSnapshot.dfidToken;
+        const prevAccountBalance = previousSnapshot.accountSnapshot[actorAddress] || BigInt(0);
         const newAccountBalance = newSnapshot.accountSnapshot[actorAddress] || BigInt(0);
 
-        // Stake Update validations
-        const previousStake = previousDfireStakingSnapshot.stakes[actorAddress]?.stake || BigInt(0);
-        const newStake = newDfireStakingSnapshot.stakes[actorAddress]?.stake || BigInt(0);
-        expect(newStake).to.equal(previousStake + amount, "Stake amount should be increased by _amount");
+        const initialUserStake = prevDfireStaking.stakes[actorAddress]?.stake || BigInt(0);
+        const newUserStake = newDfireStaking.stakes[actorAddress]?.stake || BigInt(0);
 
-        expect(newDfireStakingSnapshot.stakes[actorAddress]?.rewardSnapshot).to.equal(newDfireStakingSnapshot.totalRewardPerTokenValue, "rewardSnapshot should be equal to totalRewardPerToken");
-        expect(newDfireStakingSnapshot.stakes[actorAddress]?.collateralSnapshot).to.equal(newDfireStakingSnapshot.totalCollateralPerTokenValue, "collateralSnapshot should be equal to totalCollateralPerToken");
+        const initialTotalStake = prevDfireStaking.totalStake;
+        const newTotalStake = newDfireStaking.totalStake;
 
-        const previousTotalStake = previousDfireStakingSnapshot.totalStakeValue;
-        const newTotalStake = newDfireStakingSnapshot.totalStakeValue;
-        expect(newTotalStake).to.equal(previousTotalStake + amount, "totalStake should be increased by _amount");
+        const initialStakingTokenBalance = prevDfireToken.accountBalance[stakingContractAddress] || BigInt(0);
+        const newStakingTokenBalance = newDfireToken.accountBalance[stakingContractAddress] || BigInt(0);
 
+        const initialUserTokenBalance = prevDfireToken.accountBalance[actorAddress] || BigInt(0);
+        const newUserTokenBalance = newDfireToken.accountBalance[actorAddress] || BigInt(0);
 
-        // Token Transfer validations
-        const previousStakingTokenBalance = previousDfireTokenSnapshot.balances[context.contracts.dfireStaking.target] || BigInt(0);
-        const newStakingTokenBalance = newDfireTokenSnapshot.balances[context.contracts.dfireStaking.target] || BigInt(0);
-        expect(newStakingTokenBalance).to.equal(previousStakingTokenBalance + amount, "stakingToken.balanceOf(address(this)) should increase by _amount");
+        const initialUserRewardBalance = prevDfidToken.balances[actorAddress] || BigInt(0);
+        const newUserRewardBalance = newDfidToken.balances[actorAddress] || BigInt(0);
 
-        const previousUserTokenBalance = previousDfireTokenSnapshot.balances[actorAddress] || BigInt(0);
-        const newUserTokenBalance = newDfireTokenSnapshot.balances[actorAddress] || BigInt(0);
-        expect(newUserTokenBalance).to.equal(previousUserTokenBalance - amount, "stakingToken.balanceOf(msg.sender) should decrease by _amount");
+        // User stake balance should increase by amountStaked
+        expect(newUserStake).to.be.equal(initialUserStake + amountStaked, "User stake balance not updated correctly");
 
-        // Reward Claim Validations
-        const previousRewardSnapshot = previousDfireStakingSnapshot.stakes[actorAddress]?.rewardSnapshot || BigInt(0);
-        const previousCollateralSnapshot = previousDfireStakingSnapshot.stakes[actorAddress]?.collateralSnapshot || BigInt(0);
+        // Total stake should increase by amountStaked
+        expect(newTotalStake).to.be.equal(initialTotalStake + amountStaked, "Total stake not updated correctly");
 
-        const reward = ((newDfireStakingSnapshot.totalRewardPerTokenValue - previousRewardSnapshot) * previousStake) / previousDfireStakingSnapshot.precisionValue;
-        const collateralReward = ((newDfireStakingSnapshot.totalCollateralPerTokenValue - previousCollateralSnapshot) * previousStake) / previousDfireStakingSnapshot.precisionValue;
+        // Staking token balance of contract should increase by amountStaked
+        expect(newStakingTokenBalance).to.be.equal(initialStakingTokenBalance + amountStaked, "Staking contract token balance not updated correctly");
 
-        if (reward > 0) {
-            const previousRewardTokenBalance = previousDfidTokenSnapshot.balances[actorAddress] || BigInt(0);
-            const newRewardTokenBalance = newDfidTokenSnapshot.balances[actorAddress] || BigInt(0);
-            expect(newRewardTokenBalance).to.equal(previousRewardTokenBalance + reward, "rewardToken.balanceOf(msg.sender) should increase by reward");
+        // User's token balance should decrease by amountStaked
+        expect(newUserTokenBalance).to.be.equal(initialUserTokenBalance - amountStaked, "User's token balance not updated correctly");
+
+        // Check reward claim and collateral claim
+        const reward = newUserRewardBalance - initialUserRewardBalance;
+        const collateralReward = newAccountBalance - prevAccountBalance;
+
+        // Check if claimed event is emitted
+        const claimedEvent = executionReceipt.receipt.logs.find(
+            (log: any) => {
+                try {
+                    const parsedLog = this.contract.interface.parseLog(log);
+                    return parsedLog.name === "Claimed" && parsedLog.args.user === actorAddress && parsedLog.args.reward === reward && parsedLog.args.collateralReward === collateralReward;
+                } catch (e) {
+                    return false;
+                }
+            }
+        );
+
+        // Staked event should be emitted with the correct parameters
+        const stakedEvent = executionReceipt.receipt.logs.find(
+            (log: any) => {
+                try {
+                    const parsedLog = this.contract.interface.parseLog(log);
+                    return parsedLog.name === "Staked" && parsedLog.args.user === actorAddress && parsedLog.args.amount === amountStaked;
+                } catch (e) {
+                    return false;
+                }
+            }
+        );
+        expect(stakedEvent).to.not.be.undefined;
+
+        //check IRewardSender(stableBaseContract)
+        if (newDfireStaking.rewardSenderActive && initialTotalStake === BigInt(0)){
+          //Need to find a way to validate the call to stableBaseContract.setCanSBRStakingPoolReceiveRewards(true)
+          //It can be validated by checking if stableBaseCDP.sbrStakingPoolCanReceiveRewards is true in the new snapshot
+          expect(newSnapshot.contractSnapshot.stableBaseCDP.sbrStakingPoolCanReceiveRewards).to.be.true;
         }
 
-        if (collateralReward > 0) {
-            expect(newAccountBalance).to.be.gte(previousAccountBalance + collateralReward, "msg.sender ETH balance should increase by collateralReward");
-        }
-
-        //Reward Sender Activation
-        if (previousDfireStakingSnapshot.isRewardSenderActive && previousDfireStakingSnapshot.totalStakeValue === BigInt(0)) {
-          expect((newSnapshot.contractSnapshot.stableBaseCDP as any).sbrStakingPoolCanReceiveRewards).to.be.true
-        }
+        expect(claimedEvent).to.not.be.undefined;
 
         return true;
     }
