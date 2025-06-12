@@ -4,140 +4,100 @@ import { ethers } from "ethers";
 import { expect } from 'chai';
 
 export class OpensafeAction extends Action {
-  contract: ethers.Contract;
+    contract: ethers.Contract;
 
-  constructor(contract: ethers.Contract) {
-    super("OpenSafeAction");
-    this.contract = contract;
-  }
-
-  async initialize(
-    context: RunContext,
-    actor: Actor,
-    currentSnapshot: Snapshot
-  ): Promise<[boolean, any, Record<string, any>]> {
-    const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
-    const accountBalance = currentSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-
-    // Generate parameters
-    let _safeId: bigint;
-    let _amount: bigint;
-    let canExecute = false;
-
-    // Find a unique safeId.  This is a naive approach, and could be improved
-    // in a real implementation.
-    let safeIdCounter = 1;
-    while (true) {
-      _safeId = BigInt(safeIdCounter);
-      const safeExists = currentSnapshot.contractSnapshot.stableBaseCDP.safes?.[_safeId.toString()];
-
-      if (!safeExists) {
-        break;
-      }
-      safeIdCounter++;
+    constructor(contract: ethers.Contract) {
+        super("OpenSafeAction");
+        this.contract = contract;
     }
 
-    _amount = BigInt(context.prng.next()) % (accountBalance / BigInt(2)) + BigInt(1);
+    async initialize(
+        context: RunContext,
+        actor: Actor,
+        currentSnapshot: Snapshot
+    ): Promise<[boolean, any, Record<string, any>]> {
+        const stableBaseCDPSnapshot: any = currentSnapshot.contractSnapshot.stableBaseCDP;
 
-    if (_amount > accountBalance) {
-        return [false, {}, {}];
-    }
+        // Generate a unique safeId
+        let safeId: bigint;
+        let attempts = 0;
+        const maxAttempts = 100;
+        do {
+            safeId = BigInt(context.prng.next());
+            attempts++;
+            if (attempts > maxAttempts) {
+                console.warn("Could not generate unique safeId after " + maxAttempts + " attempts.");
+                return [false, {}, {}];
+            }
+        } while (stableBaseCDPSnapshot.safeOwners[safeId.toString()] !== undefined || safeId <= 0n);
 
-    // Check if the safe already exists
-    try {
-        const safe = await this.contract.safes(_safeId);
-        if (safe.collateralAmount > 0) {
+        // Generate a random amount for the collateral deposit
+        const maxCollateral = currentSnapshot.accountSnapshot[actor.account.address] || 0n;
+        if (maxCollateral <= 0n) {
+            console.warn("Account has insufficient ETH to open a Safe.");
             return [false, {}, {}];
         }
-    } catch (error) {
-       //if the safe does not exists in the blockchain, continue with execution
+        const amount = BigInt(context.prng.next()) % maxCollateral + 1n; // Ensure amount > 0
+
+        const params = {
+            _safeId: safeId,
+            _amount: amount,
+        };
+
+        const newIdentifiers: Record<string, any> = {
+            safeId: safeId.toString(),
+        };
+
+        return [true, params, newIdentifiers];
     }
 
-    // Check if the owner already exists
-    try {
-        const owner = await this.contract._ownerOf(_safeId);
-        if (owner !== ethers.ZeroAddress) {
-            return [false, {}, {}];
-        }
-    } catch (error) {
-         //if the owner does not exists in the blockchain, continue with execution
+    async execute(
+        context: RunContext,
+        actor: Actor,
+        currentSnapshot: Snapshot,
+        actionParams: any
+    ): Promise<ExecutionReceipt> {
+        const { _safeId, _amount } = actionParams;
+
+        const tx = await this.contract.connect(actor.account.value).openSafe(_safeId, _amount, { value: _amount });
+        const receipt = await tx.wait();
+        return { receipt };
     }
 
-    canExecute = true;    
-    const actionParams = {
-      _safeId: _safeId,
-      _amount: _amount,
-    };
+    async validate(
+        context: RunContext,
+        actor: Actor,
+        previousSnapshot: Snapshot,
+        newSnapshot: Snapshot,
+        actionParams: any,
+        executionReceipt: ExecutionReceipt
+    ): Promise<boolean> {
+        const { _safeId, _amount } = actionParams;
 
-    const newIdentifiers = {
-      safeId: _safeId.toString(),
-    };
+        const prevStableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
+        const newStableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
+        const prevAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || 0n;
+        const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || 0n;
 
-    return [canExecute, actionParams, newIdentifiers];
-  }
+        // Safe Existence
+        expect(newStableBaseCDPSnapshot.safesData[_safeId.toString()]).to.not.be.undefined; //Check that a new Safe is created
+        expect(newStableBaseCDPSnapshot.safesData[_safeId.toString()].collateralAmount).to.equal(_amount, "Collateral amount mismatch");
+        expect(newStableBaseCDPSnapshot.safesData[_safeId.toString()].borrowedAmount).to.equal(0n, "Borrowed amount mismatch");
+        expect(newStableBaseCDPSnapshot.liquidationSnapshotsData[_safeId.toString()].debtPerCollateralSnapshot).to.equal(newStableBaseCDPSnapshot.cumulativeDebtPerUnitCollateral, "debtPerCollateralSnapshot mismatch");
+        expect(newStableBaseCDPSnapshot.liquidationSnapshotsData[_safeId.toString()].collateralPerCollateralSnapshot).to.equal(newStableBaseCDPSnapshot.cumulativeCollateralPerUnitCollateral, "collateralPerCollateralSnapshot mismatch");
 
-  async execute(
-    context: RunContext,
-    actor: Actor,
-    currentSnapshot: Snapshot,
-    actionParams: any
-  ): Promise<ExecutionReceipt> {
-    const tx = await this.contract
-      .connect(actor.account.value)
-      .openSafe(actionParams._safeId, actionParams._amount, { value: actionParams._amount });
-    const receipt = await tx.wait();
-    return { receipt };
-  }
+        // Total Collateral
+        expect(newStableBaseCDPSnapshot.totalCollateral).to.equal(prevStableBaseCDPSnapshot.totalCollateral + _amount, "Total collateral mismatch");
 
-  async validate(
-    context: RunContext,
-    actor: Actor,
-    previousSnapshot: Snapshot,
-    newSnapshot: Snapshot,
-    actionParams: any,
-    executionReceipt: ExecutionReceipt
-  ): Promise<boolean> {
-    const _safeId = actionParams._safeId;
-    const _amount = actionParams._amount;
+        // NFT Ownership
+        expect(newStableBaseCDPSnapshot.safeOwners[_safeId.toString()]).to.equal(actor.account.address, "NFT ownership mismatch");
 
-    const previousStableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
-    const newStableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
+        // Balances
+        expect(newAccountBalance).to.equal(prevAccountBalance - _amount - executionReceipt.receipt.gasUsed * executionReceipt.receipt.effectiveGasPrice, "Account balance mismatch");
 
-    const previousAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-    const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+        // Additional checks (optional, but recommended)
+        expect(newStableBaseCDPSnapshot.balances[actor.account.address]).to.gt(0n, "The balance of the msg.sender should be greater than 0");
 
-    const previousTotalCollateral = previousStableBaseCDPSnapshot.totalCollateral || BigInt(0);
-    const newTotalCollateral = newStableBaseCDPSnapshot.totalCollateral || BigInt(0);
-
-    const previousTotalDebt = previousStableBaseCDPSnapshot.totalDebt || BigInt(0);
-    const newTotalDebt = newStableBaseCDPSnapshot.totalDebt || BigInt(0);
-
-    // Safe Existence
-    expect(newStableBaseCDPSnapshot.safes[_safeId.toString()].collateralAmount).to.equal(_amount);
-    expect(newStableBaseCDPSnapshot.safes[_safeId.toString()].borrowedAmount).to.equal(BigInt(0));
-    expect(newStableBaseCDPSnapshot.safes[_safeId.toString()].weight).to.equal(BigInt(0));
-    expect(newStableBaseCDPSnapshot.safes[_safeId.toString()].totalBorrowedAmount).to.equal(BigInt(0));
-    expect(newStableBaseCDPSnapshot.safes[_safeId.toString()].feePaid).to.equal(BigInt(0));
-
-    // NFT Ownership
-    expect(await this.contract._ownerOf(_safeId)).to.equal(actor.account.address);
-    const previousBalance = previousSnapshot.contractSnapshot.stableBaseCDP._balances?.[actor.account.address] || BigInt(0);
-    const newBalance = newSnapshot.contractSnapshot.stableBaseCDP._balances?.[actor.account.address] || BigInt(0);
-    expect(newBalance - previousBalance).to.equal(BigInt(1));
-
-    // Collateral Value
-    expect(newTotalCollateral - previousTotalCollateral).to.equal(_amount);
-
-    // Liquidation Snapshot
-    expect(newStableBaseCDPSnapshot.liquidationSnapshots[_safeId.toString()].debtPerCollateralSnapshot).to.equal(previousStableBaseCDPSnapshot.cumulativeDebtPerUnitCollateral);
-    expect(newStableBaseCDPSnapshot.liquidationSnapshots[_safeId.toString()].collateralPerCollateralSnapshot).to.equal(previousStableBaseCDPSnapshot.cumulativeCollateralPerUnitCollateral);
-
-    // Account balance validation
-    expect(previousAccountBalance - newAccountBalance).to.equal(_amount);
-
-    // Total collateral and debt validation
-    expect(newTotalCollateral).to.equal(previousTotalCollateral + _amount);
-
-    return true;
-  }
-}
+        return true;
+    }
+} 
