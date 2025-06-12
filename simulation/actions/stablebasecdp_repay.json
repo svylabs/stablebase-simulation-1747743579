@@ -11,92 +11,74 @@
     "contract_name": "StableBaseCDP",
     "function_name": "repay",
     "pre_execution_parameter_generation_rules": [
-      "The 'safeId' must correspond to an existing CDP owned by the transaction sender.",
-      "The CDP identified by 'safeId' must have an outstanding 'borrowedAmount' greater than 0.",
-      "The 'amount' must be a positive integer representing the SBD tokens to repay.",
-      "The transaction sender must have a SBD token balance (queried via 'sbdToken.balanceOf(msg.sender)') greater than or equal to the specified 'amount'.",
-      "The 'amount' must be less than or equal to the current 'borrowedAmount' of the CDP (queried from 'safes[safeId].borrowedAmount').",
-      "After repayment, the remaining 'borrowedAmount' of the CDP must either be 0 or greater than or equal to the 'MINIMUM_DEBT' value (which can be queried from the 'StableBaseCDP' contract).",
-      "The 'nearestSpotInLiquidationQueue' can be 0. If a non-zero value is provided, it should be a 'safeId' that exists within the 'safesOrderedForLiquidation' linked list and is numerically 'close' to the expected new collateralization ratio of the CDP to optimize gas usage for list operations."
+      "'safeId': Must be the ID of an existing CDP (Safe) that is owned by the calling address (msg.sender).",
+      "'amount': A positive integer representing the amount of SBD to repay. This amount must be less than or equal to the current 'borrowedAmount' of the specified 'safeId'. The calling address must have an SBD token balance greater than or equal to this 'amount'. The 'borrowedAmount' remaining after repayment (i.e., previous_borrowedAmount - amount) must either be zero or greater than or equal to the 'MINIMUM_DEBT' constant.",
+      "'nearestSpotInLiquidationQueue': An optional 'safeId' that serves as a hint for efficient placement/repositioning within the 'safesOrderedForLiquidation' doubly linked list. This parameter can be 0 if no specific hint is provided or required, in which case the contract will start searching from the head of the list."
     ],
     "on_execution_state_updates_made": [
       {
         "category": "CDP State Updates",
         "state_update_descriptions": [
-          "The 'borrowedAmount' of the specified CDP ('safes[safeId].borrowedAmount') is first increased to account for any accrued debt since the last update, and then decreased by the 'amount' repaid.",
-          "The 'collateralAmount' of the specified CDP ('safes[safeId].collateralAmount') is increased to account for any accrued collateral since the last update.",
-          "The 'totalBorrowedAmount' of the specified CDP ('safes[safeId].totalBorrowedAmount') is increased by any accrued debt.",
-          "The 'collateralPerCollateralSnapshot' in 'liquidationSnapshots[safeId]' is updated to the current 'cumulativeCollateralPerUnitCollateral'.",
-          "The 'debtPerCollateralSnapshot' in 'liquidationSnapshots[safeId]' is updated to the current 'cumulativeDebtPerUnitCollateral'."
+          "The 'borrowedAmount' of the specified Safe (CDP) is decreased by the repaid 'amount'.",
+          "The 'collateralAmount' of the specified Safe (CDP) may be increased if the '_updateSafe' function is triggered due to accrued collateral.",
+          "The 'totalBorrowedAmount' of the specified Safe (CDP) may be increased if the '_updateSafe' function is triggered due to accrued debt."
         ]
       },
       {
         "category": "Global Protocol State Updates",
         "state_update_descriptions": [
-          "The 'totalCollateral' is increased by any accrued collateral for the specific CDP.",
-          "The 'totalDebt' is increased by any accrued debt for the specific CDP, and then decreased by the 'amount' repaid.",
-          "The 'PROTOCOL_MODE' may change from 'BOOTSTRAP' to 'NORMAL' if 'totalDebt' exceeds 'BOOTSTRAP_MODE_DEBT_THRESHOLD' during the debt increase step."
+          "The overall 'totalDebt' of the protocol is decreased by the 'amount' repaid.",
+          "The 'totalCollateral' of the protocol may be increased if the '_updateSafe' function is triggered due to accrued collateral.",
+          "The 'PROTOCOL_MODE' may transition from 'BOOTSTRAP' to 'NORMAL' if the 'totalDebt' falls below 'BOOTSTRAP_MODE_DEBT_THRESHOLD'."
         ]
       },
       {
-        "category": "Token Balance Updates",
+        "category": "Token State Updates",
         "state_update_descriptions": [
-          "The SBD token balance of the transaction sender (msg.sender) is decreased by the 'amount'.",
+          "The SBD token balance of the 'msg.sender' (the caller) is decreased by the 'amount' as tokens are burned.",
           "The total supply of SBD tokens ('sbdToken.totalSupply') is decreased by the 'amount'.",
-          "The 'totalBurned' counter in the 'DFIDToken' contract is increased by the 'amount'."
+          "The 'totalBurned' counter in the SBD token contract is increased by the 'amount'."
         ]
       },
       {
-        "category": "Liquidation Queue Updates",
+        "category": "Queue State Updates",
         "state_update_descriptions": [
-          "If the CDP's new collateralization ratio is not zero after repayment, the CDP's position in the 'safesOrderedForLiquidation' linked list is updated or re-inserted (via 'upsert') to reflect its new ratio, potentially modifying 'nodes', 'head', or 'tail' of the list.",
-          "If the CDP's new collateralization ratio is zero (debt fully repaid), the CDP is removed from the 'safesOrderedForLiquidation' linked list, updating 'nodes', 'head', or 'tail'."
+          "The specified Safe is repositioned in the 'safesOrderedForLiquidation' doubly linked list based on its new collateralization ratio, or removed if its new borrowed amount becomes zero.",
+          "If the Safe's borrowed amount becomes zero after repayment, it is also removed from the 'safesOrderedForRedemption' doubly linked list."
         ]
       },
       {
-        "category": "Redemption Queue Updates",
+        "category": "Snapshot State Updates",
         "state_update_descriptions": [
-          "If the CDP's new collateralization ratio is zero (debt fully repaid), the CDP is removed from the 'safesOrderedForRedemption' linked list, updating 'nodes', 'head', or 'tail'."
+          "The 'collateralPerCollateralSnapshot' and 'debtPerCollateralSnapshot' for the 'safeId' within 'liquidationSnapshots' are updated if the '_updateSafe' function is triggered, reflecting the latest cumulative values."
         ]
       }
     ],
     "post_execution_contract_state_validation_rules": [
       {
-        "category": "CDP State Validation",
+        "category": "State Validation",
         "rule_descriptions": [
-          "The 'borrowedAmount' of the 'safeId' in 'safes' must be equal to its original 'borrowedAmount' (after accounting for any accrual via '_updateSafe') minus the 'amount' repaid.",
-          "The 'collateralAmount' of the 'safeId' in 'safes' must reflect any accrued collateral (via '_updateSafe').",
-          "The 'liquidationSnapshots[safeId].collateralPerCollateralSnapshot' must be equal to the 'cumulativeCollateralPerUnitCollateral' of the 'StableBaseCDP' contract after the transaction.",
-          "The 'liquidationSnapshots[safeId].debtPerCollateralSnapshot' must be equal to the 'cumulativeDebtPerCollateral' of the 'StableBaseCDP' contract after the transaction.",
-          "If the 'borrowedAmount' of the CDP becomes 0, the CDP must no longer exist in the 'safesOrderedForLiquidation' and 'safesOrderedForRedemption' linked lists.",
-          "If the 'borrowedAmount' of the CDP is still greater than 0, its position within the 'safesOrderedForLiquidation' linked list must accurately reflect its new collateralization ratio."
-        ]
-      },
-      {
-        "category": "Global Protocol State Validation",
-        "rule_descriptions": [
-          "The 'totalCollateral' in 'StableBaseCDP' must be updated by any accrued collateral for the specific CDP.",
-          "The 'totalDebt' in 'StableBaseCDP' must be updated by any accrued debt for the specific CDP and then decreased by the 'amount' repaid.",
-          "The 'PROTOCOL_MODE' must reflect any changes if 'totalDebt' crossed the 'BOOTSTRAP_MODE_DEBT_THRESHOLD'."
-        ]
-      },
-      {
-        "category": "Token Balance Validation",
-        "rule_descriptions": [
-          "The SBD token balance of the transaction sender (msg.sender) must be reduced by the specified 'amount'.",
-          "The 'sbdToken.totalSupply' must be reduced by the specified 'amount'.",
-          "The 'sbdToken.totalBurned' must be increased by the specified 'amount'."
+          "Verify that the 'borrowedAmount' for the 'safeId' in 'StableBaseCDP.safes' has been updated correctly, reflecting the 'amount' repaid and any adjustments from accrued debt within '_updateSafe'.",
+          "Verify that the 'totalDebt' in 'StableBaseCDP' has been decreased by the 'amount' repaid, taking into account any 'debtIncrease' from '_updateSafe'.",
+          "Verify that the 'sbdToken.balanceOf(msg.sender)' has decreased by the 'amount' repaid.",
+          "Verify that the 'sbdToken.totalSupply' has decreased by the 'amount' repaid.",
+          "Verify that the 'sbdToken.totalBurned' has increased by the 'amount' repaid.",
+          "If '_updateSafe' was triggered, verify that 'StableBaseCDP.safes[safeId].collateralAmount' and 'StableBaseCDP.safes[safeId].totalBorrowedAmount' reflect the increase from accrued collateral and debt respectively. Also, verify 'StableBaseCDP.totalCollateral' is updated.",
+          "If '_updateSafe' was triggered, verify that 'StableBaseCDP.liquidationSnapshots[safeId].collateralPerCollateralSnapshot' is updated to 'cumulativeCollateralPerUnitCollateral' and 'StableBaseCDP.liquidationSnapshots[safeId].debtPerCollateralSnapshot' is updated to 'cumulativeDebtPerCollateral'.",
+          "Verify that if the calculated 'newRatio' for the safe is not zero, the 'safeId' is correctly positioned (or re-positioned) within 'StableBaseCDP.safesOrderedForLiquidation' according to its updated ratio.",
+          "Verify that if the calculated 'newRatio' for the safe is zero, the 'safeId' has been successfully removed from both 'StableBaseCDP.safesOrderedForLiquidation' and 'StableBaseCDP.safesOrderedForRedemption'.",
+          "If the protocol's 'PROTOCOL_MODE' was 'BOOTSTRAP' prior to repayment and the new 'totalDebt' is less than or equal to 'BOOTSTRAP_MODE_DEBT_THRESHOLD', verify that 'StableBaseCDP.PROTOCOL_MODE' has transitioned to 'NORMAL'."
         ]
       },
       {
         "category": "Event Validation",
         "rule_descriptions": [
-          "A 'Repaid' event must be emitted by the 'StableBaseCDP' contract, containing the correct 'safeId', 'amount', 'newRatio', 'totalCollateral', and 'totalDebt'.",
-          "A 'SafeUpdated' event must be emitted by the 'StableBaseCDP' contract, with correct 'safeId', 'collateralAmount', 'debtAmount', 'collateralIncrease', 'debtIncrease', 'totalCollateral', and 'totalDebt' if the CDP's state was updated via '_updateSafe'.",
-          "A 'Burn' event must be emitted by the 'sbdToken' (DFIDToken) contract, with 'from' as 'msg.sender' and the correct 'amount'.",
-          "If the CDP's borrowed amount becomes zero after repayment, a 'SafeRemovedFromLiquidationQueue' event must be emitted by 'StableBaseCDP' with the 'safeId'.",
-          "If the CDP's borrowed amount becomes zero after repayment, a 'SafeRemovedFromRedemptionQueue' event must be emitted by 'StableBaseCDP' with the 'safeId'.",
-          "If the CDP's borrowed amount remains greater than zero after repayment, a 'LiquidationQueueUpdated' event must be emitted by 'StableBaseCDP' with the correct 'safeId', 'newRatio', and 'nextNode'."
+          "A 'Repaid' event must be emitted from the 'StableBaseCDP' contract with the correct 'safeId', 'amount', the calculated 'newRatio', and the updated 'totalCollateral' and 'totalDebt'.",
+          "A 'Burn' event must be emitted from the 'DFIDToken' contract (sbdToken) with 'msg.sender' as 'from' and the 'amount' repaid.",
+          "A 'Transfer' event must be emitted from the 'DFIDToken' contract (sbdToken) with 'msg.sender' as 'from', 'address(0)' as 'to', and the 'amount' repaid.",
+          "If the internal '_updateSafe' function was executed, a 'SafeUpdated' event must be emitted from 'StableBaseCDP' with the relevant updated values.",
+          "If the 'newRatio' (calculated for the safe after repayment) is not zero, a 'LiquidationQueueUpdated' event must be emitted from 'StableBaseCDP' for the 'safeId'.",
+          "If the 'newRatio' is zero, a 'SafeRemovedFromLiquidationQueue' event and a 'SafeRemovedFromRedemptionQueue' event must be emitted from 'StableBaseCDP' for the 'safeId'."
         ]
       }
     ]
@@ -114,118 +96,109 @@
           {
             "state_variable_name": "safes[safeId].borrowedAmount",
             "type": "uint256",
-            "what_does_it_track": "The current amount of SBD (debt) borrowed against a specific CDP.",
-            "why_is_is_important": "It reflects the actual amount of debt owed for the CDP, which is crucial for calculating the new collateralization ratio after repayment and determining if the CDP is undercollateralized.",
-            "when_is_it_updated": "It is updated at the beginning of the `repay` function, within the `_updateSafe` internal function, if the `cumulativeCollateralPerUnitCollateral` has changed since the last snapshot, implying an accrual of debt.",
-            "how_to_validate_state_update": "Verify that the `borrowedAmount` for the specific `safeId` has increased by the calculated `debtIncrease` (based on the difference in `cumulativeDebtPerUnitCollateral` since the last snapshot and the `collateralAmount`).",
+            "what_does_it_track": "The current outstanding SBD debt for a specific CDP (Safe).",
+            "why_is_is_important": "It represents the current financial obligation of a user within a CDP.",
+            "when_is_it_updated": "Updated when 'repay' is called. First, it might increase due to accrued debt via `_updateSafe`, then it is decreased by the 'amount' being repaid.",
+            "how_to_validate_state_update": "Verify the 'borrowedAmount' for the specified 'safeId' decreases by the 'amount' repaid, after any potential increase from accrued debt calculated by '_updateSafe'.",
             "has_conditional_updates": true,
-            "summary_of_update": "The `borrowedAmount` within the specified CDP (`safeId`) is increased to account for accrued interest (debt increase) since the last update.",
+            "summary_of_update": "The 'borrowedAmount' for the specific CDP ('safeId') is decreased by the 'amount' of SBD repaid. It can also be increased by accrued debt if the `_updateSafe` function logic is triggered.",
             "conditions": [
-              "If 'liquidationSnapshot.collateralPerCollateralSnapshot' is not equal to 'cumulativeCollateralPerUnitCollateral'"
+              "Updates from _updateSafe only apply if liquidationSnapshot.collateralPerCollateralSnapshot is not equal to cumulativeCollateralPerUnitCollateral.",
+              "Repayment amount must be less than or equal to current borrowedAmount.",
+              "Resulting borrowedAmount must be 0 or greater than or equal to MINIMUM_DEBT."
             ]
           },
           {
             "state_variable_name": "safes[safeId].totalBorrowedAmount",
             "type": "uint256",
-            "what_does_it_track": "The total amount of SBD ever borrowed for a specific CDP, including all accrued interest.",
-            "why_is_is_important": "This variable tracks the historical debt taken, potentially for accounting or analytics purposes, distinct from the currently owed `borrowedAmount`.",
-            "when_is_it_updated": "It is updated at the beginning of the `repay` function, within the `_updateSafe` internal function, if the `cumulativeCollateralPerUnitCollateral` has changed since the last snapshot.",
-            "how_to_validate_state_update": "Verify that the `totalBorrowedAmount` for the specific `safeId` has increased by the calculated `debtIncrease`.",
+            "what_does_it_track": "The cumulative SBD debt that a specific CDP (Safe) has ever accrued.",
+            "why_is_is_important": "It provides a historical record of the total debt associated with a CDP over its lifetime.",
+            "when_is_it_updated": "Updated when the `_updateSafe` function is called, which happens at the beginning of `repay`.",
+            "how_to_validate_state_update": "Verify the 'totalBorrowedAmount' for the specified 'safeId' increases by the 'debtIncrease' calculated in '_updateSafe'.",
             "has_conditional_updates": true,
-            "summary_of_update": "The `totalBorrowedAmount` within the specified CDP (`safeId`) is increased by the `debtIncrease` accrued since the last snapshot.",
+            "summary_of_update": "The 'totalBorrowedAmount' for the specific CDP ('safeId') is increased by any accrued debt (`debtIncrease`) calculated during the `_updateSafe` call.",
             "conditions": [
-              "If 'liquidationSnapshot.collateralPerCollateralSnapshot' is not equal to 'cumulativeCollateralPerUnitCollateral'"
+              "Only applies if liquidationSnapshot.collateralPerCollateralSnapshot is not equal to cumulativeCollateralPerUnitCollateral."
             ]
           },
           {
             "state_variable_name": "liquidationSnapshots[safeId].debtPerCollateralSnapshot",
             "type": "uint256",
-            "what_does_it_track": "The value of `cumulativeDebtPerUnitCollateral` at the time of the last update for a specific CDP, used to calculate debt accrual.",
-            "why_is_is_important": "This snapshot is crucial for accurately calculating the accrued debt on a CDP between user interactions.",
-            "when_is_it_updated": "It is updated at the beginning of the `repay` function, within the `_updateSafe` internal function, if the `cumulativeCollateralPerUnitCollateral` has changed, indicating an update to the safe's state.",
-            "how_to_validate_state_update": "Verify that `liquidationSnapshots[safeId].debtPerCollateralSnapshot` is updated to the current `cumulativeDebtPerUnitCollateral` value.",
+            "what_does_it_track": "A snapshot of the `cumulativeDebtPerUnitCollateral` at the time a Safe's debt is last updated, used to calculate future debt accrual.",
+            "why_is_is_important": "It is crucial for correctly calculating the amount of debt that has accrued on a Safe since its last update.",
+            "when_is_it_updated": "Updated when the `_updateSafe` function is called, which happens at the beginning of `repay`.",
+            "how_to_validate_state_update": "Verify 'debtPerCollateralSnapshot' for the specified 'safeId' is set to the current 'cumulativeDebtPerUnitCollateral' after the `_updateSafe` call.",
             "has_conditional_updates": true,
-            "summary_of_update": "The snapshot of the `cumulativeDebtPerUnitCollateral` for the given CDP (`safeId`) is updated to the current value.",
+            "summary_of_update": "The 'debtPerCollateralSnapshot' for the specific CDP ('safeId') is updated to the current `cumulativeDebtPerUnitCollateral`.",
             "conditions": [
-              "If 'liquidationSnapshot.collateralPerCollateralSnapshot' is not equal to 'cumulativeCollateralPerUnitCollateral'"
+              "Only applies if liquidationSnapshot.collateralPerCollateralSnapshot is not equal to cumulativeCollateralPerUnitCollateral."
             ]
           },
           {
             "state_variable_name": "safes[safeId].collateralAmount",
             "type": "uint256",
-            "what_does_it_track": "The current amount of collateral deposited in a specific CDP.",
-            "why_is_is_important": "It reflects the actual amount of collateral backing the CDP, essential for ratio calculations and liquidation checks.",
-            "when_is_it_updated": "It is updated at the beginning of the `repay` function, within the `_updateSafe` internal function, if the `cumulativeCollateralPerUnitCollateral` has changed.",
-            "how_to_validate_state_update": "Verify that the `collateralAmount` for the specific `safeId` has increased by the calculated `collateralIncrease` (based on the difference in `cumulativeCollateralPerUnitCollateral` since the last snapshot and the `collateralAmount`).",
+            "what_does_it_track": "The amount of collateral (e.g., ETH) currently locked in a specific CDP (Safe).",
+            "why_is_is_important": "It represents the value securing the debt of a CDP and impacts its collateralization ratio.",
+            "when_is_it_updated": "Updated when the `_updateSafe` function is called, which happens at the beginning of `repay`.",
+            "how_to_validate_state_update": "Verify the 'collateralAmount' for the specified 'safeId' increases by the 'collateralIncrease' calculated in '_updateSafe'.",
             "has_conditional_updates": true,
-            "summary_of_update": "The `collateralAmount` within the specified CDP (`safeId`) is increased to account for accrued collateral interest (collateral increase) since the last update.",
+            "summary_of_update": "The 'collateralAmount' for the specific CDP ('safeId') is increased by any accrued collateral (`collateralIncrease`) calculated during the `_updateSafe` call.",
             "conditions": [
-              "If 'liquidationSnapshot.collateralPerCollateralSnapshot' is not equal to 'cumulativeCollateralPerUnitCollateral'"
+              "Only applies if liquidationSnapshot.collateralPerCollateralSnapshot is not equal to cumulativeCollateralPerUnitCollateral."
             ]
           },
           {
             "state_variable_name": "liquidationSnapshots[safeId].collateralPerCollateralSnapshot",
             "type": "uint256",
-            "what_does_it_track": "The value of `cumulativeCollateralPerUnitCollateral` at the time of the last update for a specific CDP, used to calculate collateral accrual.",
-            "why_is_is_important": "This snapshot is crucial for accurately calculating the accrued collateral in a CDP between user interactions.",
-            "when_is_it_updated": "It is updated at the beginning of the `repay` function, within the `_updateSafe` internal function, if `cumulativeCollateralPerUnitCollateral` has changed.",
-            "how_to_validate_state_update": "Verify that `liquidationSnapshots[safeId].collateralPerCollateralSnapshot` is updated to the current `cumulativeCollateralPerUnitCollateral` value.",
+            "what_does_it_track": "A snapshot of the `cumulativeCollateralPerUnitCollateral` at the time a Safe's collateral is last updated, used to calculate future collateral accrual.",
+            "why_is_is_important": "It is crucial for correctly calculating the amount of collateral that has accrued in a Safe since its last update.",
+            "when_is_it_updated": "Updated when the `_updateSafe` function is called, which happens at the beginning of `repay`.",
+            "how_to_validate_state_update": "Verify 'collateralPerCollateralSnapshot' for the specified 'safeId' is set to the current 'cumulativeCollateralPerUnitCollateral' after the `_updateSafe` call.",
             "has_conditional_updates": true,
-            "summary_of_update": "The snapshot of the `cumulativeCollateralPerUnitCollateral` for the given CDP (`safeId`) is updated to the current value.",
+            "summary_of_update": "The 'collateralPerCollateralSnapshot' for the specific CDP ('safeId') is updated to the current `cumulativeCollateralPerUnitCollateral`.",
             "conditions": [
-              "If 'liquidationSnapshot.collateralPerCollateralSnapshot' is not equal to 'cumulativeCollateralPerUnitCollateral'"
+              "Only applies if liquidationSnapshot.collateralPerCollateralSnapshot is not equal to cumulativeCollateralPerUnitCollateral."
             ]
           },
           {
             "state_variable_name": "totalCollateral",
             "type": "uint256",
-            "what_does_it_track": "The aggregated amount of collateral held across all active CDPs in the protocol.",
-            "why_is_is_important": "It represents the protocol's total collateral backing the issued SBD, vital for overall system health and solvency.",
-            "when_is_it_updated": "It is updated at the beginning of the `repay` function, within the `_updateSafe` internal function, if collateral interest has accrued for the `safeId`.",
-            "how_to_validate_state_update": "Verify that `totalCollateral` has increased by the `collateralIncrease` calculated in the `_updateSafe` function.",
+            "what_does_it_track": "The sum of all collateral held across all active CDPs in the protocol.",
+            "why_is_is_important": "It represents the overall collateral backing the system's stablecoin supply.",
+            "when_is_it_updated": "Updated when the `_updateSafe` function is called, which happens at the beginning of `repay`.",
+            "how_to_validate_state_update": "Verify 'totalCollateral' increases by the 'collateralIncrease' amount determined in the '_updateSafe' call.",
             "has_conditional_updates": true,
-            "summary_of_update": "The total amount of collateral locked across all CDPs is increased by the `collateralIncrease` calculated for the specific `safeId`.",
+            "summary_of_update": "The 'totalCollateral' is increased by any accrued collateral (`collateralIncrease`) calculated during the `_updateSafe` call.",
             "conditions": [
-              "If 'liquidationSnapshot.collateralPerCollateralSnapshot' is not equal to 'cumulativeCollateralPerUnitCollateral'"
+              "Only applies if `_updateSafe` logic is triggered and `collateralIncrease` is positive (i.e., liquidationSnapshot.collateralPerCollateralSnapshot is not equal to cumulativeCollateralPerUnitCollateral and `collateralIncrease` is > 0)."
             ]
           },
           {
             "state_variable_name": "totalDebt",
             "type": "uint256",
-            "what_does_it_track": "The total amount of SBD currently minted and outstanding across all CDPs.",
-            "why_is_is_important": "It indicates the total SBD supply backed by collateral, crucial for maintaining the SBD peg and system stability.",
-            "when_is_it_updated": "It is updated twice: first within `_updateSafe` (if debt accrued) and then directly at the end of the `repay` function to reflect the repayment amount.",
-            "how_to_validate_state_update": "The `totalDebt` should reflect the sum/difference of the current `totalDebt` and the provided `delta` (`debtIncrease` for the first call, `amount` for the second call) based on the `add` parameter.",
-            "has_conditional_updates": false,
-            "summary_of_update": "The total outstanding debt in the system is updated by increasing it (due to accrued interest during `_updateSafe`) and then decreasing it (due to the `amount` repaid).",
+            "what_does_it_track": "The sum of all outstanding SBD debt across all active CDPs in the protocol.",
+            "why_is_is_important": "It represents the total stablecoin supply generated by the protocol.",
+            "when_is_it_updated": "Updated via `_updateSafe` at the beginning of `repay` (for potential increase) and then directly by `repay` itself (for decrease).",
+            "how_to_validate_state_update": "Verify 'totalDebt' decreases by the 'amount' repaid, after considering any potential increase from accrued debt calculated by '_updateSafe'.",
+            "has_conditional_updates": true,
+            "summary_of_update": "The 'totalDebt' is decreased by the 'amount' of SBD repaid. It can also be increased by accrued debt (`debtIncrease`) if the `_updateSafe` function logic is triggered before the repayment.",
             "conditions": [
-              "If 'liquidationSnapshot.collateralPerCollateralSnapshot' is not equal to 'cumulativeCollateralPerUnitCollateral' (first call to _updateTotalDebt)",
-              "Always (second call to _updateTotalDebt)"
+              "Always decreased by the 'amount' being repaid.",
+              "Can be increased if `_updateSafe` logic is triggered and `debtIncrease` is positive (i.e., liquidationSnapshot.collateralPerCollateralSnapshot is not equal to cumulativeCollateralPerUnitCollateral and `debtIncrease` is > 0)."
             ]
           },
           {
             "state_variable_name": "PROTOCOL_MODE",
             "type": "enum",
-            "what_does_it_track": "The current operating mode of the protocol (e.g., 'BOOTSTRAP' or 'NORMAL'), which might influence fee structures or other parameters.",
-            "why_is_is_important": "This mode transition can signify a mature state of the protocol and potentially adjust risk parameters or fee mechanisms.",
-            "when_is_it_updated": "It is updated during the first call to `_updateTotalDebt` (triggered by `_updateSafe`) if the total debt crosses a certain threshold and the system is in `BOOTSTRAP` mode.",
-            "how_to_validate_state_update": "Verify `PROTOCOL_MODE` changes from `BOOTSTRAP` to `NORMAL` if the debt crosses the threshold and the protocol is in bootstrap mode.",
+            "what_does_it_track": "The operational mode of the protocol (e.g., BOOTSTRAP, NORMAL).",
+            "why_is_is_important": "Determines certain operational parameters and restrictions of the protocol.",
+            "when_is_it_updated": "Potentially updated within the `_updateTotalDebt` function, which is called both by `_updateSafe` and directly by `repay`.",
+            "how_to_validate_state_update": "Verify 'PROTOCOL_MODE' changes from 'BOOTSTRAP' to 'NORMAL' if 'totalDebt' crosses the 'BOOTSTRAP_MODE_DEBT_THRESHOLD' during this transaction.",
             "has_conditional_updates": true,
-            "summary_of_update": "The protocol's operational mode is changed from `BOOTSTRAP` to `NORMAL` if the total debt exceeds a predefined threshold.",
+            "summary_of_update": "The protocol mode can transition from `BOOTSTRAP` to `NORMAL` if the `totalDebt` exceeds a predefined `BOOTSTRAP_MODE_DEBT_THRESHOLD` during the update of `totalDebt`.",
             "conditions": [
-              "If 'liquidationSnapshot.collateralPerCollateralSnapshot' is not equal to 'cumulativeCollateralPerUnitCollateral' AND 'totalDebt' (after update) is greater than 'BOOTSTRAP_MODE_DEBT_THRESHOLD' AND 'PROTOCOL_MODE' is 'BOOTSTRAP'"
+              "Only updated if `totalDebt` exceeds `BOOTSTRAP_MODE_DEBT_THRESHOLD` AND `PROTOCOL_MODE` is currently `BOOTSTRAP`."
             ]
-          },
-          {
-            "state_variable_name": "safes[safeId].borrowedAmount",
-            "type": "uint256",
-            "what_does_it_track": "The current amount of SBD (debt) borrowed against a specific CDP.",
-            "why_is_is_important": "This is the primary state change reflecting the debt reduction for the CDP, directly impacting its collateralization ratio.",
-            "when_is_it_updated": "After SBD tokens are burned, the `borrowedAmount` of the specific `safeId` is directly reduced by the `amount` repaid.",
-            "how_to_validate_state_update": "Verify that `safes[safeId].borrowedAmount` has decreased by the `amount` of SBD repaid.",
-            "has_conditional_updates": false,
-            "summary_of_update": "The `borrowedAmount` for the given CDP (`safeId`) is reduced by the amount of SBD repaid.",
-            "conditions": []
           }
         ]
       },
@@ -233,36 +206,38 @@
         "contract_name": "DFIDToken",
         "state_updated": [
           {
-            "state_variable_name": "_balances[msg.sender]",
+            "state_variable_name": "_balances[account]",
             "type": "uint256",
-            "what_does_it_track": "The individual SBD token balance of a specific address.",
-            "why_is_is_important": "This reflects the SBD token transfer out of the user's wallet as part of the repayment.",
-            "when_is_it_updated": "It is updated when `sbdToken.burn` is called on the `DFIDToken` contract, which occurs as part of the `repay` function.",
-            "how_to_validate_state_update": "Verify that `_balances[msg.sender]` has decreased by `amount`.",
+            "what_does_it_track": "The SBD token balance held by individual addresses.",
+            "why_is_is_important": "Tracks the SBD ownership for each user.",
+            "when_is_it_updated": "Updated when `sbdToken.burn(msg.sender, amount)` is called within the `repay` function.",
+            "how_to_validate_state_update": "Verify the SBD balance of `msg.sender` decreases by the `amount` repaid.",
             "has_conditional_updates": false,
-            "summary_of_update": "The SBD balance of the `msg.sender` (the repayer) is decreased by the `amount` repaid, as these tokens are burned.",
-            "conditions": []
+            "summary_of_update": "The SBD token balance of the `msg.sender` is decreased by the `amount` being repaid.",
+            "conditions": [
+              "Sender (msg.sender) must have sufficient SBD balance (balanceOf(msg.sender) >= amount)."
+            ]
           },
           {
             "state_variable_name": "_totalSupply",
             "type": "uint256",
             "what_does_it_track": "The total number of SBD tokens in existence.",
-            "why_is_is_important": "This maintains the deflationary nature of SBD upon repayment, contributing to its peg stability.",
-            "when_is_it_updated": "It is updated when `sbdToken.burn` is called on the `DFIDToken` contract.",
-            "how_to_validate_state_update": "Verify that `_totalSupply` has decreased by `amount`.",
+            "why_is_is_important": "Reflects the overall supply of the stablecoin.",
+            "when_is_it_updated": "Updated when `sbdToken.burn(msg.sender, amount)` is called within the `repay` function.",
+            "how_to_validate_state_update": "Verify the 'totalSupply' of SBD tokens decreases by the 'amount' repaid.",
             "has_conditional_updates": false,
-            "summary_of_update": "The total supply of SBD tokens is decreased by the `amount` repaid, as these tokens are burned.",
+            "summary_of_update": "The total supply of the SBD token is decreased by the `amount` being repaid (burned).",
             "conditions": []
           },
           {
             "state_variable_name": "totalBurned",
             "type": "uint256",
-            "what_does_it_track": "The cumulative sum of all SBD tokens that have been permanently removed from circulation.",
-            "why_is_is_important": "This provides a public record of the SBD tokens burned, useful for transparency and auditing.",
-            "when_is_it_updated": "It is updated when `sbdToken.burn` is called on the `DFIDToken` contract.",
-            "how_to_validate_state_update": "Verify that `totalBurned` has increased by `amount`.",
+            "what_does_it_track": "The total count of SBD tokens that have been permanently removed from circulation.",
+            "why_is_is_important": "Provides a public record of the deflationary mechanism of the SBD token.",
+            "when_is_it_updated": "Updated when `sbdToken.burn(msg.sender, amount)` is called within the `repay` function.",
+            "how_to_validate_state_update": "Verify 'totalBurned' increases by the 'amount' repaid.",
             "has_conditional_updates": false,
-            "summary_of_update": "The total cumulative amount of SBD tokens ever burned is increased by the `amount` repaid.",
+            "summary_of_update": "The cumulative amount of SBD tokens that have been burned is increased by the `amount` being repaid.",
             "conditions": []
           }
         ]
@@ -271,61 +246,45 @@
         "contract_name": "OrderedDoublyLinkedList",
         "state_updated": [
           {
-            "state_variable_name": "nodes[safeId]",
-            "type": "struct",
-            "what_does_it_track": "The metadata (value, prev, next pointers) for each node (CDP `safeId`) in the ordered doubly linked list, representing its collateralization ratio and position.",
-            "why_is_is_important": "This ensures the liquidation queue accurately reflects the current risk profile of the CDPs, allowing for efficient liquidation of undercollateralized positions.",
-            "when_is_it_updated": "If the `_newRatio` (collateralization ratio) is not zero, the `safeId`'s position in `safesOrderedForLiquidation` is `upsert`-ed with the new ratio.",
-            "how_to_validate_state_update": "After `upsert`, retrieve `nodes[safeId]`. Its `value` should be `_newRatio`, and its `prev` and `next` pointers should correctly link it within the ordered list based on `_newRatio`.",
+            "state_variable_name": "nodes[id]",
+            "type": "struct Node",
+            "what_does_it_track": "Individual nodes within the doubly linked list, storing their value (ratio) and pointers to previous and next nodes.",
+            "why_is_is_important": "Maintains the ordered lists of CDPs for liquidation and redemption, which is critical for the protocol's stability mechanisms.",
+            "when_is_it_updated": "Updated by `safesOrderedForLiquidation.upsert` or `safesOrderedForLiquidation.remove` and `safesOrderedForRedemption.remove` depending on the `_newRatio`.",
+            "how_to_validate_state_update": "Check the `nodes` mapping for the `safeId` in `safesOrderedForLiquidation` and `safesOrderedForRedemption`. The node should be updated with the new ratio or removed if debt is zero. Verify `prev` and `next` pointers of adjacent nodes are correct.",
             "has_conditional_updates": true,
-            "summary_of_update": "The node representing the `safeId` in the `safesOrderedForLiquidation` list is updated with the new collateralization ratio, or inserted if it was not present.",
+            "summary_of_update": "The node representing the `safeId` in the `safesOrderedForLiquidation` list is either updated with a new ratio (if `_newRatio != 0`) or removed (if `_newRatio == 0`). If `_newRatio == 0`, the node is also removed from `safesOrderedForRedemption`.",
             "conditions": [
-              "If the new collateralization ratio (`_newRatio`) for the safe is not zero AND the safe already exists in the list (i.e., it's an update)",
-              "If the new collateralization ratio (`_newRatio`) for the safe is not zero AND the safe does not exist in the list (i.e., it's an insert)"
-            ]
-          },
-          {
-            "state_variable_name": "nodes[safeId]",
-            "type": "struct",
-            "what_does_it_track": "The metadata (value, prev, next pointers) for each node (CDP `safeId`) in the ordered doubly linked list.",
-            "why_is_is_important": "Removing the safe ensures it's no longer considered for liquidation or redemption, especially when the debt is fully repaid.",
-            "when_is_it_updated": "If the `_newRatio` (collateralization ratio) becomes zero, the `safeId` is removed from both `safesOrderedForLiquidation` and `safesOrderedForRedemption` lists.",
-            "how_to_validate_state_update": "After `remove`, querying `nodes[safeId]` should return a default/zero-initialized node, indicating its deletion.",
-            "has_conditional_updates": true,
-            "summary_of_update": "The node representing the `safeId` is removed from both the `safesOrderedForLiquidation` and `safesOrderedForRedemption` lists.",
-            "conditions": [
-              "If the new collateralization ratio (`_newRatio`) for the safe is zero AND the safe is removed from the liquidation queue.",
-              "If the new collateralization ratio (`_newRatio`) for the safe is zero AND the safe is removed from the redemption queue."
+              "If `_newRatio` (calculated from remaining debt and collateral) is not zero, the safe's node in `safesOrderedForLiquidation` is updated (upserted).",
+              "If `_newRatio` is zero (debt is fully repaid), the safe's node is removed from both `safesOrderedForLiquidation` and `safesOrderedForRedemption`."
             ]
           },
           {
             "state_variable_name": "head",
             "type": "uint256",
             "what_does_it_track": "The ID of the first node in the ordered doubly linked list.",
-            "why_is_is_important": "This pointer provides efficient access to the riskiest/least risky CDP in the respective queues, depending on the ordering logic.",
-            "when_is_it_updated": "It is updated when a node is inserted at the beginning of the list, or when the current head node is removed.",
-            "how_to_validate_state_update": "After an operation that modifies `head`, verify that the `head` pointer points to the correct `safeId` which should be the new first element in the ordered list.",
+            "why_is_is_important": "Acts as the starting point for traversing the ordered list.",
+            "when_is_it_updated": "Updated internally by `_insert` or `_remove` functions within `OrderedDoublyLinkedList` when `safesOrderedForLiquidation.upsert`, `safesOrderedForLiquidation.remove`, or `safesOrderedForRedemption.remove` are called.",
+            "how_to_validate_state_update": "Verify the 'head' ID correctly points to the first node in the respective ordered list after modification.",
             "has_conditional_updates": true,
-            "summary_of_update": "The `head` pointer of `safesOrderedForLiquidation` or `safesOrderedForRedemption` might change if the `safeId` being updated/removed was previously the head or if a new `safeId` becomes the new head.",
+            "summary_of_update": "The `head` pointer of `safesOrderedForLiquidation` or `safesOrderedForRedemption` can be updated if a new node is inserted at the beginning of the list or if the current head node is removed.",
             "conditions": [
-              "If the new collateralization ratio (`_newRatio`) is zero AND the `safeId` was previously the head of the `safesOrderedForLiquidation` list.",
-              "If the new collateralization ratio (`_newRatio`) is zero AND the `safeId` was previously the head of the `safesOrderedForRedemption` list.",
-              "If the new collateralization ratio (`_newRatio`) is not zero AND the `safeId` is inserted as the new head of the `safesOrderedForLiquidation` list."
+              "Only updated if a node is inserted at the head or the current head node is removed.",
+              "Depends on the `_newRatio` calculation which determines whether `upsert` or `remove` is called and how the list is modified."
             ]
           },
           {
             "state_variable_name": "tail",
             "type": "uint256",
             "what_does_it_track": "The ID of the last node in the ordered doubly linked list.",
-            "why_is_is_important": "This pointer provides efficient access to the least risky/most risky CDP in the respective queues, depending on the ordering logic.",
-            "when_is_it_updated": "It is updated when a node is inserted at the end of the list, or when the current tail node is removed.",
-            "how_to_validate_state_update": "After an operation that modifies `tail`, verify that the `tail` pointer points to the correct `safeId` which should be the new last element in the ordered list.",
+            "why_is_is_important": "Acts as the ending point for traversing the ordered list.",
+            "when_is_it_updated": "Updated internally by `_insert` or `_remove` functions within `OrderedDoublyLinkedList` when `safesOrderedForLiquidation.upsert`, `safesOrderedForLiquidation.remove`, or `safesOrderedForRedemption.remove` are called.",
+            "how_to_validate_state_update": "Verify the 'tail' ID correctly points to the last node in the respective ordered list after modification.",
             "has_conditional_updates": true,
-            "summary_of_update": "The `tail` pointer of `safesOrderedForLiquidation` or `safesOrderedForRedemption` might change if the `safeId` being updated/removed was previously the tail or if a new `safeId` becomes the new tail.",
+            "summary_of_update": "The `tail` pointer of `safesOrderedForLiquidation` or `safesOrderedForRedemption` can be updated if a new node is inserted at the end of the list or if the current tail node is removed.",
             "conditions": [
-              "If the new collateralization ratio (`_newRatio`) is zero AND the `safeId` was previously the tail of the `safesOrderedForLiquidation` list.",
-              "If the new collateralization ratio (`_newRatio`) is zero AND the `safeId` was previously the tail of the `safesOrderedForRedemption` list.",
-              "If the new collateralization ratio (`_newRatio`) is not zero AND the `safeId` is inserted as the new tail of the `safesOrderedForLiquidation` list."
+              "Only updated if a node is inserted at the tail or the current tail node is removed.",
+              "Depends on the `_newRatio` calculation which determines whether `upsert` or `remove` is called and how the list is modified."
             ]
           }
         ]
