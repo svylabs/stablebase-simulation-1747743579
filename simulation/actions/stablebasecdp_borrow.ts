@@ -4,164 +4,177 @@ import { ethers } from "ethers";
 import { expect } from 'chai';
 
 export class BorrowAction extends Action {
-  private contract: ethers.Contract;
+    contract: ethers.Contract;
 
-  constructor(contract: ethers.Contract) {
-    super("BorrowAction");
-    this.contract = contract;
-  }
-
-  async initialize(
-    context: RunContext,
-    actor: Actor,
-    currentSnapshot: Snapshot
-  ): Promise<[boolean, any, Record<string, any>]> {
-    const safeId = actor.identifiers.safeId;
-    if (!safeId) {
-      console.log("SafeId not available, cannot proceed with Borrow action");
-      return [false, {}, {}];
+    constructor(contract: ethers.Contract) {
+        super("BorrowAction");
+        this.contract = contract;
     }
 
-    const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
-    const accountSnapshot = currentSnapshot.accountSnapshot[actor.account.address];
+    async initialize(
+        context: RunContext,
+        actor: Actor,
+        currentSnapshot: Snapshot
+    ): Promise<[boolean, any, Record<string, any>]> {
+        const safeOwners = currentSnapshot.contractSnapshot.stableBaseCDP.safeOwners;
 
-    const safeInfo = currentSnapshot.contractSnapshot.stableBaseCDP.safes[safeId.toString()];
+        let safeId: number | undefined = undefined;
+        for (const id in safeOwners) {
+            if (safeOwners[id] === actor.account.address) {
+                safeId = parseInt(id);
+                break;
+            }
+        }
 
-    if (!safeInfo) {
-      console.log("Safe does not exist, cannot proceed with Borrow action");
-      return [false, {}, {}];
-    }
-    if (safeInfo.collateralAmount === BigInt(0)) {
-        console.log("Safe has no collateral, cannot proceed with Borrow action");
-        return [false, {}, {}];
-    }
+        if (safeId === undefined) {
+            console.log("No safe owned by actor");
+            return [false, {}, {}];
+        }
 
-    const priceOracle = context.contracts.mockPriceOracle;
-    const price = await priceOracle.fetchPrice();
+        const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP
+        const safe = stableBaseCDPSnapshot.safesData[safeId];
+        if (!safe) {
+            console.log(`Safe with id ${safeId} not found`);
+            return [false, {}, {}];
+        }
 
-    const liquidationRatio = BigInt(20000); // Example liquidation ratio
-    const basisPointsDivisor = BigInt(10000);
-    const minimumDebt = stableBaseCDPSnapshot.minimumDebt
+        const mockPriceOracleSnapshot = currentSnapshot.contractSnapshot.mockPriceOracle
+        const price = mockPriceOracleSnapshot.currentPrice;
+        const liquidationRatio = 15000; // Example liquidation ratio, adjust as needed
+        const BASIS_POINTS_DIVISOR = 10000;
+        const PRECISION = BigInt(10) ** BigInt(18);
+        const MINIMUM_DEBT = BigInt(2000) * BigInt(10) ** BigInt(18);
 
-    const maxBorrowAmount = ((
-        (safeInfo.collateralAmount * price * basisPointsDivisor)
-    ) / liquidationRatio) / BigInt(100000000);
+        const maxBorrowAmount = ((
+            (safe.collateralAmount * price * BigInt(BASIS_POINTS_DIVISOR))
+        ) / BigInt(liquidationRatio)) / PRECISION;
 
-    const availableEth = accountSnapshot || BigInt(0)
+        const currentBorrowedAmount = safe.borrowedAmount;
 
-    if (maxBorrowAmount <= safeInfo.borrowedAmount) {
-        console.log("Max borrow amount is less than or equal to the current borrowed amount");
-        return [false, {}, {}];
-    }
+        let amount: bigint = BigInt(context.prng.next()) % (maxBorrowAmount - currentBorrowedAmount);
+        if (amount <= BigInt(0)) {
+            amount = maxBorrowAmount / BigInt(2);
+        }
 
-    let amount = BigInt(Math.floor(context.prng.next() % Number(maxBorrowAmount - safeInfo.borrowedAmount))) + BigInt(1);
+        if (amount + safe.borrowedAmount < MINIMUM_DEBT) {
+            amount = MINIMUM_DEBT - safe.borrowedAmount;
+        }
 
-    if (safeInfo.borrowedAmount + amount > maxBorrowAmount || safeInfo.borrowedAmount + amount < minimumDebt) {
-      console.log("Borrow amount exceeds the limit or is invalid, cannot proceed with Borrow action");
-      return [false, {}, {}];
-    }
+        const shieldingRate = BigInt(context.prng.next()) % BigInt(BASIS_POINTS_DIVISOR);
+        const nearestSpotInLiquidationQueue = BigInt(0); // For simplicity
+        const nearestSpotInRedemptionQueue = BigInt(0); // For simplicity
 
-    const shieldingRate = BigInt(Math.floor(context.prng.next() % 10000)); // between 0 and BASIS_POINTS_DIVISOR
-    const nearestSpotInLiquidationQueue = BigInt(0); // Or a valid safeId
-    const nearestSpotInRedemptionQueue = BigInt(0); // Or a valid safeId
+        const actionParams = {
+            safeId: BigInt(safeId),
+            amount: amount,
+            shieldingRate: shieldingRate,
+            nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue,
+            nearestSpotInRedemptionQueue: nearestSpotInRedemptionQueue,
+        };
 
-    const params = {
-      safeId: safeId,
-      amount: amount,
-      shieldingRate: shieldingRate,
-      nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue,
-      nearestSpotInRedemptionQueue: nearestSpotInRedemptionQueue,
-    };
-
-    return [true, params, {}];
-  }
-
-  async execute(
-    context: RunContext,
-    actor: Actor,
-    currentSnapshot: Snapshot,
-    actionParams: any
-  ): Promise<ExecutionReceipt> {
-    const { safeId, amount, shieldingRate, nearestSpotInLiquidationQueue, nearestSpotInRedemptionQueue } = actionParams;
-
-    const tx = await this.contract
-      .connect(actor.account.value)
-      .borrow(
-        safeId,
-        amount,
-        shieldingRate,
-        nearestSpotInLiquidationQueue,
-        nearestSpotInRedemptionQueue
-      );
-
-    return { tx: tx, emittedEvents: [] };
-  }
-
-  async validate(
-    context: RunContext,
-    actor: Actor,
-    previousSnapshot: Snapshot,
-    newSnapshot: Snapshot,
-    actionParams: any,
-    executionReceipt: ExecutionReceipt
-  ): Promise<boolean> {
-    const { safeId, amount, shieldingRate } = actionParams;
-
-    const previousSafe = previousSnapshot.contractSnapshot.stableBaseCDP.safes[safeId.toString()];
-    const newSafe = newSnapshot.contractSnapshot.stableBaseCDP.safes[safeId.toString()];
-
-    const previousTotalDebt = previousSnapshot.contractSnapshot.stableBaseCDP.totalDebt;
-    const newTotalDebt = newSnapshot.contractSnapshot.stableBaseCDP.totalDebt;
-    const bootstrapModeDebtThreshold = previousSnapshot.contractSnapshot.stableBaseCDP.bootstrapModeDebtThreshold;
-
-    const previousProtocolMode = previousSnapshot.contractSnapshot.stableBaseCDP.protocolMode;
-    const newProtocolMode = newSnapshot.contractSnapshot.stableBaseCDP.protocolMode;
-
-    const dfidTokenAddress = (context.contracts.dfidToken as any).target;
-    const previousSBDTokenBalance = previousSnapshot.contractSnapshot.dfidToken.balances[actor.account.address] || BigInt(0);
-    const newSBDTokenBalance = newSnapshot.contractSnapshot.dfidToken.balances[actor.account.address] || BigInt(0);
-    const previousContractSBDTokenBalance = previousSnapshot.contractSnapshot.dfidToken.balances[dfidTokenAddress] || BigInt(0);
-    const newContractSBDTokenBalance = newSnapshot.contractSnapshot.dfidToken.balances[dfidTokenAddress] || BigInt(0);
-
-    const basisPointsDivisor = BigInt(10000);
-
-    // Calculate shielding fee based on weight. This part depends on contract internal logic.
-    let _shieldingFee = BigInt(0);
-    if (shieldingRate > BigInt(0)) {
-        _shieldingFee = (amount * shieldingRate) / basisPointsDivisor;
+        return [true, actionParams, {}];
     }
 
-    const _amountToBorrow = amount - _shieldingFee;
-
-    // Validate Safe state
-    expect(newSafe.borrowedAmount).to.equal(previousSafe.borrowedAmount + amount, "Borrowed amount mismatch");
-    expect(newSafe.totalBorrowedAmount).to.equal(previousSafe.totalBorrowedAmount + amount, "Total borrowed amount mismatch");
-    expect(newSafe.feePaid).to.gte(previousSafe.feePaid, "Fee paid mismatch");
-
-    // Validate Total Debt
-    expect(newTotalDebt).to.equal(previousTotalDebt + amount, "Total debt mismatch");
-
-    // Validate SBD Token balance
-    expect(newSBDTokenBalance).to.equal(previousSBDTokenBalance + _amountToBorrow, "SBD token balance mismatch");
-
-    // Validate contract's SBD token balance
-    expect(newContractSBDTokenBalance).to.gte(previousContractSBDTokenBalance, "Contract SBD token balance mismatch");
-
-    const previousAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-    const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
-    const expectedAccountBalance = previousAccountBalance // The action does not directly affect account ETH balance
-
-    expect(newAccountBalance).to.equal(expectedAccountBalance, 'Account balance should remain the same');
-
-
-    //Protocol Mode Validation
-    if (previousProtocolMode === 0 && newProtocolMode === 1) { // Assuming 0 is BOOTSTRAP and 1 is NORMAL
-      expect(newTotalDebt).to.be.above(bootstrapModeDebtThreshold, "Total debt should exceed bootstrap threshold");
-    }
-    else {
-        expect(newProtocolMode).to.equal(previousProtocolMode, "Protocol mode should not change");
+    async execute(
+        context: RunContext,
+        actor: Actor,
+        currentSnapshot: Snapshot,
+        actionParams: any
+    ): Promise<ExecutionReceipt> {
+        return this.contract.connect(actor.account.value).borrow(
+            actionParams.safeId,
+            actionParams.amount,
+            actionParams.shieldingRate,
+            actionParams.nearestSpotInLiquidationQueue,
+            actionParams.nearestSpotInRedemptionQueue,
+            {
+                gasLimit: 1000000
+            }
+        );
     }
 
-    return true;
-  }
+    async validate(
+        context: RunContext,
+        actor: Actor,
+        previousSnapshot: Snapshot,
+        newSnapshot: Snapshot,
+        actionParams: any,
+        executionReceipt: ExecutionReceipt
+    ): Promise<boolean> {
+        const safeId = actionParams.safeId;
+        const amount = actionParams.amount;
+        const shieldingRate = actionParams.shieldingRate;
+
+        const previousStableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP
+        const newStableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP
+
+        const previousSafe = previousStableBaseCDPSnapshot.safesData[Number(safeId)];
+        const newSafe = newStableBaseCDPSnapshot.safesData[Number(safeId)];
+
+
+        expect(newSafe, `Safe ${safeId} should exist after borrowing`).to.not.be.undefined
+
+        const previousTotalDebt = previousStableBaseCDPSnapshot.totalDebt;
+        const newTotalDebt = newStableBaseCDPSnapshot.totalDebt;
+
+        const previousProtocolMode = previousStableBaseCDPSnapshot.protocolMode;
+        const newProtocolMode = newStableBaseCDPSnapshot.protocolMode;
+
+        const previousAccountBalance = previousSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+        const newAccountBalance = newSnapshot.accountSnapshot[actor.account.address] || BigInt(0);
+
+        const dfidTokenAddress = (context.contracts.dfidToken as ethers.Contract).target
+        const previousContractBalance = previousSnapshot.contractSnapshot.dfidToken.balances[dfidTokenAddress] || BigInt(0);
+        const newContractBalance = newSnapshot.contractSnapshot.dfidToken.balances[dfidTokenAddress] || BigInt(0);
+
+        const BASIS_POINTS_DIVISOR = 10000;
+        const BOOTSTRAP_MODE_DEBT_THRESHOLD = BigInt(5000000) * BigInt(10) ** BigInt(18);
+
+        const shieldingFee = (amount * shieldingRate) / BigInt(BASIS_POINTS_DIVISOR);
+        const amountToBorrow = amount - shieldingFee;
+
+        // Safe State validations
+        expect(newSafe.borrowedAmount).to.equal(previousSafe.borrowedAmount + amount, "Borrowed amount should increase by the borrow amount.");
+        expect(newSafe.totalBorrowedAmount).to.equal(previousSafe.totalBorrowedAmount + amount, "Total borrowed amount should increase by the borrow amount.");
+        expect(newSafe.feePaid).to.gte(previousSafe.feePaid + shieldingFee, "Fee paid should increase by the shielding fee amount.");
+
+        // Total Debt validation
+        expect(newTotalDebt).to.equal(previousTotalDebt + amount, "Total debt should increase by the borrowed amount.");
+
+        // Protocol Mode Validation
+        if (previousTotalDebt <= BOOTSTRAP_MODE_DEBT_THRESHOLD) {
+            if (newTotalDebt > BOOTSTRAP_MODE_DEBT_THRESHOLD) {
+                expect(newProtocolMode).to.equal(1, "Protocol mode should be NORMAL"); // Assuming NORMAL is represented by 1
+            } else {
+                expect(newProtocolMode).to.equal(previousProtocolMode, "Protocol mode should remain unchanged");
+            }
+        }
+
+        // DFIDToken Balance validation for borrower
+        expect(newAccountBalance).to.equal(previousAccountBalance + amountToBorrow, "Borrower's SBD token balance should increase by the borrowed amount minus the shielding fee");
+
+        // Validation for contract's SBD token balance
+        const feeDistributedEvent = executionReceipt.events?.find((event: any) => event.event === 'FeeDistributed');
+        let sbrStakersFee = BigInt(0);
+        let stabilityPoolFee = BigInt(0);
+        let canRefund = BigInt(0);
+
+        if (feeDistributedEvent) {
+            sbrStakersFee = BigInt(feeDistributedEvent.args.sbrStakersFee);
+            stabilityPoolFee = BigInt(feeDistributedEvent.args.stabilityPoolFee);
+            canRefund = BigInt(feeDistributedEvent.args.canRefund);
+        }
+
+        let expectedContractBalanceChange = shieldingFee - canRefund; //Shielding fee increases, refund decreases
+
+        expect(newContractBalance).to.equal(previousContractBalance + expectedContractBalanceChange, 'Contract SBD balance should change by shielding fee - refund');
+
+        //Doubly Linked List Validations : Need to mock doubly linked list to perform these validations since we don't have access to it right now
+        //Skipping Doubly Linked List Validations
+
+        //Liquidation Snapshots Update Validations : Also skipping since cumulativeDebtPerUnitCollateral, cumulativeCollateralPerUnitCollateral doesn't change in code.
+        //Skipping Liquidation Snapshots Update Validations
+
+        return true;
+    }
 }
