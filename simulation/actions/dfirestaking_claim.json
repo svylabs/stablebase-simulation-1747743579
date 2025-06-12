@@ -10,62 +10,58 @@
     "action_name": "Claim",
     "contract_name": "DFIREStaking",
     "function_name": "claim",
-    "pre_execution_parameter_generation_rules": [
-      "No parameters are required for the claim function as it is an external function that does not take any explicit input parameters. The function uses msg.sender to identify the user claiming the reward."
-    ],
+    "pre_execution_parameter_generation_rules": [],
     "on_execution_state_updates_made": [
       {
-        "category": "Reward Calculation and Snapshot Update",
+        "category": "DFIREStaking Contract State Updates",
         "state_update_descriptions": [
-          "Calculates the reward amount as: ((totalRewardPerToken - user.rewardSnapshot) * user.stake) / PRECISION",
-          "Calculates the collateral reward amount as: ((totalCollateralPerToken - user.collateralSnapshot) * user.stake) / PRECISION",
-          "Updates the user's reward snapshot (user.rewardSnapshot) to the current total reward per token (totalRewardPerToken).",
-          "Updates the user's collateral snapshot (user.collateralSnapshot) to the current total collateral per token (totalCollateralPerToken)."
+          "The 'rewardSnapshot' for the caller's stake in the DFIREStaking contract is updated to the current 'totalRewardPerToken'.",
+          "The 'collateralSnapshot' for the caller's stake in the DFIREStaking contract is updated to the current 'totalCollateralPerToken'."
         ]
       },
       {
-        "category": "Reward Transfer",
+        "category": "Token Balances Updates",
         "state_update_descriptions": [
-          "Transfers the calculated reward amount to the user's address using rewardToken.transfer()",
-          "Transfers the calculated collateral reward amount to the user's address via a payable call."
+          "The calculated 'reward' amount of DFIDToken is transferred from the DFIREStaking contract to the caller's address. This decreases the DFIDToken balance of the DFIREStaking contract and increases the DFIDToken balance of the caller.",
+          "The calculated 'collateralReward' amount of native currency (ETH) is transferred from the DFIREStaking contract to the caller's address. This decreases the ETH balance of the DFIREStaking contract and increases the ETH balance of the caller."
         ]
       },
       {
-        "category": "Event Emission",
+        "category": "Event Emissions",
         "state_update_descriptions": [
-          "Emits a Claimed event with the user's address, reward amount, and collateral reward amount."
+          "A 'Claimed' event is emitted, indicating the user who claimed, the amount of rewardToken claimed, and the amount of collateral reward (ETH) claimed."
         ]
       }
     ],
     "post_execution_contract_state_validation_rules": [
       {
-        "category": "Reward Calculation and Snapshot Validation",
+        "category": "DFIREStaking Contract State Validation",
         "rule_descriptions": [
-          "The user's rewardSnapshot should be equal to the totalRewardPerToken after the claim.",
-          "The user's collateralSnapshot should be equal to the totalCollateralPerToken after the claim."
+          "The 'rewardSnapshot' for the caller's stake in the DFIREStaking contract must be equal to the 'totalRewardPerToken' at the time of execution.",
+          "The 'collateralSnapshot' for the caller's stake in the DFIREStaking contract must be equal to the 'totalCollateralPerToken' at the time of execution."
         ]
       },
       {
-        "category": "Reward Balance Validation",
+        "category": "Token Balance Validation",
         "rule_descriptions": [
-          "The user's reward token balance should increase by the calculated rewardAmount.",
-          "The user's ETH balance should increase by the calculated collateralReward amount."
+          "The DFIDToken balance of the caller's address must have increased by the exact 'reward' amount calculated ((((DFIREStaking.totalRewardPerToken - DFIREStaking.stakes[msg.sender].rewardSnapshot_BEFORE_EXECUTION) * DFIREStaking.stakes[msg.sender].stake_BEFORE_EXECUTION) / DFIREStaking.PRECISION)).",
+          "The DFIDToken balance of the DFIREStaking contract must have decreased by the exact 'reward' amount calculated ((((DFIREStaking.totalRewardPerToken - DFIREStaking.stakes[msg.sender].rewardSnapshot_BEFORE_EXECUTION) * DFIREStaking.stakes[msg.sender].stake_BEFORE_EXECUTION) / DFIREStaking.PRECISION))."
+        ]
+      },
+      {
+        "category": "Native Currency Balance Validation",
+        "rule_descriptions": [
+          "The native currency (ETH) balance of the caller's address must have increased by the exact 'collateralReward' amount calculated ((((DFIREStaking.totalCollateralPerToken - DFIREStaking.stakes[msg.sender].collateralSnapshot_BEFORE_EXECUTION) * DFIREStaking.stakes[msg.sender].stake_BEFORE_EXECUTION) / DFIREStaking.PRECISION)), accounting for gas costs.",
+          "The native currency (ETH) balance of the DFIREStaking contract must have decreased by the exact 'collateralReward' amount calculated ((((DFIREStaking.totalCollateralPerToken - DFIREStaking.stakes[msg.sender].collateralSnapshot_BEFORE_EXECUTION) * DFIREStaking.stakes[msg.sender].stake_BEFORE_EXECUTION) / DFIREStaking.PRECISION))."
         ]
       },
       {
         "category": "Event Emission Validation",
         "rule_descriptions": [
-          "A 'Claimed' event should be emitted with the 'user' field equal to the caller's address (msg.sender).",
-          "The 'rewardAmount' in the 'Claimed' event should match the calculated reward.",
-          "The 'collateralReward' in the 'Claimed' event should match the calculated collateral reward."
-        ]
-      },
-      {
-        "category": "Pre-conditions",
-        "rule_descriptions": [
-          "The user must have a stake greater than 0.",
-          "The rewardToken.transfer() call must succeed for the reward transfer.",
-          "The payable call to msg.sender must succeed for the collateral reward transfer."
+          "A 'Claimed' event must be emitted with the following arguments:",
+          "- 'user': should be the address of the transaction sender (msg.sender).",
+          "- 'rewardAmount': should be the exact 'reward' amount calculated ((((DFIREStaking.totalRewardPerToken - DFIREStaking.stakes[msg.sender].rewardSnapshot_BEFORE_EXECUTION) * DFIREStaking.stakes[msg.sender].stake_BEFORE_EXECUTION) / DFIREStaking.PRECISION)).",
+          "- 'collateralReward': should be the exact 'collateralReward' amount calculated ((((DFIREStaking.totalCollateralPerToken - DFIREStaking.stakes[msg.sender].collateralSnapshot_BEFORE_EXECUTION) * DFIREStaking.stakes[msg.sender].stake_BEFORE_EXECUTION) / DFIREStaking.PRECISION))."
         ]
       }
     ]
@@ -81,25 +77,25 @@
         "contract_name": "DFIREStaking",
         "state_updated": [
           {
-            "state_variable_name": "stakes[msg.sender].rewardSnapshot",
-            "type": "uint256",
-            "what_does_it_track": "Tracks the user's reward snapshot at the time of claiming.",
-            "why_is_is_important": "This is important for calculating the accurate reward for the user in the next claim and ensures that user only gets reward after the snapshot.",
-            "when_is_it_updated": "It is updated every time a user claims rewards.",
-            "how_to_validate_state_update": "Check the user's stake struct to verify the rewardSnapshot is updated to totalRewardPerToken.",
+            "state_variable_name": "stakes",
+            "type": "mapping(address => struct IDFIREStaking.Stake)",
+            "what_does_it_track": "The 'rewardSnapshot' component of the 'Stake' struct for each user, which records the value of 'totalRewardPerToken' at the last interaction (stake, unstake, or claim). This is used to calculate pending DFI rewards.",
+            "why_is_is_important": "It is crucial for preventing users from claiming the same rewards multiple times and for accurately calculating the new rewards accumulated since the last interaction.",
+            "when_is_it_updated": "Whenever a user calls the 'claim' function.",
+            "how_to_validate_state_update": "The 'rewardSnapshot' for the 'msg.sender' in the 'stakes' mapping should be updated to the current value of 'totalRewardPerToken'.",
             "has_conditional_updates": false,
-            "summary_of_update": "Updates the user's rewardSnapshot to the current totalRewardPerToken.",
+            "summary_of_update": "The user's 'rewardSnapshot' is updated to reflect the `totalRewardPerToken` at the time of claiming, ensuring that future reward calculations are based on the correct starting point.",
             "conditions": []
           },
           {
-            "state_variable_name": "stakes[msg.sender].collateralSnapshot",
-            "type": "uint256",
-            "what_does_it_track": "Tracks the user's collateral snapshot at the time of claiming.",
-            "why_is_is_important": "This is important for calculating the accurate reward for the user in the next claim and ensures that user only gets collateral reward after the snapshot.",
-            "when_is_it_updated": "It is updated every time a user claims rewards.",
-            "how_to_validate_state_update": "Check the user's stake struct to verify the collateralSnapshot is updated to totalCollateralPerToken.",
+            "state_variable_name": "stakes",
+            "type": "mapping(address => struct IDFIREStaking.Stake)",
+            "what_does_it_track": "The 'collateralSnapshot' component of the 'Stake' struct for each user, which records the value of 'totalCollateralPerToken' at the last interaction (stake, unstake, or claim). This is used to calculate pending collateral rewards (native token).",
+            "why_is_is_important": "It is crucial for preventing users from claiming the same collateral rewards multiple times and for accurately calculating the new collateral rewards accumulated since the last interaction.",
+            "when_is_it_updated": "Whenever a user calls the 'claim' function.",
+            "how_to_validate_state_update": "The 'collateralSnapshot' for the 'msg.sender' in the 'stakes' mapping should be updated to the current value of 'totalCollateralPerToken'.",
             "has_conditional_updates": false,
-            "summary_of_update": "Updates the user's collateralSnapshot to the current totalCollateralPerToken.",
+            "summary_of_update": "The user's 'collateralSnapshot' is updated to reflect the `totalCollateralPerToken` at the time of claiming, ensuring that future collateral reward calculations are based on the correct starting point.",
             "conditions": []
           }
         ]
@@ -108,14 +104,14 @@
         "contract_name": "DFIDToken",
         "state_updated": [
           {
-            "state_variable_name": "rewardToken",
-            "type": "IERC20",
-            "what_does_it_track": "Tracks the reward token contract.",
-            "why_is_is_important": "This is important to reward the user with the reward token.",
-            "when_is_it_updated": "It is updated when a user claims and has rewards to claim.",
-            "how_to_validate_state_update": "Check the balance of msg.sender in rewardToken to verify the transfer of reward.",
+            "state_variable_name": "balances",
+            "type": "mapping(address => uint256)",
+            "what_does_it_track": "The balance of DFID (reward) tokens held by each address.",
+            "why_is_is_important": "This ensures that users receive their accumulated DFID token rewards and that the token supply distribution is correctly reflected after a claim.",
+            "when_is_it_updated": "Conditionally, if the calculated reward for the user is greater than zero.",
+            "how_to_validate_state_update": "The balance of 'DFIREStaking' contract for DFIDToken should decrease by 'reward' amount, and the 'msg.sender''s balance for DFIDToken should increase by 'reward' amount.",
             "has_conditional_updates": true,
-            "summary_of_update": "Transfers reward tokens to the user, if reward > 0. Transfers reward to msg.sender.",
+            "summary_of_update": "If the calculated 'reward' for the user is greater than zero, the corresponding amount of DFID tokens is transferred from the DFIREStaking contract's balance to the user's balance.",
             "conditions": [
               "reward > 0"
             ]
@@ -123,17 +119,17 @@
         ]
       },
       {
-        "contract_name": "msg.sender",
+        "contract_name": "Native Token (e.g., ETH/BNB)",
         "state_updated": [
           {
-            "state_variable_name": "msg.sender",
-            "type": "address",
-            "what_does_it_track": "Tracks the address of the user.",
-            "why_is_is_important": "This is important to reward the user with collateral reward (native token).",
-            "when_is_it_updated": "It is updated when a user claims and has collateral reward to claim.",
-            "how_to_validate_state_update": "Check the balance of msg.sender in native token to verify the transfer of collateralReward.",
+            "state_variable_name": "Native Token Balance",
+            "type": "uint256",
+            "what_does_it_track": "The native token (collateral) balance of each address on the blockchain.",
+            "why_is_is_important": "This ensures that users receive their accumulated native token collateral rewards and that the balance of the contract and user reflects the transfer.",
+            "when_is_it_updated": "Conditionally, if the calculated collateral reward for the user is greater than zero.",
+            "how_to_validate_state_update": "The native token balance of the 'DFIREStaking' contract should decrease by 'collateralReward' amount, and the 'msg.sender''s native token balance should increase by 'collateralReward' amount.",
             "has_conditional_updates": true,
-            "summary_of_update": "Transfers collateral reward to the user, if collateralReward > 0.  It calls the msg.sender address with the collateralReward value.",
+            "summary_of_update": "If the calculated 'collateralReward' for the user is greater than zero, the corresponding amount of native tokens (e.g., ETH/BNB) is transferred from the DFIREStaking contract's balance to the user's address.",
             "conditions": [
               "collateralReward > 0"
             ]
@@ -169,7 +165,72 @@
         "contract_name": "DFIDToken",
         "code_snippet": "function transfer(address to, uint256 value) external returns (bool);",
         "references": {
-          "references": []
+          "references": [
+            {
+              "state_variable_name": "_stableBaseCDP",
+              "contract_name": "DFIDToken"
+            },
+            {
+              "state_variable_name": "_stabilityPool",
+              "contract_name": "DFIREToken"
+            },
+            {
+              "state_variable_name": "_stakingToken",
+              "contract_name": "DFIREStaking"
+            },
+            {
+              "state_variable_name": "_rewardToken",
+              "contract_name": "DFIREStaking"
+            },
+            {
+              "state_variable_name": "_stableBaseContract",
+              "contract_name": "DFIREStaking"
+            },
+            {
+              "state_variable_name": "_stakingToken",
+              "contract_name": "StabilityPool"
+            },
+            {
+              "state_variable_name": "_stableBaseCDP",
+              "contract_name": "StabilityPool"
+            },
+            {
+              "state_variable_name": "_sbrToken",
+              "contract_name": "StabilityPool"
+            },
+            {
+              "state_variable_name": "_sbdToken",
+              "contract_name": "StableBaseCDP"
+            },
+            {
+              "state_variable_name": "_priceOracle",
+              "contract_name": "StableBaseCDP"
+            },
+            {
+              "state_variable_name": "_stabilityPool",
+              "contract_name": "StableBaseCDP"
+            },
+            {
+              "state_variable_name": "_dfireTokenStaking",
+              "contract_name": "StableBaseCDP"
+            },
+            {
+              "state_variable_name": "_safesOrderedForLiquidation",
+              "contract_name": "StableBaseCDP"
+            },
+            {
+              "state_variable_name": "_safesOrderedForRedemption",
+              "contract_name": "StableBaseCDP"
+            },
+            {
+              "state_variable_name": "_stableBaseCDP",
+              "contract_name": "OrderedDoublyLinkedList"
+            },
+            {
+              "state_variable_name": "_stableBaseCDP",
+              "contract_name": "OrderedDoublyLinkedList"
+            }
+          ]
         },
         "constants": []
       }
