@@ -1,7 +1,7 @@
 {
   "attributes": [
     {
-      "name": "Allowance",
+      "name": "allowanceAmount",
       "type": "uint256",
       "contract_function": "allowance",
       "parameters": [
@@ -18,7 +18,7 @@
       ]
     },
     {
-      "name": "Balance",
+      "name": "accountBalance",
       "type": "uint256",
       "contract_function": "balanceOf",
       "parameters": [
@@ -30,37 +30,37 @@
       ]
     },
     {
-      "name": "Decimals",
+      "name": "decimals",
       "type": "uint8",
       "contract_function": "decimals",
       "parameters": []
     },
     {
-      "name": "Name",
+      "name": "name",
       "type": "string",
       "contract_function": "name",
       "parameters": []
     },
     {
-      "name": "Owner",
+      "name": "owner",
       "type": "address",
       "contract_function": "owner",
       "parameters": []
     },
     {
-      "name": "Symbol",
+      "name": "symbol",
       "type": "string",
       "contract_function": "symbol",
       "parameters": []
     },
     {
-      "name": "TotalBurned",
+      "name": "totalBurned",
       "type": "uint256",
       "contract_function": "totalBurned",
       "parameters": []
     },
     {
-      "name": "TotalSupply",
+      "name": "totalSupply",
       "type": "uint256",
       "contract_function": "totalSupply",
       "parameters": []
