@@ -1,71 +1,38 @@
 {
   "reviews": [
     {
-      "line_number": 27,
-      "description": "Inefficiently iterates through all safes to find one owned by the actor. This is slow for large numbers of safes.",
+      "line_number": 38,
+      "description": "The check for sender balance should use the correct token. It currently uses `(context.contracts.dfidToken as ethers.Contract).target` but the balance is fetched directly `currentSnapshot.accountSnapshot[actor.account.address]`. The fee is calculated based on SBD so we should use SBD balance. It's important to ensure the actor has enough SBD tokens to cover the fee.",
       "function_name": "initialize",
-      "suggested_fix": "Use a mapping of owner to safeId for direct access. If on-chain mapping isn't feasible, use an off-chain index."
+      "suggested_fix": "Fetch the SBD token balance from the account snapshot by using the SBD token's address to access `currentSnapshot.accountSnapshot`. Then, verify that `senderBalance` (SBD balance) is greater than or equal to the calculated `fee`."
     },
     {
-      "line_number": 36,
-      "description": "`console.log` is used for logging, which is not ideal for production.",
-      "function_name": "initialize",
-      "suggested_fix": "Replace `console.log` with a more robust logging mechanism, like emitting an event."
-    },
-    {
-      "line_number": 57,
-      "description": "`nearestSpotInRedemptionQueue` is hardcoded to 0, which might not be optimal. The pre-execution rule suggests using an existing safeId in the redemption queue.",
-      "function_name": "initialize",
-      "suggested_fix": "Dynamically determine `nearestSpotInRedemptionQueue` by querying the `OrderedDoublyLinkedList` contract."
-    },
-    {
-      "line_number": 59,
-      "description": "The `fee` calculation uses different `borrowedAmount` in `initialize` and `validate`. `initialize` uses `safeInfo.borrowedAmount`, while `validate` uses `newSafeInfo.borrowedAmount`.",
-      "function_name": "initialize",
-      "suggested_fix": "Use `stableBaseCDPSnapshot.safes[safeId.toString()].borrowedAmount` to calculate `fee` in the `initialize` method."
-    },
-    {
-      "line_number": 117,
-      "description": "Missing validation of updates to safe's `collateralAmount` and `borrowedAmount` based on `cumulativeCollateralPerUnitCollateral` and `cumulativeDebtPerUnitCollateral`.",
+      "line_number": 159,
+      "description": "The `PROTOCOL_MODE` state update needs to be validated in `validate` to ensure the protocol transitions correctly from `BOOTSTRAP` to `NORMAL` when `totalDebt` exceeds `BOOTSTRAP_MODE_DEBT_THRESHOLD`.",
       "function_name": "validate",
-      "suggested_fix": "Check that `newSafeInfo.collateralAmount` and `newSafeInfo.borrowedAmount` are updated correctly. Fetch previous values from `previousStableBaseCDPSnapshot` and compare the differences against expected values."
+      "suggested_fix": "Retrieve the `PROTOCOL_MODE` from both `previousSnapshot` and `newSnapshot` contract snapshots. Add an `expect` statement to verify that if `previousSnapshot.contractSnapshot.stableBaseCDP.totalDebt` is less than or equal to `BOOTSTRAP_MODE_DEBT_THRESHOLD` and `newSnapshot.contractSnapshot.stableBaseCDP.totalDebt` is greater than `BOOTSTRAP_MODE_DEBT_THRESHOLD`, then `newSnapshot.contractSnapshot.stableBaseCDP.PROTOCOL_MODE` should equal `SBStructs.Mode.NORMAL`."
     },
     {
-      "line_number": 115,
-      "description": "The `validate` method calculates the fee based on `newSafeInfo.borrowedAmount`. It should also consider `previousSafeInfo.borrowedAmount` because of the `_updateSafe` function.",
+      "line_number": 159,
+      "description": "Add validation for emitted events (`FeeTopup`, `RedemptionQueueUpdated`, `FeeDistributed`, `SafeUpdated`) to ensure the contract emits these events with the correct parameters after the `feeTopup` function is executed.",
       "function_name": "validate",
-      "suggested_fix": "Calculate fee based on both `previousSafeInfo.borrowedAmount` and `newSafeInfo.borrowedAmount` to ensure proper fee calculation and validate the fee difference."
+      "suggested_fix": "Iterate through `executionReceipt.receipt.logs`. For each log, use `this.contract.interface.parseLog(log)` to parse the log.  Then, check if the parsed log's name matches `FeeTopup`, `RedemptionQueueUpdated`, `FeeDistributed`, or `SafeUpdated`. If a match is found, validate the event arguments against the expected values calculated within the `validate` function. For example, check if `FeeTopup`'s `safeId`, `topupRate`, `fee`, and `newWeight` match the expected values."
     },
     {
-      "line_number": 137,
-      "description": "Missing validation for events emitted during execution (`FeeTopup`, `RedemptionQueueUpdated`, `FeeRefund`, `SafeUpdated`).",
+      "line_number": 136,
+      "description": "The calculation of `debtIncrease` in the conditional block for updating `borrowedAmount` and `collateralAmount` uses `previousSafe.collateralAmount`, but it should use `previousSafe.borrowedAmount` in calculating the `debtIncrease`.",
       "function_name": "validate",
-      "suggested_fix": "Parse logs from `executionReceipt.tx.wait()` and assert that expected events are emitted with the correct parameters."
+      "suggested_fix": "Change the calculation of `debtIncrease` to use `previousSafe.borrowedAmount`: `const debtIncrease = (previousSafe.borrowedAmount * (newSnapshot.contractSnapshot.stableBaseCDP.cumulativeDebtPerUnitCollateral - previousSnapshot.contractSnapshot.stableBaseCDP.liquidationSnapshotsData[safeIdNumber].debtPerCollateralSnapshot)) / BigInt(10 ** 18);`"
     },
     {
-      "line_number": 135,
-      "description": "Missing validation for the `FeeDistributed` event. No balance validations for StabilityPool and DFIREStaking.",
+      "line_number": 159,
+      "description": "Add checks to confirm that rewards are correctly distributed to DFIREStaking and StabilityPool, and that the corresponding state variables (`totalRewardPerToken` in both contracts, and `totalSbrRewardPerToken` in StabilityPool) are updated as expected.  This ensures that fee distribution works as intended.",
       "function_name": "validate",
-      "suggested_fix": "Include `FeeDistributed` event in receipt parsing. Validate SBD token balance updates for StabilityPool and DFIREStaking contracts."
-    },
-    {
-      "line_number": 181,
-      "description": "Incorrect validation of liquidation snapshots; compares cumulative values instead of specific snapshot values.",
-      "function_name": "validate",
-      "suggested_fix": "Check `liquidationSnapshots[safeId].collateralPerCollateralSnapshot` and `liquidationSnapshots[safeId].debtPerCollateralSnapshot` against `cumulativeCollateralPerUnitCollateral` and `cumulativeDebtPerUnitCollateral` respectively."
-    },
-    {
-      "line_number": 174,
-      "description": "PROTOCOL_MODE change from BOOTSTRAP to NORMAL is not validated based on the action execution state updates.",
-      "function_name": "validate",
-      "suggested_fix": "Check `previousStableBaseCDPSnapshot.PROTOCOL_MODE` and `newStableBaseCDPSnapshot.PROTOCOL_MODE` and validate if it changed from BOOTSTRAP to NORMAL based on `totalDebt`."
+      "suggested_fix": "Retrieve the previous and new values of `totalRewardPerToken` from both DFIREStaking and StabilityPool contracts' snapshots. Also, retrieve the previous and new values of `totalSbrRewardPerToken` from the StabilityPool contract's snapshots. Add `expect` statements to verify that these values have increased by the expected amounts, considering the distributed fees. If `feeAdded1` or `feeAdded2` is false, the corresponding `totalRewardPerToken` should remain unchanged."
     }
   ],
   "overall_assessment": [
-    "The code generally follows good practices, with clear separation of concerns in the `initialize`, `execute`, and `validate` methods.",
-    "The `initialize` method prepares parameters for `feeTopup`, generating a random `topupRate`.",
-    "The `execute` method calls the contract's `feeTopup` function.",
-    "The `validate` method checks state updates and validates balances and safe properties.",
-    "Improvements can be made to `validate`, including validation for liquidation snapshot updates and event validations. Additional checks for edge cases, error handling, and clearer logging would increase robustness."
+    "The `FeeTopupAction` implementation appears mostly correct, covering the main logic of fee top-up and interaction with the redemption queue. However, there are potential areas for improvement in the `initialize` and `validate` functions to ensure complete coverage of state updates, event emissions, and error conditions.",
+    "The `initialize` function correctly identifies a safe for the actor and prepares action parameters. The `execute` function simply calls the contract function. The `validate` function covers most of the key state updates, but lacks validations for event emissions and potential edge cases in fee distribution."
   ]
 }
