@@ -1,85 +1,32 @@
 {
   "attributes": [
     {
-      "name": "node",
-      "type": "struct",
-      "contract_function": "get",
-      "parameters": [
-        {
-          "name": "id",
-          "type": "uint256",
-          "reference": "safeId"
-        }
-      ]
-    },
-    {
       "name": "headId",
-      "type": "uint256",
+      "type": "bigint",
       "contract_function": "getHead",
       "parameters": []
     },
     {
-      "name": "node",
-      "type": "struct",
-      "contract_function": "getNode",
-      "parameters": [
-        {
-          "name": "id",
-          "type": "uint256",
-          "reference": "safeId"
-        }
-      ]
-    },
-    {
-      "name": "nodes",
-      "type": "struct[]",
-      "contract_function": "getNodes",
-      "parameters": [
-        {
-          "name": "beginAt",
-          "type": "uint256",
-          "reference": "safeId"
-        },
-        {
-          "name": "total",
-          "type": "uint256",
-          "reference": "safeId"
-        }
-      ]
-    },
-    {
       "name": "tailId",
-      "type": "uint256",
+      "type": "bigint",
       "contract_function": "getTail",
       "parameters": []
     },
     {
-      "name": "headId",
-      "type": "uint256",
-      "contract_function": "head",
-      "parameters": []
-    },
-    {
       "name": "node",
-      "type": "struct",
+      "type": "{ value: bigint; prev: bigint; next: bigint; }",
       "contract_function": "nodes",
       "parameters": [
         {
           "name": "id",
-          "type": "uint256",
+          "type": "bigint",
           "reference": "safeId"
         }
       ]
-    },
-    {
-      "name": "tailId",
-      "type": "uint256",
-      "contract_function": "tail",
-      "parameters": []
     }
   ],
   "typescript_interfaces": {
-    "contract_snapshot_interface_code": "interface OrderedDoublyLinkedListSnapshot {\n  headId: bigint;\n  tailId: bigint;\n  nodes: { [safeId: bigint]: Node };\n}\n\ninterface Node {\n  value: bigint;\n  prev: bigint;\n  next: bigint;\n}",
+    "contract_snapshot_interface_code": "interface Node {value: bigint;prev: bigint;next: bigint;}interface OrderedDoublyLinkedListSnapshot {headId: bigint;tailId: bigint;nodes: {[id: string]: Node;};}",
     "interface_name": "OrderedDoublyLinkedListSnapshot"
   }
 }
