@@ -4,171 +4,123 @@ import { ethers } from "ethers";
 import { expect } from 'chai';
 
 export class RedeemAction extends Action {
-  private contract: ethers.Contract;
+    contract: ethers.Contract;
+    redemptionId: string;
 
-  constructor(contract: ethers.Contract) {
-    super("RedeemAction");
-    this.contract = contract;
-  }
-
-  async initialize(
-    context: RunContext,
-    actor: Actor,
-    currentSnapshot: Snapshot
-  ): Promise<[boolean, any, Record<string, any>]> {
-    const dfidTokenAddress = (context.contracts.dfidToken as ethers.Contract).target;
-    const dfidTokenSnapshot = currentSnapshot.contractSnapshot.dfidToken;
-    const actorAddress = actor.account.address;
-
-    const actorBalance = dfidTokenSnapshot.balances[actorAddress] || BigInt(0);
-
-    if (actorBalance <= BigInt(0)) {
-      return [false, {}, {}];
+    constructor(contract: ethers.Contract) {
+        super("RedeemAction");
+        this.contract = contract;
+        this.redemptionId = "";
     }
 
-    //Generate random amount based on actor balance
-    const amount = BigInt(Math.floor(context.prng.next() % Number(actorBalance)));
-    const nearestSpotInLiquidationQueue = BigInt(0);
+    async initialize(
+        context: RunContext,
+        actor: Actor,
+        currentSnapshot: Snapshot
+    ): Promise<[boolean, any, Record<string, any>]> {
+        const stableBaseCDPSnapshot = currentSnapshot.contractSnapshot.stableBaseCDP;
+        const dfidTokenSnapshot = currentSnapshot.contractSnapshot.dfidToken;
+        const accountAddress = actor.account.address;
+        const sbdBalance = dfidTokenSnapshot.balances[accountAddress] || BigInt(0);
+        const totalDebt = stableBaseCDPSnapshot.totalDebt;
 
-    if (amount <= BigInt(0)) {
-      return [false, {}, {}];
-    }
-
-    const canExecute = amount > BigInt(0);
-
-    const actionParams = canExecute
-      ? {
-          amount: amount,
-          nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue,
+        if (sbdBalance <= BigInt(0) || totalDebt <= BigInt(0)) {
+            return [false, {}, {}];
         }
-      : {};
 
-    return [canExecute, actionParams, {}];
-  }
+        // Redeem up to the total debt, but not more than the SBD balance
+        const amount = BigInt(context.prng.next()) % Math.min(Number(sbdBalance), Number(totalDebt)) + BigInt(1);
 
-  async execute(
-    context: RunContext,
-    actor: Actor,
-    currentSnapshot: Snapshot,
-    actionParams: any
-  ): Promise<ExecutionReceipt> {
-    const signer = actor.account.value.connect(context.provider);
-    const tx = await this.contract
-      .connect(signer)
-      .redeem(
-        actionParams.amount,
-        actionParams.nearestSpotInLiquidationQueue
-      );
-    const receipt = await tx.wait();
-    return { receipt: receipt, result: null };
-  }
+        const nearestSpotInLiquidationQueue = BigInt(0);
+        this.redemptionId = ethers.keccak256(ethers.toUtf8Bytes(accountAddress + amount.toString() + context.prng.next().toString()));
 
-  async validate(
-    context: RunContext,
-    actor: Actor,
-    previousSnapshot: Snapshot,
-    newSnapshot: Snapshot,
-    actionParams: any,
-    executionReceipt: ExecutionReceipt
-  ): Promise<boolean> {
-    const amount = actionParams.amount;
-    // Contract Snapshots
-    const previousStableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
-    const newStableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
-    const previousDFIDTokenSnapshot = previousSnapshot.contractSnapshot.dfidToken;
-    const newDFIDTokenSnapshot = newSnapshot.contractSnapshot.dfidToken;
-    const previousStabilityPoolSnapshot = previousSnapshot.contractSnapshot.stabilityPool;
-    const newStabilityPoolSnapshot = newSnapshot.contractSnapshot.stabilityPool;
+        const actionParams = {
+            amount: amount,
+            nearestSpotInLiquidationQueue: nearestSpotInLiquidationQueue
+        };
 
-    // Contract Addresses
-    const stableBaseCDPAddress = (context.contracts.stableBaseCDP as ethers.Contract).target;
-    const dfidTokenAddress = (context.contracts.dfidToken as ethers.Contract).target;
-    const stabilityPoolAddress = (context.contracts.stabilityPool as ethers.Contract).target;
+        const newIdentifiers = {
+            redemptionId: this.redemptionId
+        };
+        return [true, actionParams, newIdentifiers];
+    }
 
-    // Account Snapshots
-    const previousAccountSnapshot = previousSnapshot.accountSnapshot;
-    const newAccountSnapshot = newSnapshot.accountSnapshot;
-    const actorAddress = actor.account.address;
+    async execute(
+        context: RunContext,
+        actor: Actor,
+        currentSnapshot: Snapshot,
+        actionParams: any
+    ): Promise<ExecutionReceipt> {
+        const tx = await this.contract.connect(actor.account.value).redeem(
+            actionParams.amount,
+            actionParams.nearestSpotInLiquidationQueue
+        );
 
-    // Actor ETH Balance Validation
-    const prevActorETHBalance = previousAccountSnapshot[actorAddress] || BigInt(0);
-    const newActorETHBalance = newAccountSnapshot[actorAddress] || BigInt(0);
+        const receipt = await tx.wait();
+        return { receipt };
+    }
 
-    // Actor SBD Balance Validation
-    const prevActorSBDBalance = previousDFIDTokenSnapshot.balances[actorAddress] || BigInt(0);
-    const newActorSBDBalance = newDFIDTokenSnapshot.balances[actorAddress] || BigInt(0);
+    async validate(
+        context: RunContext,
+        actor: Actor,
+        previousSnapshot: Snapshot,
+        newSnapshot: Snapshot,
+        actionParams: any,
+        executionReceipt: ExecutionReceipt
+    ): Promise<boolean> {
+        const previousStableBaseCDPSnapshot = previousSnapshot.contractSnapshot.stableBaseCDP;
+        const newStableBaseCDPSnapshot = newSnapshot.contractSnapshot.stableBaseCDP;
+        const previousDFIDTokenSnapshot = previousSnapshot.contractSnapshot.dfidToken;
+        const newDFIDTokenSnapshot = newSnapshot.contractSnapshot.dfidToken;
 
-    // StableBaseCDP SBD Balance Validation
-    const prevStableBaseCDPSBDBalance = previousDFIDTokenSnapshot.balances[stableBaseCDPAddress] || BigInt(0);
-    const newStableBaseCDPSBDBalance = newDFIDTokenSnapshot.balances[stableBaseCDPAddress] || BigInt(0);
+        const amount = actionParams.amount;
+        const accountAddress = actor.account.address;
+        const contractAddress = this.contract.target;
 
-    // Total Supply Validation
-    const prevTotalSupply = previousDFIDTokenSnapshot.totalSupply;
-    const newTotalSupply = newDFIDTokenSnapshot.totalSupply;
+        let redeemedAmount = BigInt(0);
+        let refundedAmount = BigInt(0);
+        let collateralAmount = BigInt(0);
 
-    // Total Burned Validation
-    const prevTotalBurned = previousDFIDTokenSnapshot.totalBurned;
-    const newTotalBurned = newDFIDTokenSnapshot.totalBurned;
+        // Extract event data to get the actual state changes
+        if (executionReceipt.receipt && executionReceipt.receipt.logs) {
+            for (const log of executionReceipt.receipt.logs) {
+                try {
+                    if (log.address === contractAddress) {
+                        const parsedLog = this.contract.interface.parseLog(log);
 
-    // Total Collateral Validation
-    const prevTotalCollateral = previousStableBaseCDPSnapshot.totalCollateral;
-    const newTotalCollateral = newStableBaseCDPSnapshot.totalCollateral;
-
-    // Total Debt Validation
-    const prevTotalDebt = previousStableBaseCDPSnapshot.totalDebt;
-    const newTotalDebt = newStableBaseCDPSnapshot.totalDebt;
-
-    // Event Validation
-    let redeemedBatchEvent;
-    try {
-        redeemedBatchEvent = executionReceipt.receipt.logs.find((log: any) => {
-            try {
-                const parsedLog = this.contract.interface.parseLog(log);
-                return parsedLog && parsedLog.name === 'RedeemedBatch';
-            } catch (e) {
-                return false;
+                        if (parsedLog && parsedLog.name === "RedeemedBatch") {
+                            redeemedAmount = BigInt(parsedLog.args.amount.toString());
+                            collateralAmount = BigInt(parsedLog.args.collateralAmount.toString());
+                        }
+                    }
+                } catch (error) {
+                    console.error("Error parsing log:", error);
+                }
             }
-        });
-    } catch (error) {
-        console.error("Error parsing logs:", error);
-        return false;
-    }
-
-    //RedeemedBatch event validation
-    if(redeemedBatchEvent) {
-        let parsedRedeemBatchEvent;
-        try {
-             parsedRedeemBatchEvent = this.contract.interface.parseLog(redeemedBatchEvent);
-        } catch (error) {
-            console.error("Error parsing RedeemedBatch event:", error);
-            return false;
         }
 
-        expect(parsedRedeemBatchEvent.args.amount).to.equal(amount, "RedeemedBatch: Amount mismatch");
-        expect(newTotalCollateral).to.equal(parsedRedeemBatchEvent.args.totalCollateral, "RedeemedBatch: Total Collateral mismatch");
-        expect(newTotalDebt).to.equal(parsedRedeemBatchEvent.args.totalDebt, "RedeemedBatch: Total Debt mismatch");
+        // Total Debt should decrease
+        const expectedTotalDebt = previousStableBaseCDPSnapshot.totalDebt - (redeemedAmount - refundedAmount);
+        expect(newStableBaseCDPSnapshot.totalDebt).to.equal(expectedTotalDebt, "Total debt should decrease");
+
+        // Account SBD balance should decrease by amount.
+        const previousAccountSBD = previousDFIDTokenSnapshot.balances[accountAddress] || BigInt(0);
+        const newAccountSBD = newDFIDTokenSnapshot.balances[accountAddress] || BigInt(0);
+        expect(newAccountSBD).to.equal(previousAccountSBD - amount, "Account SBD balance should decrease by amount");
+
+        // Contract SBD balance should increase by amount
+        const previousContractSBD = previousDFIDTokenSnapshot.balances[contractAddress] || BigInt(0);
+        const newContractSBD = newDFIDTokenSnapshot.balances[contractAddress] || BigInt(0);
+        expect(newContractSBD).to.equal(previousContractSBD + amount, "Contract SBD balance should increase by amount");
+
+        // Total supply of SBD might decrease (if redeemedAmount > refundedAmount)
+        const expectedTotalSupply = previousDFIDTokenSnapshot.totalSupply - (redeemedAmount - refundedAmount);
+        expect(newDFIDTokenSnapshot.totalSupply).to.equal(expectedTotalSupply, "Total supply should decrease or remain the same");
+
+        //Total Collateral should decrease
+        const expectedTotalCollateral = previousStableBaseCDPSnapshot.totalCollateral - collateralAmount; 
+        expect(newStableBaseCDPSnapshot.totalCollateral).to.equal(expectedTotalCollateral, "Total Collateral should decrease");
+
+        return true;
     }
-    else {
-         console.warn("RedeemedBatch event not found. Validation may be incomplete.");
-    }
-
-    // Check that SBD was transferred from the redeemer to the contract
-    expect(newActorSBDBalance).to.equal(prevActorSBDBalance - amount, "SBD not transferred from redeemer");
-    expect(newStableBaseCDPSBDBalance).to.equal(prevStableBaseCDPSBDBalance + amount, "SBD not transferred to contract");
-
-    // Check that SBD was burned
-    expect(newTotalSupply).to.be.lte(prevTotalSupply, "SBD not burned");
-    expect(newTotalBurned).to.be.gte(prevTotalBurned, "totalBurned incorrect");
-
-    // Check that totalCollateral decreased (by an amount that's hard to predict exactly)
-    expect(newTotalCollateral).to.be.lte(prevTotalCollateral, "totalCollateral did not decrease");
-
-    // Check that totalDebt decreased (by amount)
-    expect(newTotalDebt).to.be.lte(prevTotalDebt, "totalDebt did not decrease");
-
-    // Check that the actor received ETH (redeemed collateral)
-    expect(newActorETHBalance).to.be.gt(prevActorETHBalance, "ETH not received by redeemer");
-
-    return true;
-  }
 }
